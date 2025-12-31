@@ -23,7 +23,7 @@ jobs:
           - os: ubuntu-24.04-arm
             platform: linux-arm64
             rust_target: aarch64-unknown-linux-gnu
-          - os: macos-13
+          - os: macos-13-large
             platform: macos-x64
             rust_target: x86_64-apple-darwin
           - os: macos-latest
@@ -55,49 +55,91 @@ jobs:
         shell: bash
         run: mkdir -p artifacts
 
-      # Determine versions
-      - name: Get versions
-        id: versions
+      # Determine versions and create requirements files
+      - name: Setup build configuration
+        id: config
         shell: bash
         run: |
           TAG="${{ inputs.tag || github.ref_name }}"
+
+          # Check if this is a release build (tag) or dev build (branch)
+          IS_RELEASE="false"
+          if [[ "${{ github.ref }}" == refs/tags/* ]] || [[ -n "${{ inputs.tag }}" ]]; then
+            IS_RELEASE="true"
+          fi
+
           # Extract version from tag (remove 'v' prefix if present)
           if [[ "$TAG" =~ ^v ]]; then
             VERSION="${TAG:1}"
           else
             VERSION="$TAG"
           fi
+
           # Fallback to reading from version.py if no tag
-          if [ -z "$VERSION" ] || [ "$VERSION" = "pyapp" ]; then
-            VERSION=$(grep -oP '__version__\s*=\s*"\K[^"]+' chgksuite/version.py || echo "0.0.0")
+          if [ -z "$VERSION" ] || [[ ! "$VERSION" =~ ^[0-9] ]]; then
+            VERSION=$(grep -oP '__version__\s*=\s*"\K[^"]+' chgksuite/version.py 2>/dev/null || \
+                      grep -o '__version__\s*=\s*"[^"]*"' chgksuite/version.py | cut -d'"' -f2 || \
+                      echo "0.0.0")
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "is_release=$IS_RELEASE" >> $GITHUB_OUTPUT
 
-          # Determine if prerelease
-          if [[ "$VERSION" =~ (a|b|rc)[0-9]+ ]]; then
-            echo "prerelease=--prerelease=allow" >> $GITHUB_OUTPUT
+          # For non-release builds, always use --pre to get latest beta versions
+          if [ "$IS_RELEASE" = "false" ]; then
+            PIP_PRE="--pre"
+          elif [[ "$VERSION" =~ (a|b|rc)[0-9]+ ]]; then
+            PIP_PRE="--pre"
           else
-            echo "prerelease=" >> $GITHUB_OUTPUT
+            PIP_PRE=""
           fi
+          echo "pip_pre=$PIP_PRE" >> $GITHUB_OUTPUT
+
+          echo "Build configuration:"
+          echo "  Version: $VERSION"
+          echo "  Is release: $IS_RELEASE"
+          echo "  Pip pre flag: $PIP_PRE"
+
+      # Create requirements files in pyapp directory to avoid Windows path issues
+      - name: Create requirements files
+        shell: bash
+        run: |
+          PIP_PRE="${{ steps.config.outputs.pip_pre }}"
+
+          # Qt requirements
+          if [ -n "$PIP_PRE" ]; then
+            echo "$PIP_PRE" > pyapp/requirements-qt.txt
+          fi
+          echo "chgksuite" >> pyapp/requirements-qt.txt
+          echo "chgksuite-qt" >> pyapp/requirements-qt.txt
+
+          # Tk requirements
+          if [ -n "$PIP_PRE" ]; then
+            echo "$PIP_PRE" > pyapp/requirements-tk.txt
+          fi
+          echo "chgksuite" >> pyapp/requirements-tk.txt
+          echo "chgksuite-tk" >> pyapp/requirements-tk.txt
+
+          echo "=== Qt requirements ==="
+          cat pyapp/requirements-qt.txt
+          echo "=== Tk requirements ==="
+          cat pyapp/requirements-tk.txt
 
       # Build Qt GUI (skip on linux-arm64 - no PyQt6 wheel)
       - name: Build Qt GUI
         if: matrix.platform != 'linux-arm64'
         shell: bash
         working-directory: pyapp
-        env:
-          PYAPP_PROJECT_NAME: chgksuite-qt
-          PYAPP_PROJECT_VERSION: ${{ steps.versions.outputs.version }}
-          PYAPP_PROJECT_DEPENDENCY_FILE: ${{ github.workspace }}/requirements-qt.txt
-          PYAPP_EXEC_SPEC: chgksuite_qt.__main__:main
-          PYAPP_PYTHON_VERSION: "3.12"
-          PYAPP_IS_GUI: "1"
-          PYAPP_UV_ENABLED: "1"
         run: |
-          # Create requirements file (no leading spaces)
-          echo "chgksuite" > ${{ github.workspace }}/requirements-qt.txt
-          echo "chgksuite-qt" >> ${{ github.workspace }}/requirements-qt.txt
-          cat ${{ github.workspace }}/requirements-qt.txt
+          export PYAPP_PROJECT_NAME="chgksuite-qt"
+          export PYAPP_PROJECT_VERSION="${{ steps.config.outputs.version }}"
+          export PYAPP_PROJECT_DEPENDENCY_FILE="$(pwd)/requirements-qt.txt"
+          export PYAPP_EXEC_SPEC="chgksuite_qt.__main__:main"
+          export PYAPP_PYTHON_VERSION="3.12"
+          export PYAPP_IS_GUI="1"
+          export PYAPP_UV_ENABLED="1"
+
+          echo "Building Qt GUI with:"
+          echo "  PYAPP_PROJECT_DEPENDENCY_FILE=$PYAPP_PROJECT_DEPENDENCY_FILE"
 
           cargo build --release --target ${{ matrix.rust_target }}
 
@@ -112,19 +154,17 @@ jobs:
       - name: Build Tk GUI
         shell: bash
         working-directory: pyapp
-        env:
-          PYAPP_PROJECT_NAME: chgksuite-tk
-          PYAPP_PROJECT_VERSION: ${{ steps.versions.outputs.version }}
-          PYAPP_PROJECT_DEPENDENCY_FILE: ${{ github.workspace }}/requirements-tk.txt
-          PYAPP_EXEC_SPEC: chgksuite_tk.__main__:main
-          PYAPP_PYTHON_VERSION: "3.12"
-          PYAPP_IS_GUI: "1"
-          PYAPP_UV_ENABLED: "1"
         run: |
-          # Create requirements file (no leading spaces)
-          echo "chgksuite" > ${{ github.workspace }}/requirements-tk.txt
-          echo "chgksuite-tk" >> ${{ github.workspace }}/requirements-tk.txt
-          cat ${{ github.workspace }}/requirements-tk.txt
+          export PYAPP_PROJECT_NAME="chgksuite-tk"
+          export PYAPP_PROJECT_VERSION="${{ steps.config.outputs.version }}"
+          export PYAPP_PROJECT_DEPENDENCY_FILE="$(pwd)/requirements-tk.txt"
+          export PYAPP_EXEC_SPEC="chgksuite_tk.__main__:main"
+          export PYAPP_PYTHON_VERSION="3.12"
+          export PYAPP_IS_GUI="1"
+          export PYAPP_UV_ENABLED="1"
+
+          echo "Building Tk GUI with:"
+          echo "  PYAPP_PROJECT_DEPENDENCY_FILE=$PYAPP_PROJECT_DEPENDENCY_FILE"
 
           cargo build --release --target ${{ matrix.rust_target }}
 
