@@ -171,6 +171,85 @@ jobs:
             cp target/${{ matrix.rust_target }}/release/pyapp ../artifacts/chgkt-${{ matrix.platform }}
           fi
 
+      # Create macOS .app bundles (required for Finder launch)
+      - name: Create macOS app bundles
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          # Create Qt .app bundle
+          if [ -f "artifacts/chgkq-${{ matrix.platform }}" ]; then
+            mkdir -p "artifacts/chgkq.app/Contents/MacOS"
+            mv "artifacts/chgkq-${{ matrix.platform }}" "artifacts/chgkq.app/Contents/MacOS/chgkq"
+            cat > "artifacts/chgkq.app/Contents/Info.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>chgkq</string>
+            <key>CFBundleIdentifier</key>
+            <string>me.pecheny.chgkq</string>
+            <key>CFBundleName</key>
+            <string>chgksuite-qt</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleVersion</key>
+            <string>${{ steps.config.outputs.version }}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${{ steps.config.outputs.version }}</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>10.15</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>LSEnvironment</key>
+            <dict>
+              <key>PYAPP</key>
+              <string>1</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+            # Zip the .app bundle
+            cd artifacts && zip -r "chgkq-${{ matrix.platform }}.zip" chgkq.app && rm -rf chgkq.app && cd ..
+          fi
+
+          # Create Tk .app bundle
+          if [ -f "artifacts/chgkt-${{ matrix.platform }}" ]; then
+            mkdir -p "artifacts/chgkt.app/Contents/MacOS"
+            mv "artifacts/chgkt-${{ matrix.platform }}" "artifacts/chgkt.app/Contents/MacOS/chgkt"
+            cat > "artifacts/chgkt.app/Contents/Info.plist" << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key>
+            <string>chgkt</string>
+            <key>CFBundleIdentifier</key>
+            <string>me.pecheny.chgkt</string>
+            <key>CFBundleName</key>
+            <string>chgksuite-tk</string>
+            <key>CFBundlePackageType</key>
+            <string>APPL</string>
+            <key>CFBundleVersion</key>
+            <string>${{ steps.config.outputs.version }}</string>
+            <key>CFBundleShortVersionString</key>
+            <string>${{ steps.config.outputs.version }}</string>
+            <key>LSMinimumSystemVersion</key>
+            <string>10.15</string>
+            <key>NSHighResolutionCapable</key>
+            <true/>
+            <key>LSEnvironment</key>
+            <dict>
+              <key>PYAPP</key>
+              <string>1</string>
+            </dict>
+          </dict>
+          </plist>
+          EOF
+            # Zip the .app bundle
+            cd artifacts && zip -r "chgkt-${{ matrix.platform }}.zip" chgkt.app && rm -rf chgkt.app && cd ..
+          fi
+
       - name: List artifacts
         shell: bash
         run: ls -lh artifacts/
