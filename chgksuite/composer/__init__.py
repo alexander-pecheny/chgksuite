@@ -78,7 +78,8 @@ def parse_filepath(filepath, args=None):
     with codecs.open(filepath, "r", "utf8") as input_file:
         input_text = input_file.read()
     input_text = input_text.replace("\r", "")
-    return parse_4s(input_text, randomize=args.randomize, debug=args.debug)
+    debug_dir = os.path.dirname(os.path.abspath(filepath))
+    return parse_4s(input_text, randomize=args.randomize, debug=args.debug, debug_dir=debug_dir)
 
 
 def make_merged_filename(filelist):

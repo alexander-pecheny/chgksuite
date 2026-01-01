@@ -1,9 +1,16 @@
 import codecs
+import os
 import random
 import re
 from collections import defaultdict
 
-from chgksuite.common import QUESTION_LABELS, check_question, init_logger, log_wrap
+from chgksuite.common import (
+    QUESTION_LABELS,
+    check_question,
+    get_chgksuite_dir,
+    init_logger,
+    log_wrap,
+)
 from chgksuite.typotools import remove_excessive_whitespace as rew
 
 REQUIRED_LABELS = set(["question", "answer"])
@@ -89,7 +96,7 @@ def replace_counters(string_):
     return string_
 
 
-def parse_4s(s, randomize=False, debug=False, logger=None):
+def parse_4s(s, randomize=False, debug=False, logger=None, debug_dir=None):
     logger = logger or init_logger("composer")
     mapping = {
         "#": "meta",
@@ -115,8 +122,11 @@ def parse_4s(s, randomize=False, debug=False, logger=None):
     if s[0] == "\ufeff" and len(s) > 1:
         s = s[1:]
 
-    with codecs.open("raw.debug", "w", "utf8") as debugf:
-        debugf.write(log_wrap(s.split("\n")))
+    if debug:
+        debug_dir = debug_dir or get_chgksuite_dir()
+        debug_path = os.path.join(debug_dir, "raw.debug")
+        with codecs.open(debug_path, "w", "utf8") as debugf:
+            debugf.write(log_wrap(s.split("\n")))
 
     s = replace_counters(s)
 
