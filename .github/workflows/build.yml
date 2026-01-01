@@ -103,20 +103,12 @@ jobs:
       - name: Create requirements files
         shell: bash
         run: |
-          PIP_PRE="${{ steps.config.outputs.pip_pre }}"
-
           # Qt requirements
-          if [ -n "$PIP_PRE" ]; then
-            echo "$PIP_PRE" > pyapp/requirements-qt.txt
-          fi
-          echo "chgksuite" >> pyapp/requirements-qt.txt
+          echo "chgksuite" > pyapp/requirements-qt.txt
           echo "chgksuite-qt" >> pyapp/requirements-qt.txt
 
           # Tk requirements
-          if [ -n "$PIP_PRE" ]; then
-            echo "$PIP_PRE" > pyapp/requirements-tk.txt
-          fi
-          echo "chgksuite" >> pyapp/requirements-tk.txt
+          echo "chgksuite" > pyapp/requirements-tk.txt
           echo "chgksuite-tk" >> pyapp/requirements-tk.txt
 
           echo "=== Qt requirements ==="
@@ -137,9 +129,11 @@ jobs:
           export PYAPP_PYTHON_VERSION="3.12"
           export PYAPP_IS_GUI="1"
           export PYAPP_UV_ENABLED="1"
+          export PYAPP_PIP_EXTRA_ARGS="${{ steps.config.outputs.pip_pre }}"
 
           echo "Building Qt GUI with:"
           echo "  PYAPP_PROJECT_DEPENDENCY_FILE=$PYAPP_PROJECT_DEPENDENCY_FILE"
+          echo "  PYAPP_PIP_EXTRA_ARGS=$PYAPP_PIP_EXTRA_ARGS"
 
           cargo build --release --target ${{ matrix.rust_target }}
 
@@ -162,9 +156,11 @@ jobs:
           export PYAPP_PYTHON_VERSION="3.12"
           export PYAPP_IS_GUI="1"
           export PYAPP_UV_ENABLED="1"
+          export PYAPP_PIP_EXTRA_ARGS="${{ steps.config.outputs.pip_pre }}"
 
           echo "Building Tk GUI with:"
           echo "  PYAPP_PROJECT_DEPENDENCY_FILE=$PYAPP_PROJECT_DEPENDENCY_FILE"
+          echo "  PYAPP_PIP_EXTRA_ARGS=$PYAPP_PIP_EXTRA_ARGS"
 
           cargo build --release --target ${{ matrix.rust_target }}
 
