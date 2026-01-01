@@ -209,6 +209,8 @@ jobs:
           </dict>
           </plist>
           EOF
+            # Ad-hoc sign the app bundle to prevent "damaged" error
+            codesign --force --deep --sign - "artifacts/chgkq.app"
             # Zip the .app bundle
             cd artifacts && zip -r "chgkq-${{ matrix.platform }}.zip" chgkq.app && rm -rf chgkq.app && cd ..
           fi
@@ -246,6 +248,8 @@ jobs:
           </dict>
           </plist>
           EOF
+            # Ad-hoc sign the app bundle to prevent "damaged" error
+            codesign --force --deep --sign - "artifacts/chgkt.app"
             # Zip the .app bundle
             cd artifacts && zip -r "chgkt-${{ matrix.platform }}.zip" chgkt.app && rm -rf chgkt.app && cd ..
           fi
