@@ -12,7 +12,8 @@ import tempfile
 import pytest
 from chgksuite.common import DefaultArgs
 from chgksuite.composer.chgksuite_parser import parse_4s, replace_counters
-from chgksuite.composer.composer_common import _parse_4s_elem, parseimg
+from chgksuite.composer.composer_common import _parse_4s_elem, parseimg, remove_accents_standalone
+from chgksuite.composer.docx import remove_square_brackets_standalone
 from chgksuite.composer.telegram import TelegramExporter
 from chgksuite.parser import (
     chgk_parse_docx,
@@ -64,6 +65,37 @@ QUOTE_TEST_CASES = [
 @pytest.mark.parametrize("a,expected", QUOTE_TEST_CASES)
 def test_quotes(a, expected):
     assert get_quotes_right(a) == expected
+
+
+with open(os.path.join(parentdir, "chgksuite", "resources", "regexes_ru.json")) as f:
+    TEST_REGEXES = json.load(f)
+
+
+SQUARE_BRACKET_TEST_CASES = [
+    ("black [блэк]", "black"),
+    ("black [блэк] смотрит [looks]", "black смотрит"),
+    ("text with [Раздаточный материал: handout] here", "text with [Раздаточный материал: handout] here"),  # handout preserved
+    ("text \\[escaped\\]", "text [escaped]"),  # escaped brackets restored
+    ("simple text", "simple text"),  # no brackets
+]
+
+
+@pytest.mark.parametrize("input_text,expected", SQUARE_BRACKET_TEST_CASES)
+def test_remove_square_brackets(input_text, expected):
+    assert remove_square_brackets_standalone(input_text, TEST_REGEXES) == expected
+
+
+ACCENT_TEST_CASES = [
+    ("при́вет", "привет"),  # \u0301 accent removed
+    ("мо́ре си́нее", "море синее"),  # multiple accents
+    ("[Раздаточный материал: при́вет]", "[Раздаточный материал: при́вет]"),  # accent in handout preserved
+    ("simple text", "simple text"),  # no accents
+]
+
+
+@pytest.mark.parametrize("input_text,expected", ACCENT_TEST_CASES)
+def test_remove_accents(input_text, expected):
+    assert remove_accents_standalone(input_text, TEST_REGEXES) == expected
 
 
 @contextlib.contextmanager
