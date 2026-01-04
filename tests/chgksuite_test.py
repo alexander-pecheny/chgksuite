@@ -26,6 +26,27 @@ from PIL import Image
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 parentdir = os.path.dirname(currentdir)
 
+# Encrypted test file support
+PASSWORD_FILE = os.path.join(currentdir, "tests_password.txt")
+
+
+def get_test_password():
+    """Read password from file, return None if not found."""
+    if os.path.exists(PASSWORD_FILE):
+        with open(PASSWORD_FILE, "r") as f:
+            return f.read().strip()
+    return None
+
+
+def decrypt_test_file(filepath: str, password: str) -> bytes:
+    """Decrypt a test file using XOR."""
+    import hashlib
+    key = hashlib.sha256(password.encode()).digest()
+    with open(filepath, "rb") as f:
+        data = f.read()
+    key_len = len(key)
+    return bytes(b ^ key[i % key_len] for i, b in enumerate(data))
+
 
 with open(os.path.join(currentdir, "settings.json")) as f:
     settings = json.loads(f.read())
@@ -109,21 +130,55 @@ def normalize(string):
     return string.replace("\r\n", "\n")
 
 
-CANON_FILENAMES = [fn for fn in os.listdir(currentdir) if fn.endswith(".canon")]
+# Regular canon files (always run)
+CANON_FILENAMES = [
+    fn for fn in os.listdir(currentdir)
+    if fn.endswith(".canon") and not fn.endswith(".encrypted.canon")
+]
+
+# Add encrypted canon files only if password exists
+if os.path.exists(PASSWORD_FILE):
+    CANON_FILENAMES.extend([
+        fn for fn in os.listdir(currentdir)
+        if fn.endswith(".encrypted.canon")
+    ])
 
 
 @pytest.mark.parametrize("filename", CANON_FILENAMES)
 def test_canonical_equality(parsing_engine, filename):
-    print(os.getcwd())
+    # Handle encrypted files
+    is_encrypted = filename.endswith(".encrypted.canon")
+    if is_encrypted:
+        password = get_test_password()
+        if password is None:
+            pytest.skip("No password file found for encrypted test")
+
     with make_temp_directory(dir=".") as temp_dir:
-        to_parse_fn = filename[:-6]
-        print(os.getcwd())
-        shutil.copy(os.path.join(currentdir, filename), temp_dir)
-        print(os.getcwd())
-        shutil.copy(os.path.join(currentdir, to_parse_fn), temp_dir)
-        print(os.getcwd())
-        print("Testing {}...".format(filename[:-6]))
-        print(os.getcwd())
+        if is_encrypted:
+            # filename = "file.docx.encrypted.canon" (16 chars for ".encrypted.canon")
+            # Decrypt .encrypted.canon -> .canon in temp dir
+            canon_content = decrypt_test_file(os.path.join(currentdir, filename), password)
+            decrypted_canon = filename[:-16] + ".canon"  # "file.docx.canon"
+            with open(os.path.join(temp_dir, decrypted_canon), "wb") as f:
+                f.write(canon_content)
+
+            # Decrypt source file (.docx.encrypted)
+            source_encrypted = filename[:-6]  # remove ".canon" -> "file.docx.encrypted"
+            source_decrypted = filename[:-16]  # remove ".encrypted.canon" -> "file.docx"
+            source_content = decrypt_test_file(os.path.join(currentdir, source_encrypted), password)
+            with open(os.path.join(temp_dir, source_decrypted), "wb") as f:
+                f.write(source_content)
+
+            to_parse_fn = source_decrypted
+            canon_fn = decrypted_canon
+        else:
+            # Original logic for non-encrypted files
+            to_parse_fn = filename[:-6]
+            canon_fn = filename
+            shutil.copy(os.path.join(currentdir, filename), temp_dir)
+            shutil.copy(os.path.join(currentdir, to_parse_fn), temp_dir)
+
+        print("Testing {}...".format(to_parse_fn))
         bn, _ = os.path.splitext(to_parse_fn)
         call_args = [
             "python",
@@ -139,7 +194,7 @@ def test_canonical_equality(parsing_engine, filename):
         subprocess.call(call_args, timeout=5)
         with codecs.open(os.path.join(temp_dir, bn + ".4s"), "r", "utf8") as f:
             parsed = f.read()
-        with codecs.open(os.path.join(temp_dir, filename), "r", "utf8") as f:
+        with codecs.open(os.path.join(temp_dir, canon_fn), "r", "utf8") as f:
             canonical = f.read()
         assert normalize(canonical) == normalize(parsed)
 
