@@ -22,7 +22,7 @@ from chgksuite.composer.docx import DocxExporter
 from chgksuite.composer.latex import LatexExporter
 from chgksuite.composer.lj import LjExporter
 from chgksuite.composer.pptx import PptxExporter
-from chgksuite.composer.reddit import RedditExporter
+from chgksuite.composer.markdown import MarkdownExporter
 from chgksuite.composer.stats import StatsAdder
 from chgksuite.composer.telegram import TelegramExporter
 from chgksuite.composer.openquiz import OpenquizExporter
@@ -147,8 +147,8 @@ def process_file(filename, tmp_dir, targetdir, args=None, logger=None):
         outfilename = os.path.join(targetdir, make_filename(filename, "txt", args))
         exporter.export(outfilename)
 
-    if args.filetype == "redditmd":
-        exporter = RedditExporter(structure, args, dir_kwargs)
+    if args.filetype in ("redditmd", "markdown"):
+        exporter = MarkdownExporter(structure, args, dir_kwargs)
         outfilename = os.path.join(targetdir, make_filename(filename, "md", args))
         exporter.export(outfilename)
 
