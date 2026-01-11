@@ -40,8 +40,10 @@ class MarkdownExporter(BaseExporter):
     def markdownformat(self, s):
         res = ""
         for run in self.parse_4s_elem(s):
-            if run[0] in ("", "hyperlink"):
+            if run[0] == "":
                 res += run[1]
+            if run[0] == "hyperlink":
+                res += "<{}>".format(run[1])
             if run[0] == "screen":
                 res += run[1]["for_screen"]
             if run[0] == "italic":
