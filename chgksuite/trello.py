@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import codecs
 import json
 import os
 import pdb
@@ -52,7 +51,7 @@ def upload_file(filepath, trello, list_name=None):
     assert lid is not None
     print(f"uploading to list '{list_['name']}'")
     content = ""
-    with codecs.open(filepath, "r", "utf8") as f:
+    with open(filepath, "r", encoding="utf-8") as f:
         content = f.read()
     cards = re.split(r"(\r?\n){2,}", content)
     cards = [x for x in cards if x != "" and x != "\n" and x != "\r\n"]
@@ -255,7 +254,7 @@ def gui_trello_download(args):
 
     board_id_path = os.path.join(args.folder, ".board_id")
     if os.path.isfile(board_id_path):
-        with codecs.open(board_id_path, "r", "utf8") as f:
+        with open(board_id_path, "r", encoding="utf-8") as f:
             board_id = f.read().rstrip()
     else:
         board_id = get_board_id(path=args.folder)
@@ -401,14 +400,14 @@ def gui_trello_download(args):
             result.extend(_lists[_list["name"]])
         filename = "singlefile.4s"
         print("outputting {}".format(filename))
-        with codecs.open(filename, "w", "utf8") as f:
+        with open(filename, "w", encoding="utf-8") as f:
             for item in result:
                 f.write("\n" + item + "\n")
     else:
         for _list in _lists:
             filename = "{}.4s".format(_list)
             print("outputting {}".format(filename))
-            with codecs.open(filename, "w", "utf8") as f:
+            with open(filename, "w", encoding="utf-8") as f:
                 for item in _lists[_list]:
                     f.write("\n" + item + "\n")
 
@@ -426,7 +425,7 @@ def get_board_id(path=None):
     if "trello.com" in board_id:
         board_id = re_bi.search(board_id).group(1)
     if path:
-        with codecs.open(os.path.join(path, ".board_id"), "w", "utf8") as f:
+        with open(os.path.join(path, ".board_id"), "w", encoding="utf-8") as f:
             f.write(board_id)
     return board_id
 
@@ -437,7 +436,7 @@ def get_token(tokenpath, args):
     else:
         webbrowser.open(TRELLO_URL)
     token = input("Please paste the obtained token: ").rstrip()
-    with codecs.open(tokenpath, "w", "utf8") as f:
+    with open(tokenpath, "w", encoding="utf-8") as f:
         f.write(token)
     return token
 
@@ -452,7 +451,7 @@ def gui_trello(args):
     if not os.path.isfile(tokenpath):
         token = get_token(tokenpath, args)
     else:
-        with codecs.open(tokenpath, "r", "utf8") as f:
+        with open(tokenpath, "r", encoding="utf-8") as f:
             token = f.read().rstrip()
 
     with open(os.path.join(resourcedir, "trello.json")) as f:

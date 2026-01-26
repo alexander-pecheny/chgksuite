@@ -1,6 +1,5 @@
 #!usr/bin/env python
 # -*- coding: utf-8 -*-
-import codecs
 import json
 import os
 import shutil
@@ -22,7 +21,7 @@ from chgksuite.composer.docx import DocxExporter
 from chgksuite.composer.latex import LatexExporter
 from chgksuite.composer.lj import LjExporter
 from chgksuite.composer.pptx import PptxExporter
-from chgksuite.composer.reddit import RedditExporter
+from chgksuite.composer.markdown import MarkdownExporter
 from chgksuite.composer.stats import StatsAdder
 from chgksuite.composer.telegram import TelegramExporter
 from chgksuite.composer.openquiz import OpenquizExporter
@@ -75,10 +74,13 @@ def process_file_wrapper(filename, sourcedir, targetdir, args):
 
 def parse_filepath(filepath, args=None):
     args = args or DefaultArgs()
-    with codecs.open(filepath, "r", "utf8") as input_file:
+    with open(filepath, "r", encoding="utf-8") as input_file:
         input_text = input_file.read()
     input_text = input_text.replace("\r", "")
-    return parse_4s(input_text, randomize=args.randomize, debug=args.debug)
+    debug_dir = os.path.dirname(os.path.abspath(filepath))
+    return parse_4s(
+        input_text, randomize=args.randomize, debug=args.debug, debug_dir=debug_dir
+    )
 
 
 def make_merged_filename(filelist):
@@ -105,7 +107,7 @@ def process_file(filename, tmp_dir, targetdir, args=None, logger=None):
             targetdir,
             make_filename(os.path.basename(filename), "dbg", args),
         )
-        with codecs.open(debug_fn, "w", "utf8") as output_file:
+        with open(debug_fn, "w", encoding="utf-8") as output_file:
             output_file.write(json.dumps(structure, indent=2, ensure_ascii=False))
 
     if not args.filetype:
@@ -146,8 +148,8 @@ def process_file(filename, tmp_dir, targetdir, args=None, logger=None):
         outfilename = os.path.join(targetdir, make_filename(filename, "txt", args))
         exporter.export(outfilename)
 
-    if args.filetype == "redditmd":
-        exporter = RedditExporter(structure, args, dir_kwargs)
+    if args.filetype in ("redditmd", "markdown"):
+        exporter = MarkdownExporter(structure, args, dir_kwargs)
         outfilename = os.path.join(targetdir, make_filename(filename, "md", args))
         exporter.export(outfilename)
 

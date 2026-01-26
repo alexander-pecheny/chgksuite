@@ -1,4 +1,3 @@
-import codecs
 import os
 
 from chgksuite.composer.composer_common import (
@@ -9,20 +8,20 @@ from chgksuite.composer.composer_common import (
 )
 
 
-class RedditExporter(BaseExporter):
+class MarkdownExporter(BaseExporter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.im = Imgur(self.args.imgur_client_id or IMGUR_CLIENT_ID)
         self.qcount = 1
 
-    def reddityapper(self, e):
+    def markdownyapper(self, e):
         if isinstance(e, str):
-            return self.reddit_element_layout(e)
+            return self.markdown_element_layout(e)
         elif isinstance(e, list):
             if not any(isinstance(x, list) for x in e):
-                return self.reddit_element_layout(e)
+                return self.markdown_element_layout(e)
             else:
-                return "  \n".join([self.reddit_element_layout(x) for x in e])
+                return "  \n".join([self.markdown_element_layout(x) for x in e])
 
     def parse_and_upload_image(self, path):
         parsed_image = parseimg(
@@ -37,11 +36,13 @@ class RedditExporter(BaseExporter):
             imglink = uploaded_image["data"]["link"]
             return imglink
 
-    def redditformat(self, s):
+    def markdownformat(self, s):
         res = ""
         for run in self.parse_4s_elem(s):
-            if run[0] in ("", "hyperlink"):
+            if run[0] == "":
                 res += run[1]
+            if run[0] == "hyperlink":
+                res += "<{}>".format(run[1])
             if run[0] == "screen":
                 res += run[1]["for_screen"]
             if run[0] == "italic":
@@ -51,61 +52,70 @@ class RedditExporter(BaseExporter):
                     imglink = run[1]
                 else:
                     imglink = self.parse_and_upload_image(run[1])
-                res += "[картинка]({})".format(imglink)
+                if self.args.filetype == "redditmd":
+                    res += "[картинка]({})".format(imglink)
+                else:
+                    res += "![]({})".format(imglink)
         while res.endswith("\n"):
             res = res[:-1]
         res = res.replace("\n", "  \n")
         return res
 
-    def reddit_element_layout(self, e):
+    def markdown_element_layout(self, e):
         res = ""
         if isinstance(e, str):
-            res = self.redditformat(e)
+            res = self.markdownformat(e)
             return res
         if isinstance(e, list):
             res = "  \n".join(
                 [
-                    "{}\\. {}".format(i + 1, self.reddit_element_layout(x))
+                    "{}\\. {}".format(i + 1, self.markdown_element_layout(x))
                     for i, x in enumerate(e)
                 ]
             )
         return res
 
-    def reddit_format_element(self, pair):
+    def markdown_format_element(self, pair):
         if pair[0] == "Question":
-            return self.reddit_format_question(pair[1])
+            return self.markdown_format_question(pair[1])
 
-    def reddit_format_question(self, q):
+    def markdown_format_question(self, q):
         if "setcounter" in q:
             self.qcount = int(q["setcounter"])
         res = "__Вопрос {}__: {}  \n".format(
             self.qcount if "number" not in q else q["number"],
-            self.reddityapper(q["question"]),
+            self.markdownyapper(q["question"]),
         )
         if "number" not in q:
             self.qcount += 1
-        res += "__Ответ:__ >!{}  \n".format(self.reddityapper(q["answer"]))
+        spoiler_start = ">!" if self.args.filetype == "redditmd" else ""
+        spoiler_end = "!<" if self.args.filetype == "redditmd" else ""
+        res += "__Ответ:__ {}{}  \n".format(
+            spoiler_start, self.markdownyapper(q["answer"])
+        )
         if "zachet" in q:
-            res += "__Зачёт:__ {}  \n".format(self.reddityapper(q["zachet"]))
+            res += "__Зачёт:__ {}  \n".format(self.markdownyapper(q["zachet"]))
         if "nezachet" in q:
-            res += "__Незачёт:__ {}  \n".format(self.reddityapper(q["nezachet"]))
+            res += "__Незачёт:__ {}  \n".format(self.markdownyapper(q["nezachet"]))
         if "comment" in q:
-            res += "__Комментарий:__ {}  \n".format(self.reddityapper(q["comment"]))
+            res += "__Комментарий:__ {}  \n".format(self.markdownyapper(q["comment"]))
         if "source" in q:
-            res += "__Источник:__ {}  \n".format(self.reddityapper(q["source"]))
+            res += "__Источник:__ {}  \n".format(self.markdownyapper(q["source"]))
         if "author" in q:
-            res += "!<\n__Автор:__ {}  \n".format(self.reddityapper(q["author"]))
+            res += "{}\n__Автор:__ {}  \n".format(
+                spoiler_end, self.markdownyapper(q["author"])
+            )
         else:
-            res += "!<\n"
+            res += spoiler_end + "\n"
         return res
 
     def export(self, outfile):
         result = []
         for pair in self.structure:
-            res = self.reddit_format_element(pair)
+            res = self.markdown_format_element(pair)
             if res:
                 result.append(res)
         text = "\n\n".join(result)
-        with codecs.open(outfile, "w", "utf8") as f:
+        with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
         self.logger.info("Output: {}".format(outfile))

@@ -13,7 +13,7 @@ HEADER = r"""
 \begin{document}
 \fontsize{14pt}{16pt}\selectfont
 \setlength\parindent{0pt}
-\tikzstyle{box}=[draw, dashed, rectangle, inner sep=<TIKZ_MM>mm]
+\tikzstyle{box}=[rectangle, inner sep=<TIKZ_MM>mm]
 \raggedright
 \raggedbottom
 """.strip()
@@ -25,9 +25,19 @@ TIKZBOX_START = r"""{<CENTERING>
 
 TIKZBOX_INNER = r"""
 \begin{tikzpicture}
-\node[box, minimum width=\boxwidth<TEXTWIDTH><ALIGN>] {<FONTSIZE><CONTENTS>\par};
+\node[box, minimum width=\boxwidth<TEXTWIDTH><ALIGN>] (b) {<FONTSIZE><CONTENTS>\par};
+\useasboundingbox (b.south west) rectangle (b.north east);
+\draw[<TOP>] ([xshift=<TOP_EXT_L>]b.north west) -- ([xshift=<TOP_EXT_R>]b.north east);
+\draw[<BOTTOM>] ([xshift=<BOTTOM_EXT_L>]b.south west) -- ([xshift=<BOTTOM_EXT_R>]b.south east);
+\draw[<LEFT>] ([yshift=<LEFT_EXT_T>]b.north west) -- ([yshift=<LEFT_EXT_B>]b.south west);
+\draw[<RIGHT>] ([yshift=<RIGHT_EXT_T>]b.north east) -- ([yshift=<RIGHT_EXT_B>]b.south east);
 \end{tikzpicture}
 """.strip()
+
+# Line styles for box edges
+EDGE_SOLID = "line width=0.8pt"
+EDGE_DASHED = "dashed"
+EDGE_NONE = "draw=none"  # Don't draw this edge (to avoid double dashed lines)
 
 TIKZBOX_END = "\n}"
 

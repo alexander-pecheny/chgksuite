@@ -1,4 +1,3 @@
-import codecs
 import hashlib
 import os
 import re
@@ -221,7 +220,7 @@ class LatexExporter(BaseExporter):
 
         tex += "\\end{document}"
 
-        with codecs.open(outfilename, "w", "utf8") as outfile:
+        with open(outfilename, "w", encoding="utf-8") as outfile:
             outfile.write(tex)
         cwd = os.getcwd()
         os.chdir(self.dir_kwargs["tmp_dir"])
