@@ -120,14 +120,18 @@ class HandoutGenerator:
     def get_page_width(self):
         return self.args.paperwidth - self.args.margin_left - self.args.margin_right - 2
 
-    def get_cut_direction(self, columns, num_rows, handouts_per_team):
+    def get_cut_direction(
+        self, columns, num_rows, handouts_per_team, grouping="horizontal"
+    ):
         """
-        Determine whether to cut vertically or horizontally.
-        Returns (direction, team_size) where:
-        - direction is 'vertical', 'horizontal', or None
-        - team_size is the number of columns (vertical) or rows (horizontal) per team
+        Determine team rectangle dimensions.
+        Returns (team_cols, team_rows) where each team is a team_cols × team_rows block.
 
-        Falls back to None if handouts can't be evenly divided into teams.
+        Falls back to (None, None) if handouts can't be evenly divided into teams.
+
+        Args:
+            grouping: "horizontal" (default) prefers wider teams (smaller team_rows),
+                      "vertical" prefers taller teams (smaller team_cols).
         """
         total = columns * num_rows
 
@@ -136,27 +140,32 @@ class HandoutGenerator:
             return None, None
 
         num_teams = total // handouts_per_team
-        if num_teams < 2:
-            return None, None  # Only 1 team, no cuts needed
+        if num_teams < 1:
+            return None, None  # Invalid configuration
 
-        # Try vertical layout (teams as column groups)
-        # Each team gets team_cols columns × all rows
-        if handouts_per_team % num_rows == 0:
-            team_cols = handouts_per_team // num_rows
-            if columns % team_cols == 0:
-                return "vertical", team_cols
+        # Find all valid team rectangle sizes (team_cols × team_rows = handouts_per_team)
+        valid_layouts = []
+        for team_rows in range(1, handouts_per_team + 1):
+            if handouts_per_team % team_rows == 0:
+                team_cols = handouts_per_team // team_rows
+                if columns % team_cols == 0 and num_rows % team_rows == 0:
+                    valid_layouts.append((team_cols, team_rows))
 
-        # Try horizontal layout (teams as row groups)
-        # Each team gets all columns × team_rows rows
-        if handouts_per_team % columns == 0:
-            team_rows = handouts_per_team // columns
-            if num_rows % team_rows == 0:
-                return "horizontal", team_rows
+        if not valid_layouts:
+            return None, None
 
-        return None, None
+        # Sort based on grouping preference
+        if grouping == "vertical":
+            # Prefer vertical grouping (smaller team_cols = taller teams)
+            valid_layouts.sort(key=lambda x: x[0])
+        else:
+            # Prefer horizontal grouping (smaller team_rows = wider teams)
+            valid_layouts.sort(key=lambda x: x[1])
+
+        return valid_layouts[0]
 
     def get_edge_styles(
-        self, row_idx, col_idx, num_rows, columns, cut_direction, team_size
+        self, row_idx, col_idx, num_rows, columns, team_cols, team_rows
     ):
         """
         Determine edge styles and extensions for a box at position (row_idx, col_idx).
@@ -164,7 +173,7 @@ class HandoutGenerator:
         Extensions are used to close gaps in ALL solid lines.
         Duplicate dashed edges are skipped to avoid double lines.
 
-        team_size is the number of columns (vertical) or rows (horizontal) per team.
+        team_cols and team_rows define the dimensions of each team rectangle.
         """
         # Default: all dashed, no extension
         edges = {
@@ -187,32 +196,32 @@ class HandoutGenerator:
         # Helper functions to check if position is at a team boundary
         def is_at_right_team_boundary():
             """Is this box at the right edge of its team (but not at grid edge)?"""
-            if cut_direction != "vertical" or not team_size:
+            if not team_cols:
                 return False
-            return (col_idx + 1) % team_size == 0 and col_idx < columns - 1
+            return (col_idx + 1) % team_cols == 0 and col_idx < columns - 1
 
         def is_at_left_team_boundary():
             """Is this box at the left edge of its team (but not at grid edge)?"""
-            if cut_direction != "vertical" or not team_size:
+            if not team_cols:
                 return False
-            return col_idx % team_size == 0 and col_idx > 0
+            return col_idx % team_cols == 0 and col_idx > 0
 
         def is_at_bottom_team_boundary():
             """Is this box at the bottom edge of its team (but not at grid edge)?"""
-            if cut_direction != "horizontal" or not team_size:
+            if not team_rows:
                 return False
-            return (row_idx + 1) % team_size == 0 and row_idx < num_rows - 1
+            return (row_idx + 1) % team_rows == 0 and row_idx < num_rows - 1
 
         def is_at_top_team_boundary():
             """Is this box at the top edge of its team (but not at grid edge)?"""
-            if cut_direction != "horizontal" or not team_size:
+            if not team_rows:
                 return False
-            return row_idx % team_size == 0 and row_idx > 0
+            return row_idx % team_rows == 0 and row_idx > 0
 
         # Determine which edges are solid
-        # Only apply solid edges if we have a valid cut direction
+        # Only apply solid edges if we have valid team dimensions
         # Otherwise fall back to all-dashed (default)
-        if cut_direction is not None:
+        if team_cols is not None and team_rows is not None:
             # Outer edges of the entire grid
             if row_idx == 0:
                 edges["top"] = EDGE_SOLID
@@ -292,13 +301,16 @@ class HandoutGenerator:
         columns = block["columns"]
         num_rows = block.get("rows") or 1
         handouts_per_team = block.get("handouts_per_team") or 3
+        grouping = block.get("grouping") or "horizontal"
 
-        # Determine cut direction
-        cut_direction, cut_after = self.get_cut_direction(
-            columns, num_rows, handouts_per_team
+        # Determine team rectangle dimensions
+        team_cols, team_rows = self.get_cut_direction(
+            columns, num_rows, handouts_per_team, grouping
         )
         if self.args.debug:
-            print(f"cut_direction: {cut_direction}, cut_after: {cut_after}")
+            print(
+                f"team_cols: {team_cols}, team_rows: {team_rows}, grouping: {grouping}"
+            )
 
         spaces = columns - 1
         boxwidth = self.args.boxwidth or round(
@@ -335,7 +347,7 @@ class HandoutGenerator:
             row_boxes = []
             for col_idx in range(columns):
                 edges, ext = self.get_edge_styles(
-                    row_idx, col_idx, num_rows, columns, cut_direction, cut_after
+                    row_idx, col_idx, num_rows, columns, team_cols, team_rows
                 )
                 row_boxes.append(self.make_tikzbox(block, edges, ext))
             row = (

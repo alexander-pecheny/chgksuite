@@ -66,7 +66,9 @@ def html2md(html_string: str) -> str:
     lines = []
 
     # Header row (centered, with padding)
-    header = "|" + "|".join(_center(cell, widths[i]) for i, cell in enumerate(data[0])) + "|"
+    header = (
+        "|" + "|".join(_center(cell, widths[i]) for i, cell in enumerate(data[0])) + "|"
+    )
     lines.append(header)
 
     # Separator row (no spaces to avoid typotools converting --- to em-dash)
@@ -75,7 +77,9 @@ def html2md(html_string: str) -> str:
 
     # Data rows (centered, with padding)
     for row in data[1:]:
-        line = "|" + "|".join(_center(cell, widths[i]) for i, cell in enumerate(row)) + "|"
+        line = (
+            "|" + "|".join(_center(cell, widths[i]) for i, cell in enumerate(row)) + "|"
+        )
         lines.append(line)
 
     return "\n".join(lines)

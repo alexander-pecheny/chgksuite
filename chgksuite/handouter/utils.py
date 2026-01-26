@@ -14,6 +14,7 @@ RESERVED_WORDS = [
     "raw_tex",
     "color",
     "handouts_per_team",
+    "grouping",
 ]
 
 
@@ -42,6 +43,13 @@ def wrap_val(key, val):
         return int(val.strip())
     if key in ("resize_image", "font_size"):
         return float(val.strip())
+    if key == "grouping":
+        val = val.strip().lower()
+        if val not in ("horizontal", "vertical"):
+            raise ValueError(
+                f"Invalid grouping value: {val}. Must be 'horizontal' or 'vertical'."
+            )
+        return val
     return val.strip()
 
 
