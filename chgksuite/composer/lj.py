@@ -1,4 +1,3 @@
-import codecs
 import datetime
 import os
 import random
@@ -240,7 +239,7 @@ class LjExporter(BaseExporter):
                 "general_impressions_text"
             ]
         if self.args.debug:
-            with codecs.open("lj.debug", "w", "utf8") as f:
+            with open("lj.debug", "w", encoding="utf-8") as f:
                 f.write(log_wrap(final_structure))
         return final_structure
 

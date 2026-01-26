@@ -596,6 +596,15 @@ class ArgparseBuilder:
             caption="Имя 4s-файла",
             filetypes=[("chgksuite markup files", "*.4s")],
         )
+        cmdcompose_markdown = cmdcompose_filetype.add_parser("markdown")
+        self.add_argument(
+            cmdcompose_markdown,
+            "filename",
+            nargs="*",
+            help="file(s) to compose from.",
+            caption="Имя 4s-файла",
+            filetypes=[("chgksuite markup files", "*.4s")],
+        )
         cmdcompose_pptx = cmdcompose_filetype.add_parser("pptx")
         self.add_argument(
             cmdcompose_pptx,

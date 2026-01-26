@@ -1,6 +1,5 @@
 #!usr/bin/env python
 #! -*- coding: utf-8 -*-
-import codecs
 import argparse
 from collections import Counter
 
@@ -12,7 +11,7 @@ args = parser.parse_args()
 
 authors = Counter()
 
-with codecs.open(args.filename, "r", "utf-8") as f:
+with open(args.filename, "r", encoding="utf-8") as f:
     structure = parse_4s(f.read().replace("\r", ""))
 
 for element in structure:

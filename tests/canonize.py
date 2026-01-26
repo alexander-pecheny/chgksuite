@@ -4,7 +4,6 @@ from __future__ import unicode_literals
 from __future__ import division
 import os
 import argparse
-import codecs
 import inspect
 import json
 
@@ -33,9 +32,15 @@ def workaround_chgk_parse(filename, **kwargs):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--parsing_engine", default="mammoth")
+    parser.add_argument("file", nargs="?", help="Single file to canonize (optional)")
     args = parser.parse_args()
 
-    for filename in os.listdir(currentdir):
+    if args.file:
+        files = [args.file]
+    else:
+        files = os.listdir(currentdir)
+
+    for filename in files:
         if filename.endswith((".docx", ".txt")):
             print("Canonizing {}...".format(filename))
             if filename in settings and settings[filename].get("function_args"):
@@ -54,8 +59,8 @@ def main():
                     and filename1 not in ALLOWED_IMAGES
                 ):
                     os.remove(os.path.join(currentdir, filename1))
-            with codecs.open(
-                os.path.join(currentdir, filename) + ".canon", "w", "utf8"
+            with open(
+                os.path.join(currentdir, filename) + ".canon", "w", encoding="utf-8"
             ) as f:
                 f.write(compose_4s(parsed, args=DefaultArgs()))
 

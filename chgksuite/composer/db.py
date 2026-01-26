@@ -1,4 +1,3 @@
-import codecs
 import datetime
 import os
 import re
@@ -211,7 +210,7 @@ class DbExporter(BaseExporter):
             if res:
                 result.append(res)
         text = "".join(result)
-        with codecs.open(outfilename, "w", "utf8") as f:
+        with open(outfilename, "w", encoding="utf-8") as f:
             f.write(text)
         self.logger.info("Output: {}".format(outfilename))
         if self.args.clipboard:

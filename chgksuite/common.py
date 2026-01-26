@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import argparse
-import codecs
 import csv
 import itertools
 import json
@@ -37,12 +36,19 @@ except AttributeError:
 lastdir = os.path.join(os.path.dirname(os.path.abspath("__file__")), "lastdir")
 
 
+def get_chgksuite_dir():
+    chgksuite_dir = os.path.join(os.path.expanduser("~"), ".chgksuite")
+    if not os.path.isdir(chgksuite_dir):
+        os.mkdir(chgksuite_dir)
+    return chgksuite_dir
+
+
 def init_logger(logger_name, debug=False):
     logger = logging.getLogger(logger_name)
     if not logger.handlers:
         logger.setLevel(logging.DEBUG)
-        source_dir, _ = get_source_dirs()
-        log_path = os.path.join(source_dir, f"{logger_name}.log")
+        log_dir = get_chgksuite_dir()
+        log_path = os.path.join(log_dir, f"{logger_name}.log")
         fh = logging.FileHandler(log_path, encoding="utf8")
         fh.setLevel(logging.DEBUG)
         ch = logging.StreamHandler()
@@ -56,13 +62,6 @@ def init_logger(logger_name, debug=False):
         logger.addHandler(fh)
         logger.addHandler(ch)
     return logger
-
-
-def get_chgksuite_dir():
-    chgksuite_dir = os.path.join(os.path.expanduser("~"), ".chgksuite")
-    if not os.path.isdir(chgksuite_dir):
-        os.mkdir(chgksuite_dir)
-    return chgksuite_dir
 
 
 def load_settings():
@@ -114,7 +113,7 @@ class DefaultArgs:
 def set_lastdir(path):
     chgksuite_dir = get_chgksuite_dir()
     lastdir = os.path.join(chgksuite_dir, "lastdir")
-    with codecs.open(lastdir, "w", "utf8") as f:
+    with open(lastdir, "w", encoding="utf-8") as f:
         f.write(path)
 
 
@@ -122,7 +121,7 @@ def get_lastdir():
     chgksuite_dir = get_chgksuite_dir()
     lastdir = os.path.join(chgksuite_dir, "lastdir")
     if os.path.isfile(lastdir):
-        with codecs.open(lastdir, "r", "utf8") as f:
+        with open(lastdir, "r", encoding="utf-8") as f:
             return f.read().rstrip()
     return "."
 
