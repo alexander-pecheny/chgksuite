@@ -20,7 +20,7 @@ from chgksuite.parser import (
     chgk_parse_txt,
     compose_4s,
 )
-from chgksuite.typotools import get_quotes_right
+from chgksuite.typotools import get_quotes_right, cyr_lat_check_word
 from PIL import Image
 
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
@@ -86,6 +86,42 @@ QUOTE_TEST_CASES = [
 @pytest.mark.parametrize("a,expected", QUOTE_TEST_CASES)
 def test_quotes(a, expected):
     assert get_quotes_right(a) == expected
+
+
+# Test cases for Latin accented character conversion to Cyrillic
+# Format: (input, expected_output)
+# The fix ensures uppercase Cyrillic neighbors are recognized correctly
+CYR_LAT_ACCENT_TEST_CASES = [
+    # Bug case: Latin á (U+00E1) after uppercase Cyrillic should convert
+    ("Хáральд", "Ха́ральд"),  # Х is uppercase Cyrillic
+    # Latin à (U+00E0) after lowercase Cyrillic - already worked
+    ("Ивàново", "Ива́ново"),
+    # Latin é (U+00E9) in middle of word - already worked
+    ("крылéц", "крыле́ц"),
+    # Latin ó (U+00F3) after uppercase Cyrillic
+    ("Óльга", "О́льга"),  # О is uppercase Cyrillic
+    # Latin ú (U+00FA) mapped to Cyrillic и́
+    ("Иúсус", "Ии́сус"),
+    # Multiple accented chars in one word
+    ("Москвá", "Москва́"),
+    # Pure Latin word - should NOT convert (no Cyrillic neighbors)
+    ("café", None),  # None means no change
+    # Mixed but Latin char surrounded by Latin - should NOT convert
+    ("Caféшоп", None),  # é surrounded by Latin 'f' and Cyrillic 'ш', but 'f' blocks it
+    # Single char word - should not convert (length check)
+    ("á", None),
+    # Uppercase Latin accent after uppercase Cyrillic
+    ("ХÁРАЛЬД", "ХА́РАЛЬД"),
+]
+
+
+@pytest.mark.parametrize("input_word,expected", CYR_LAT_ACCENT_TEST_CASES)
+def test_cyr_lat_accent_conversion(input_word, expected):
+    result = cyr_lat_check_word(input_word)
+    if expected is None:
+        assert result is None, f"Expected no change for '{input_word}', got '{result}'"
+    else:
+        assert result == expected, f"Expected '{expected}' for '{input_word}', got '{result}'"
 
 
 with open(os.path.join(parentdir, "chgksuite", "resources", "regexes_ru.json")) as f:

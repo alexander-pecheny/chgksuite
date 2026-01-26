@@ -92,13 +92,13 @@ def uni_normalize(k):
 
 
 def cyr_lat_check_char(i, char, word):
-    if char in CYRILLIC_CHARS:
+    if char.lower() in CYRILLIC_CHARS:
         return
     if not (
-        (i == 0 or word[i - 1] in CYRILLIC_CHARS or not word[i - 1].isalpha())
+        (i == 0 or word[i - 1].lower() in CYRILLIC_CHARS or not word[i - 1].isalpha())
         and (
             i == len(word) - 1
-            or word[i + 1] in CYRILLIC_CHARS
+            or word[i + 1].lower() in CYRILLIC_CHARS
             or not word[i + 1].isalpha()
         )
     ):
@@ -121,7 +121,7 @@ def cyr_lat_check_word(word):
         if check_result:
             replacements[char] = check_result
         elif (
-            char in CYRILLIC_CHARS
+            char.lower() in CYRILLIC_CHARS
             and i < len(word) - 1
             and word[i + 1] in ACCENTS_TO_FIX
         ):
