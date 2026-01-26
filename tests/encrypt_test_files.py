@@ -13,6 +13,7 @@ Usage:
     python encrypt_test_files.py decrypt <file.encrypted> [file2.encrypted] ...
         Decrypt files (saves without .encrypted suffix)
 """
+
 import hashlib
 import os
 import secrets
@@ -76,7 +77,10 @@ def read_password() -> str:
     """Read password from file."""
     if not os.path.exists(PASSWORD_FILE):
         print(f"Error: Password file not found: {PASSWORD_FILE}", file=sys.stderr)
-        print("Run 'python encrypt_test_files.py generate-password' first", file=sys.stderr)
+        print(
+            "Run 'python encrypt_test_files.py generate-password' first",
+            file=sys.stderr,
+        )
         sys.exit(1)
     with open(PASSWORD_FILE, "r") as f:
         return f.read().strip()
@@ -105,7 +109,10 @@ def main():
 
     elif command == "encrypt":
         if len(sys.argv) < 3:
-            print("Usage: python encrypt_test_files.py encrypt <file1> [file2] ...", file=sys.stderr)
+            print(
+                "Usage: python encrypt_test_files.py encrypt <file1> [file2] ...",
+                file=sys.stderr,
+            )
             sys.exit(1)
         password = read_password()
         for filepath in sys.argv[2:]:
@@ -114,7 +121,10 @@ def main():
 
     elif command == "decrypt":
         if len(sys.argv) < 3:
-            print("Usage: python encrypt_test_files.py decrypt <file.encrypted> [file2.encrypted] ...", file=sys.stderr)
+            print(
+                "Usage: python encrypt_test_files.py decrypt <file.encrypted> [file2.encrypted] ...",
+                file=sys.stderr,
+            )
             sys.exit(1)
         password = read_password()
         for filepath in sys.argv[2:]:

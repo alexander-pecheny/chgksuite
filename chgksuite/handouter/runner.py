@@ -72,7 +72,12 @@ class HandoutGenerator:
         ext is a dict with edge extensions to close gaps at boundaries
         """
         if edges is None:
-            edges = {"top": EDGE_DASHED, "bottom": EDGE_DASHED, "left": EDGE_DASHED, "right": EDGE_DASHED}
+            edges = {
+                "top": EDGE_DASHED,
+                "bottom": EDGE_DASHED,
+                "left": EDGE_DASHED,
+                "right": EDGE_DASHED,
+            }
         if ext is None:
             ext = {
                 "top": ("0pt", "0pt"),
@@ -150,7 +155,9 @@ class HandoutGenerator:
 
         return None, None
 
-    def get_edge_styles(self, row_idx, col_idx, num_rows, columns, cut_direction, team_size):
+    def get_edge_styles(
+        self, row_idx, col_idx, num_rows, columns, cut_direction, team_size
+    ):
         """
         Determine edge styles and extensions for a box at position (row_idx, col_idx).
         Outer edges of team rectangles are solid (thicker), inner edges are dashed.
@@ -160,7 +167,12 @@ class HandoutGenerator:
         team_size is the number of columns (vertical) or rows (horizontal) per team.
         """
         # Default: all dashed, no extension
-        edges = {"top": EDGE_DASHED, "bottom": EDGE_DASHED, "left": EDGE_DASHED, "right": EDGE_DASHED}
+        edges = {
+            "top": EDGE_DASHED,
+            "bottom": EDGE_DASHED,
+            "left": EDGE_DASHED,
+            "right": EDGE_DASHED,
+        }
         ext = {
             "top": ("0pt", "0pt"),
             "bottom": ("0pt", "0pt"),
@@ -170,7 +182,7 @@ class HandoutGenerator:
 
         # Gap sizes (half of spacing to extend into)
         h_gap = "0.75mm"  # half of SPACE (1.5mm)
-        v_gap = "0.5mm"   # half of vspace (1mm)
+        v_gap = "0.5mm"  # half of vspace (1mm)
 
         # Helper functions to check if position is at a team boundary
         def is_at_right_team_boundary():
@@ -235,28 +247,40 @@ class HandoutGenerator:
             at_left_boundary = is_at_left_team_boundary()
             ext_left = "-" + h_gap if col_idx > 0 and not at_left_boundary else "0pt"
             at_right_boundary = is_at_right_team_boundary()
-            ext_right = h_gap if col_idx < columns - 1 and not at_right_boundary else "0pt"
+            ext_right = (
+                h_gap if col_idx < columns - 1 and not at_right_boundary else "0pt"
+            )
             ext["top"] = (ext_left, ext_right)
 
         if edges["bottom"] == EDGE_SOLID:
             at_left_boundary = is_at_left_team_boundary()
             ext_left = "-" + h_gap if col_idx > 0 and not at_left_boundary else "0pt"
             at_right_boundary = is_at_right_team_boundary()
-            ext_right = h_gap if col_idx < columns - 1 and not at_right_boundary else "0pt"
+            ext_right = (
+                h_gap if col_idx < columns - 1 and not at_right_boundary else "0pt"
+            )
             ext["bottom"] = (ext_left, ext_right)
 
         if edges["left"] == EDGE_SOLID:
             at_top_boundary = is_at_top_team_boundary()
             ext_top = v_gap if row_idx > 0 and not at_top_boundary else "0pt"
             at_bottom_boundary = is_at_bottom_team_boundary()
-            ext_bottom = "-" + v_gap if row_idx < num_rows - 1 and not at_bottom_boundary else "0pt"
+            ext_bottom = (
+                "-" + v_gap
+                if row_idx < num_rows - 1 and not at_bottom_boundary
+                else "0pt"
+            )
             ext["left"] = (ext_top, ext_bottom)
 
         if edges["right"] == EDGE_SOLID:
             at_top_boundary = is_at_top_team_boundary()
             ext_top = v_gap if row_idx > 0 and not at_top_boundary else "0pt"
             at_bottom_boundary = is_at_bottom_team_boundary()
-            ext_bottom = "-" + v_gap if row_idx < num_rows - 1 and not at_bottom_boundary else "0pt"
+            ext_bottom = (
+                "-" + v_gap
+                if row_idx < num_rows - 1 and not at_bottom_boundary
+                else "0pt"
+            )
             ext["right"] = (ext_top, ext_bottom)
 
         return edges, ext
@@ -270,7 +294,9 @@ class HandoutGenerator:
         handouts_per_team = block.get("handouts_per_team") or 3
 
         # Determine cut direction
-        cut_direction, cut_after = self.get_cut_direction(columns, num_rows, handouts_per_team)
+        cut_direction, cut_after = self.get_cut_direction(
+            columns, num_rows, handouts_per_team
+        )
         if self.args.debug:
             print(f"cut_direction: {cut_direction}, cut_after: {cut_after}")
 
