@@ -17,8 +17,9 @@ import time
 
 import bs4
 import chardet
-import dashtable
 import mammoth
+
+from chgksuite._html2md import html2md
 import pypandoc
 import requests
 import toml
@@ -1064,7 +1065,7 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
             ensure_line_breaks(tag)
         for tag in bsoup.find_all("table"):
             try:
-                table = dashtable.html2md(str(tag))
+                table = html2md(str(tag))
                 tag.insert_before(table)
             except (TypeError, ValueError):
                 logger.error(f"couldn't parse html table: {str(tag)}")
