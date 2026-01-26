@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "chgksuite"
@@ -18,7 +18,7 @@ Project home on gitlab: https://gitlab.com/peczony/chgksuite
 Documentation (in Russian): https://peczony.gitlab.io/chgksuite
 """, content-type = "text/markdown"}
 requires-python = ">=3.9"
-license = {text = "MIT"}
+license = "MIT"
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
@@ -50,21 +50,11 @@ Homepage = "https://gitlab.com/peczony/chgksuite"
 [project.scripts]
 chgksuite = "chgksuite.__main__:main"
 
-[tool.setuptools.dynamic]
-version = {attr = "chgksuite.version.__version__"}
+[tool.hatch.version]
+path = "chgksuite/version.py"
 
-[tool.setuptools.packages.find]
-include = ["chgksuite", "chgksuite.*"]
-
-[tool.setuptools.package-data]
-chgksuite = [
-    "resources/*.json",
-    "resources/*.docx",
-    "resources/*.pptx",
-    "resources/*.toml",
-    "resources/*.tex",
-    "resources/*.sty",
-]
+[tool.hatch.build.targets.wheel]
+packages = ["chgksuite"]
 
 [dependency-groups]
 dev = [
