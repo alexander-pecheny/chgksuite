@@ -14,6 +14,9 @@ from chgksuite.handouter.gen import generate_handouts
 from chgksuite.handouter.pack import pack_handouts
 from chgksuite.handouter.installer import get_tectonic_path, install_tectonic
 from chgksuite.handouter.tex_internals import (
+    EDGE_DASHED,
+    EDGE_NONE,
+    EDGE_SOLID,
     GREYTEXT,
     HEADER,
     IMG,
@@ -61,7 +64,23 @@ class HandoutGenerator:
         )
         return GREYTEXT.replace("<GREYTEXT>", handout_text)
 
-    def make_tikzbox(self, block):
+    def make_tikzbox(self, block, edges=None, ext=None):
+        """
+        Create a TikZ box with configurable edge styles and extensions.
+        edges is a dict with keys 'top', 'bottom', 'left', 'right'
+        values are EDGE_DASHED or EDGE_SOLID
+        ext is a dict with edge extensions to close gaps at boundaries
+        """
+        if edges is None:
+            edges = {"top": EDGE_DASHED, "bottom": EDGE_DASHED, "left": EDGE_DASHED, "right": EDGE_DASHED}
+        if ext is None:
+            ext = {
+                "top": ("0pt", "0pt"),
+                "bottom": ("0pt", "0pt"),
+                "left": ("0pt", "0pt"),
+                "right": ("0pt", "0pt"),
+            }
+
         if block.get("no_center"):
             align = ""
         else:
@@ -79,19 +98,185 @@ class HandoutGenerator:
             .replace("<ALIGN>", align)
             .replace("<TEXTWIDTH>", textwidth)
             .replace("<FONTSIZE>", fontsize)
+            .replace("<TOP>", edges["top"])
+            .replace("<BOTTOM>", edges["bottom"])
+            .replace("<LEFT>", edges["left"])
+            .replace("<RIGHT>", edges["right"])
+            .replace("<TOP_EXT_L>", ext["top"][0])
+            .replace("<TOP_EXT_R>", ext["top"][1])
+            .replace("<BOTTOM_EXT_L>", ext["bottom"][0])
+            .replace("<BOTTOM_EXT_R>", ext["bottom"][1])
+            .replace("<LEFT_EXT_T>", ext["left"][0])
+            .replace("<LEFT_EXT_B>", ext["left"][1])
+            .replace("<RIGHT_EXT_T>", ext["right"][0])
+            .replace("<RIGHT_EXT_B>", ext["right"][1])
         )
 
     def get_page_width(self):
         return self.args.paperwidth - self.args.margin_left - self.args.margin_right - 2
+
+    def get_cut_direction(self, columns, num_rows, handouts_per_team):
+        """
+        Determine whether to cut vertically or horizontally.
+        Returns (direction, team_size) where:
+        - direction is 'vertical', 'horizontal', or None
+        - team_size is the number of columns (vertical) or rows (horizontal) per team
+
+        Falls back to None if handouts can't be evenly divided into teams.
+        """
+        total = columns * num_rows
+
+        # Check if total handouts can be evenly divided
+        if total % handouts_per_team != 0:
+            return None, None
+
+        num_teams = total // handouts_per_team
+        if num_teams < 2:
+            return None, None  # Only 1 team, no cuts needed
+
+        # Try vertical layout (teams as column groups)
+        # Each team gets team_cols columns × all rows
+        if handouts_per_team % num_rows == 0:
+            team_cols = handouts_per_team // num_rows
+            if columns % team_cols == 0:
+                return "vertical", team_cols
+
+        # Try horizontal layout (teams as row groups)
+        # Each team gets all columns × team_rows rows
+        if handouts_per_team % columns == 0:
+            team_rows = handouts_per_team // columns
+            if num_rows % team_rows == 0:
+                return "horizontal", team_rows
+
+        return None, None
+
+    def get_edge_styles(self, row_idx, col_idx, num_rows, columns, cut_direction, team_size):
+        """
+        Determine edge styles and extensions for a box at position (row_idx, col_idx).
+        Outer edges of team rectangles are solid (thicker), inner edges are dashed.
+        Extensions are used to close gaps in ALL solid lines.
+        Duplicate dashed edges are skipped to avoid double lines.
+
+        team_size is the number of columns (vertical) or rows (horizontal) per team.
+        """
+        # Default: all dashed, no extension
+        edges = {"top": EDGE_DASHED, "bottom": EDGE_DASHED, "left": EDGE_DASHED, "right": EDGE_DASHED}
+        ext = {
+            "top": ("0pt", "0pt"),
+            "bottom": ("0pt", "0pt"),
+            "left": ("0pt", "0pt"),
+            "right": ("0pt", "0pt"),
+        }
+
+        # Gap sizes (half of spacing to extend into)
+        h_gap = "0.75mm"  # half of SPACE (1.5mm)
+        v_gap = "0.5mm"   # half of vspace (1mm)
+
+        # Helper functions to check if position is at a team boundary
+        def is_at_right_team_boundary():
+            """Is this box at the right edge of its team (but not at grid edge)?"""
+            if cut_direction != "vertical" or not team_size:
+                return False
+            return (col_idx + 1) % team_size == 0 and col_idx < columns - 1
+
+        def is_at_left_team_boundary():
+            """Is this box at the left edge of its team (but not at grid edge)?"""
+            if cut_direction != "vertical" or not team_size:
+                return False
+            return col_idx % team_size == 0 and col_idx > 0
+
+        def is_at_bottom_team_boundary():
+            """Is this box at the bottom edge of its team (but not at grid edge)?"""
+            if cut_direction != "horizontal" or not team_size:
+                return False
+            return (row_idx + 1) % team_size == 0 and row_idx < num_rows - 1
+
+        def is_at_top_team_boundary():
+            """Is this box at the top edge of its team (but not at grid edge)?"""
+            if cut_direction != "horizontal" or not team_size:
+                return False
+            return row_idx % team_size == 0 and row_idx > 0
+
+        # Determine which edges are solid
+        # Only apply solid edges if we have a valid cut direction
+        # Otherwise fall back to all-dashed (default)
+        if cut_direction is not None:
+            # Outer edges of the entire grid
+            if row_idx == 0:
+                edges["top"] = EDGE_SOLID
+            if row_idx == num_rows - 1:
+                edges["bottom"] = EDGE_SOLID
+            if col_idx == 0:
+                edges["left"] = EDGE_SOLID
+            if col_idx == columns - 1:
+                edges["right"] = EDGE_SOLID
+
+            # Team boundary edges
+            if is_at_right_team_boundary():
+                edges["right"] = EDGE_SOLID
+            if is_at_left_team_boundary():
+                edges["left"] = EDGE_SOLID
+            if is_at_bottom_team_boundary():
+                edges["bottom"] = EDGE_SOLID
+            if is_at_top_team_boundary():
+                edges["top"] = EDGE_SOLID
+
+        # Skip duplicate dashed edges (to avoid double lines between adjacent boxes)
+        if edges["left"] == EDGE_DASHED and col_idx > 0:
+            edges["left"] = EDGE_NONE
+
+        if edges["top"] == EDGE_DASHED and row_idx > 0:
+            edges["top"] = EDGE_NONE
+
+        # Calculate extensions for solid edges to close gaps
+        # But don't extend into team boundary gaps!
+
+        if edges["top"] == EDGE_SOLID:
+            at_left_boundary = is_at_left_team_boundary()
+            ext_left = "-" + h_gap if col_idx > 0 and not at_left_boundary else "0pt"
+            at_right_boundary = is_at_right_team_boundary()
+            ext_right = h_gap if col_idx < columns - 1 and not at_right_boundary else "0pt"
+            ext["top"] = (ext_left, ext_right)
+
+        if edges["bottom"] == EDGE_SOLID:
+            at_left_boundary = is_at_left_team_boundary()
+            ext_left = "-" + h_gap if col_idx > 0 and not at_left_boundary else "0pt"
+            at_right_boundary = is_at_right_team_boundary()
+            ext_right = h_gap if col_idx < columns - 1 and not at_right_boundary else "0pt"
+            ext["bottom"] = (ext_left, ext_right)
+
+        if edges["left"] == EDGE_SOLID:
+            at_top_boundary = is_at_top_team_boundary()
+            ext_top = v_gap if row_idx > 0 and not at_top_boundary else "0pt"
+            at_bottom_boundary = is_at_bottom_team_boundary()
+            ext_bottom = "-" + v_gap if row_idx < num_rows - 1 and not at_bottom_boundary else "0pt"
+            ext["left"] = (ext_top, ext_bottom)
+
+        if edges["right"] == EDGE_SOLID:
+            at_top_boundary = is_at_top_team_boundary()
+            ext_top = v_gap if row_idx > 0 and not at_top_boundary else "0pt"
+            at_bottom_boundary = is_at_bottom_team_boundary()
+            ext_bottom = "-" + v_gap if row_idx < num_rows - 1 and not at_bottom_boundary else "0pt"
+            ext["right"] = (ext_top, ext_bottom)
+
+        return edges, ext
 
     def generate_regular_block(self, block_):
         block = block_.copy()
         if not (block.get("image") or block.get("text")):
             return
         columns = block["columns"]
-        spaces = block["columns"] - 1
+        num_rows = block.get("rows") or 1
+        handouts_per_team = block.get("handouts_per_team") or 3
+
+        # Determine cut direction
+        cut_direction, cut_after = self.get_cut_direction(columns, num_rows, handouts_per_team)
+        if self.args.debug:
+            print(f"cut_direction: {cut_direction}, cut_after: {cut_after}")
+
+        spaces = columns - 1
         boxwidth = self.args.boxwidth or round(
-            (self.get_page_width() - spaces * self.SPACE) / block["columns"],
+            (self.get_page_width() - spaces * self.SPACE) / columns,
             3,
         )
         total_width = boxwidth * columns + spaces * self.SPACE
@@ -104,7 +289,6 @@ class HandoutGenerator:
             r"\setlength{\boxwidth}{<Q>mm}%".replace("<Q>", str(boxwidth)),
             r"\setlength{\boxwidthinner}{<Q>mm}%".replace("<Q>", str(boxwidthinner)),
         ]
-        rows = []
         contents = []
         if block.get("image"):
             img_qwidth = block.get("resize_image") or 1.0
@@ -119,10 +303,18 @@ class HandoutGenerator:
             block["centering"] = ""
         else:
             block["centering"] = "\\centering"
-        for _ in range(block.get("rows") or 1):
+
+        rows = []
+        for row_idx in range(num_rows):
+            row_boxes = []
+            for col_idx in range(columns):
+                edges, ext = self.get_edge_styles(
+                    row_idx, col_idx, num_rows, columns, cut_direction, cut_after
+                )
+                row_boxes.append(self.make_tikzbox(block, edges, ext))
             row = (
                 TIKZBOX_START.replace("<CENTERING>", block["centering"])
-                + "\n".join([self.make_tikzbox(block)] * block["columns"])
+                + "\n".join(row_boxes)
                 + TIKZBOX_END
             )
             rows.append(row)
