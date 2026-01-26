@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import argparse
-import codecs
 import csv
 import itertools
 import json
@@ -114,7 +113,7 @@ class DefaultArgs:
 def set_lastdir(path):
     chgksuite_dir = get_chgksuite_dir()
     lastdir = os.path.join(chgksuite_dir, "lastdir")
-    with codecs.open(lastdir, "w", "utf8") as f:
+    with open(lastdir, "w", encoding="utf-8") as f:
         f.write(path)
 
 
@@ -122,7 +121,7 @@ def get_lastdir():
     chgksuite_dir = get_chgksuite_dir()
     lastdir = os.path.join(chgksuite_dir, "lastdir")
     if os.path.isfile(lastdir):
-        with codecs.open(lastdir, "r", "utf8") as f:
+        with open(lastdir, "r", encoding="utf-8") as f:
             return f.read().rstrip()
     return "."
 

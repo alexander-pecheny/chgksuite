@@ -1,4 +1,3 @@
-import codecs
 import os
 
 from chgksuite.composer.composer_common import (
@@ -91,7 +90,9 @@ class MarkdownExporter(BaseExporter):
             self.qcount += 1
         spoiler_start = ">!" if self.args.filetype == "redditmd" else ""
         spoiler_end = "!<" if self.args.filetype == "redditmd" else ""
-        res += "__Ответ:__ {}{}  \n".format(spoiler_start, self.markdownyapper(q["answer"]))
+        res += "__Ответ:__ {}{}  \n".format(
+            spoiler_start, self.markdownyapper(q["answer"])
+        )
         if "zachet" in q:
             res += "__Зачёт:__ {}  \n".format(self.markdownyapper(q["zachet"]))
         if "nezachet" in q:
@@ -101,7 +102,9 @@ class MarkdownExporter(BaseExporter):
         if "source" in q:
             res += "__Источник:__ {}  \n".format(self.markdownyapper(q["source"]))
         if "author" in q:
-            res += "{}\n__Автор:__ {}  \n".format(spoiler_end, self.markdownyapper(q["author"]))
+            res += "{}\n__Автор:__ {}  \n".format(
+                spoiler_end, self.markdownyapper(q["author"])
+            )
         else:
             res += spoiler_end + "\n"
         return res
@@ -113,6 +116,6 @@ class MarkdownExporter(BaseExporter):
             if res:
                 result.append(res)
         text = "\n\n".join(result)
-        with codecs.open(outfile, "w", "utf8") as f:
+        with open(outfile, "w", encoding="utf-8") as f:
             f.write(text)
         self.logger.info("Output: {}".format(outfile))

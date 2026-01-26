@@ -1,6 +1,5 @@
 #!usr/bin/env python
 # -*- coding: utf-8 -*-
-import codecs
 import json
 import os
 import shutil
@@ -75,11 +74,13 @@ def process_file_wrapper(filename, sourcedir, targetdir, args):
 
 def parse_filepath(filepath, args=None):
     args = args or DefaultArgs()
-    with codecs.open(filepath, "r", "utf8") as input_file:
+    with open(filepath, "r", encoding="utf-8") as input_file:
         input_text = input_file.read()
     input_text = input_text.replace("\r", "")
     debug_dir = os.path.dirname(os.path.abspath(filepath))
-    return parse_4s(input_text, randomize=args.randomize, debug=args.debug, debug_dir=debug_dir)
+    return parse_4s(
+        input_text, randomize=args.randomize, debug=args.debug, debug_dir=debug_dir
+    )
 
 
 def make_merged_filename(filelist):
@@ -106,7 +107,7 @@ def process_file(filename, tmp_dir, targetdir, args=None, logger=None):
             targetdir,
             make_filename(os.path.basename(filename), "dbg", args),
         )
-        with codecs.open(debug_fn, "w", "utf8") as output_file:
+        with open(debug_fn, "w", encoding="utf-8") as output_file:
             output_file.write(json.dumps(structure, indent=2, ensure_ascii=False))
 
     if not args.filetype:

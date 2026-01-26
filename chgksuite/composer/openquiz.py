@@ -1,4 +1,3 @@
-import codecs
 import copy
 import re
 import json
@@ -175,5 +174,5 @@ class OpenquizExporter(BaseExporter):
         result = []
         for q in questions:
             result.append(self.oq_format_question(q))
-        with codecs.open(outfilename, "w", "utf8") as f:
+        with open(outfilename, "w", encoding="utf-8") as f:
             f.write(json.dumps(result, indent=2, ensure_ascii=False))

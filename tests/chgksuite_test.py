@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 #! -*- coding: utf-8 -*-
-import codecs
 import contextlib
 import inspect
 import json
@@ -12,7 +11,11 @@ import tempfile
 import pytest
 from chgksuite.common import DefaultArgs
 from chgksuite.composer.chgksuite_parser import parse_4s, replace_counters
-from chgksuite.composer.composer_common import _parse_4s_elem, parseimg, remove_accents_standalone
+from chgksuite.composer.composer_common import (
+    _parse_4s_elem,
+    parseimg,
+    remove_accents_standalone,
+)
 from chgksuite.composer.docx import remove_square_brackets_standalone
 from chgksuite.composer.telegram import TelegramExporter
 from chgksuite.parser import (
@@ -41,6 +44,7 @@ def get_test_password():
 def decrypt_test_file(filepath: str, password: str) -> bytes:
     """Decrypt a test file using XOR."""
     import hashlib
+
     key = hashlib.sha256(password.encode()).digest()
     with open(filepath, "rb") as f:
         data = f.read()
@@ -121,7 +125,9 @@ def test_cyr_lat_accent_conversion(input_word, expected):
     if expected is None:
         assert result is None, f"Expected no change for '{input_word}', got '{result}'"
     else:
-        assert result == expected, f"Expected '{expected}' for '{input_word}', got '{result}'"
+        assert result == expected, (
+            f"Expected '{expected}' for '{input_word}', got '{result}'"
+        )
 
 
 with open(os.path.join(parentdir, "chgksuite", "resources", "regexes_ru.json")) as f:
@@ -131,7 +137,10 @@ with open(os.path.join(parentdir, "chgksuite", "resources", "regexes_ru.json")) 
 SQUARE_BRACKET_TEST_CASES = [
     ("black [блэк]", "black"),
     ("black [блэк] смотрит [looks]", "black смотрит"),
-    ("text with [Раздаточный материал: handout] here", "text with [Раздаточный материал: handout] here"),  # handout preserved
+    (
+        "text with [Раздаточный материал: handout] here",
+        "text with [Раздаточный материал: handout] here",
+    ),  # handout preserved
     ("text \\[escaped\\]", "text [escaped]"),  # escaped brackets restored
     ("simple text", "simple text"),  # no brackets
 ]
@@ -145,7 +154,10 @@ def test_remove_square_brackets(input_text, expected):
 ACCENT_TEST_CASES = [
     ("при́вет", "привет"),  # \u0301 accent removed
     ("мо́ре си́нее", "море синее"),  # multiple accents
-    ("[Раздаточный материал: при́вет]", "[Раздаточный материал: при́вет]"),  # accent in handout preserved
+    (
+        "[Раздаточный материал: при́вет]",
+        "[Раздаточный материал: при́вет]",
+    ),  # accent in handout preserved
     ("simple text", "simple text"),  # no accents
 ]
 
@@ -168,16 +180,16 @@ def normalize(string):
 
 # Regular canon files (always run)
 CANON_FILENAMES = [
-    fn for fn in os.listdir(currentdir)
+    fn
+    for fn in os.listdir(currentdir)
     if fn.endswith(".canon") and not fn.endswith(".encrypted.canon")
 ]
 
 # Add encrypted canon files only if password exists
 if os.path.exists(PASSWORD_FILE):
-    CANON_FILENAMES.extend([
-        fn for fn in os.listdir(currentdir)
-        if fn.endswith(".encrypted.canon")
-    ])
+    CANON_FILENAMES.extend(
+        [fn for fn in os.listdir(currentdir) if fn.endswith(".encrypted.canon")]
+    )
 
 
 @pytest.mark.parametrize("filename", CANON_FILENAMES)
@@ -193,15 +205,21 @@ def test_canonical_equality(parsing_engine, filename):
         if is_encrypted:
             # filename = "file.docx.encrypted.canon" (16 chars for ".encrypted.canon")
             # Decrypt .encrypted.canon -> .canon in temp dir
-            canon_content = decrypt_test_file(os.path.join(currentdir, filename), password)
+            canon_content = decrypt_test_file(
+                os.path.join(currentdir, filename), password
+            )
             decrypted_canon = filename[:-16] + ".canon"  # "file.docx.canon"
             with open(os.path.join(temp_dir, decrypted_canon), "wb") as f:
                 f.write(canon_content)
 
             # Decrypt source file (.docx.encrypted)
             source_encrypted = filename[:-6]  # remove ".canon" -> "file.docx.encrypted"
-            source_decrypted = filename[:-16]  # remove ".encrypted.canon" -> "file.docx"
-            source_content = decrypt_test_file(os.path.join(currentdir, source_encrypted), password)
+            source_decrypted = filename[
+                :-16
+            ]  # remove ".encrypted.canon" -> "file.docx"
+            source_content = decrypt_test_file(
+                os.path.join(currentdir, source_encrypted), password
+            )
             with open(os.path.join(temp_dir, source_decrypted), "wb") as f:
                 f.write(source_content)
 
@@ -228,9 +246,9 @@ def test_canonical_equality(parsing_engine, filename):
         if to_parse_fn in settings and settings[to_parse_fn].get("cmdline_args"):
             call_args.extend(settings[to_parse_fn]["cmdline_args"])
         subprocess.call(call_args, timeout=5)
-        with codecs.open(os.path.join(temp_dir, bn + ".4s"), "r", "utf8") as f:
+        with open(os.path.join(temp_dir, bn + ".4s"), "r", encoding="utf-8") as f:
             parsed = f.read()
-        with codecs.open(os.path.join(temp_dir, canon_fn), "r", "utf8") as f:
+        with open(os.path.join(temp_dir, canon_fn), "r", encoding="utf-8") as f:
             canonical = f.read()
         assert normalize(canonical) == normalize(parsed)
 
@@ -251,7 +269,7 @@ def test_docx_composition(filename):
         file4s = os.path.splitext(filename)[0] + ".4s"
         composed_abspath = os.path.join(temp_dir, file4s)
         print(composed_abspath)
-        with codecs.open(composed_abspath, "w", "utf8") as f:
+        with open(composed_abspath, "w", encoding="utf-8") as f:
             f.write(compose_4s(parsed, args=DefaultArgs()))
         call_args = [
             "python",
@@ -280,7 +298,7 @@ def test_tex_composition():
                 file4s = os.path.splitext(filename)[0] + ".4s"
                 composed_abspath = os.path.join(temp_dir, file4s)
                 print(composed_abspath)
-                with codecs.open(composed_abspath, "w", "utf8") as f:
+                with open(composed_abspath, "w", encoding="utf-8") as f:
                     f.write(compose_4s(parsed, args=DefaultArgs()))
                 code = subprocess.call(
                     [

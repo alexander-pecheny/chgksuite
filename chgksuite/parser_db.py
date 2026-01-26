@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import codecs
 import json
 import os
 import re
@@ -436,7 +435,7 @@ def chgk_parse_db(text, debug=False, logger=False):
     append_question(lexer)
 
     if debug:
-        with codecs.open("debug_final.json", "w", "utf8") as f:
+        with open("debug_final.json", "w", encoding="utf-8") as f:
             f.write(json.dumps(lexer.structure, ensure_ascii=False, indent=4))
 
     return lexer.structure

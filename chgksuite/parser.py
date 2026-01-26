@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import base64
-import codecs
 import datetime
 import hashlib
 import itertools
@@ -61,7 +60,7 @@ def partition(alist, indices):
 
 
 def load_regexes(regexfile):
-    with codecs.open(regexfile, "r", "utf8") as f:
+    with open(regexfile, "r", encoding="utf-8") as f:
         regexes = json.loads(f.read())
     return {k: re.compile(v) for k, v in regexes.items()}
 
@@ -526,7 +525,7 @@ class ChgkParser:
             )
 
         if debug:
-            with codecs.open("debug_0.txt", "w", "utf8") as f:
+            with open("debug_0.txt", "w", encoding="utf-8") as f:
                 f.write(text)
 
         # 1.
@@ -558,7 +557,7 @@ class ChgkParser:
         i = 0
 
         if debug:
-            with codecs.open("debug_1.json", "w", "utf8") as f:
+            with open("debug_1.json", "w", encoding="utf-8") as f:
                 f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
 
         self.process_single_number_lines()
@@ -574,7 +573,7 @@ class ChgkParser:
                 element[0] = "question"
 
         if debug:
-            with codecs.open("debug_1a.json", "w", "utf8") as f:
+            with open("debug_1a.json", "w", encoding="utf-8") as f:
                 f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
 
         # 2.
@@ -584,7 +583,7 @@ class ChgkParser:
         self.merge_to_x_until_nextfield("comment")
 
         if debug:
-            with codecs.open("debug_2.json", "w", "utf8") as f:
+            with open("debug_2.json", "w", encoding="utf-8") as f:
                 f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
 
         # 3.
@@ -647,7 +646,7 @@ class ChgkParser:
         self.merge_to_x_until_nextfield("nezachet")
 
         if debug:
-            with codecs.open("debug_3.json", "w", "utf8") as f:
+            with open("debug_3.json", "w", encoding="utf-8") as f:
                 f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
 
         # 4.
@@ -660,7 +659,7 @@ class ChgkParser:
             self.merge_to_next(0)
 
         if debug:
-            with codecs.open("debug_3a.json", "w", "utf8") as f:
+            with open("debug_3a.json", "w", encoding="utf-8") as f:
                 f.write(
                     json.dumps(
                         list(enumerate(self.structure)), ensure_ascii=False, indent=4
@@ -718,7 +717,7 @@ class ChgkParser:
             idx += 1
 
         if debug:
-            with codecs.open("debug_4.json", "w", "utf8") as f:
+            with open("debug_4.json", "w", encoding="utf-8") as f:
                 f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
 
         # 5.
@@ -798,7 +797,7 @@ class ChgkParser:
                 )
 
         if debug:
-            with codecs.open("debug_5.json", "w", "utf8") as f:
+            with open("debug_5.json", "w", encoding="utf-8") as f:
                 f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
 
         # 6.
@@ -853,7 +852,7 @@ class ChgkParser:
             final_structure.append(["Question", current_question])
 
         if debug:
-            with codecs.open("debug_6.json", "w", "utf8") as f:
+            with open("debug_6.json", "w", encoding="utf-8") as f:
                 f.write(json.dumps(final_structure, ensure_ascii=False, indent=4))
 
         # 7.
@@ -899,7 +898,7 @@ class ChgkParser:
                 element[1] = self._process_images_in_text(element[1])
 
         if debug:
-            with codecs.open("debug_final.json", "w", "utf8") as f:
+            with open("debug_final.json", "w", encoding="utf-8") as f:
                 f.write(json.dumps(final_structure, ensure_ascii=False, indent=4))
         return final_structure
 
@@ -982,8 +981,8 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
             with open(docxfile, "rb") as docx_file:
                 html = mammoth.convert_to_html(docx_file).value
         if args.debug:
-            with codecs.open(
-                os.path.join(target_dir, "debugdebug.pydocx"), "w", "utf8"
+            with open(
+                os.path.join(target_dir, "debugdebug.pydocx"), "w", encoding="utf-8"
             ) as dbg:
                 dbg.write(html)
         input_docx = (
@@ -994,8 +993,8 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
         bsoup = BeautifulSoup(input_docx, "html.parser")
 
         if args.debug:
-            with codecs.open(
-                os.path.join(target_dir, "debug.pydocx"), "w", "utf8"
+            with open(
+                os.path.join(target_dir, "debug.pydocx"), "w", encoding="utf-8"
             ) as dbg:
                 dbg.write(input_docx)
 
@@ -1096,12 +1095,12 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
                     tag.unwrap()
 
         if args.debug:
-            with codecs.open(
-                os.path.join(target_dir, "debug_raw.html"), "w", "utf8"
+            with open(
+                os.path.join(target_dir, "debug_raw.html"), "w", encoding="utf-8"
             ) as dbg:
                 dbg.write(str(bsoup))
-            with codecs.open(
-                os.path.join(target_dir, "debug.html"), "w", "utf8"
+            with open(
+                os.path.join(target_dir, "debug.html"), "w", encoding="utf-8"
             ) as dbg:
                 dbg.write(bsoup.prettify())
 
@@ -1139,7 +1138,9 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
         txt = txt.replace(f"IMGPATH({i})", elem)
 
     if args.debug:
-        with codecs.open(os.path.join(target_dir, "debug.debug"), "w", "utf8") as dbg:
+        with open(
+            os.path.join(target_dir, "debug.debug"), "w", encoding="utf-8"
+        ) as dbg:
             dbg.write(txt)
 
     final_structure = chgk_parse(txt, defaultauthor=defaultauthor, args=args)
@@ -1173,7 +1174,7 @@ def chgk_parse_wrapper(path, args, logger=None):
         sys.exit()
     outfilename = os.path.join(target_dir, make_filename(abspath, "4s", args))
     logger.info("Output: {}".format(os.path.abspath(outfilename)))
-    with codecs.open(outfilename, "w", "utf8") as output_file:
+    with open(outfilename, "w", encoding="utf-8") as output_file:
         output_file.write(compose_4s(final_structure, args=args))
     return outfilename
 
