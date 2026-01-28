@@ -15,6 +15,7 @@ from chgksuite.common import (
     get_lastdir,
     get_source_dirs,
     log_wrap,
+    read_text_file,
     set_lastdir,
 )
 
@@ -50,9 +51,7 @@ def upload_file(filepath, trello, list_name=None):
             raise Exception(f"list '{list_name}' not found")
     assert lid is not None
     print(f"uploading to list '{list_['name']}'")
-    content = ""
-    with open(filepath, "r", encoding="utf-8") as f:
-        content = f.read()
+    content = read_text_file(filepath)
     cards = re.split(r"(\r?\n){2,}", content)
     cards = [x for x in cards if x != "" and x != "\n" and x != "\r\n"]
     for card in cards:

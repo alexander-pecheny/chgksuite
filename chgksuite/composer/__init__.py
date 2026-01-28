@@ -12,6 +12,7 @@ from chgksuite.common import (
     get_source_dirs,
     init_logger,
     log_wrap,
+    read_text_file,
     set_lastdir,
 )
 from chgksuite.composer.chgksuite_parser import parse_4s
@@ -74,9 +75,7 @@ def process_file_wrapper(filename, sourcedir, targetdir, args):
 
 def parse_filepath(filepath, args=None):
     args = args or DefaultArgs()
-    with open(filepath, "r", encoding="utf-8") as input_file:
-        input_text = input_file.read()
-    input_text = input_text.replace("\r", "")
+    input_text = read_text_file(filepath)
     debug_dir = os.path.dirname(os.path.abspath(filepath))
     return parse_4s(
         input_text, randomize=args.randomize, debug=args.debug, debug_dir=debug_dir
