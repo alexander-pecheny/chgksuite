@@ -896,7 +896,7 @@ class ArgparseBuilder:
             "filename",
             help="file with handouts",
             caption="Имя файла с раздатками",
-            filetypes=[("handouts files", "*.hndts"), ("text files", "*.txt")],
+            filetypes=[("handouts files", "*.hndt"), ("text files", "*.txt")],
         )
         self.add_argument(
             cmdhandouts_run,
@@ -1011,6 +1011,40 @@ class ArgparseBuilder:
             default=2,
             help="tikz_mm width",
             caption="Ширина tikz_mm",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_run,
+            "--hspace",
+            type=float,
+            default=1.5,
+            help="horizontal spacing between boxes (mm)",
+            caption="Горизонтальное расстояние между блоками (мм)",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_run,
+            "--vspace",
+            type=float,
+            default=1.5,
+            help="vertical spacing between boxes (mm)",
+            caption="Вертикальное расстояние между блоками (мм)",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_run,
+            "--outer_hspace",
+            type=float,
+            help="horizontal spacing between team rectangles (mm), defaults to hspace",
+            caption="Горизонтальное расстояние между командными блоками (мм)",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_run,
+            "--outer_vspace",
+            type=float,
+            help="vertical spacing between team rectangles (mm), defaults to vspace",
+            caption="Вертикальное расстояние между командными блоками (мм)",
             advanced=True,
         )
 

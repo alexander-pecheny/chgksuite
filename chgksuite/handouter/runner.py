@@ -29,9 +29,13 @@ from chgksuite.handouter.utils import parse_handouts, read_file, replace_ext, wr
 
 
 class HandoutGenerator:
-    SPACE = 1.5  # mm
-
     def __init__(self, args):
+        # Inner spacing (within teams, between dashed lines)
+        self.inner_hspace = getattr(args, 'hspace', 1.5)
+        self.inner_vspace = getattr(args, 'vspace', 1.5)
+        # Outer spacing (between teams, at solid lines) - defaults to inner
+        self.outer_hspace = getattr(args, 'outer_hspace', None) or self.inner_hspace
+        self.outer_vspace = getattr(args, 'outer_vspace', None) or self.inner_vspace
         self.args = args
         _, resourcedir = get_source_dirs()
         self.labels = toml.loads(
@@ -165,8 +169,12 @@ class HandoutGenerator:
         return valid_layouts[0]
 
     def get_edge_styles(
-        self, row_idx, col_idx, num_rows, columns, team_cols, team_rows
+        self, row_idx, col_idx, num_rows, columns, team_cols, team_rows,
+        inner_hspace=None, inner_vspace=None
     ):
+        # Use provided spacing or fall back to instance defaults
+        inner_hspace = inner_hspace if inner_hspace is not None else self.inner_hspace
+        inner_vspace = inner_vspace if inner_vspace is not None else self.inner_vspace
         """
         Determine edge styles and extensions for a box at position (row_idx, col_idx).
         Outer edges of team rectangles are solid (thicker), inner edges are dashed.
@@ -188,10 +196,6 @@ class HandoutGenerator:
             "left": ("0pt", "0pt"),
             "right": ("0pt", "0pt"),
         }
-
-        # Gap sizes (half of spacing to extend into)
-        h_gap = "0.75mm"  # half of SPACE (1.5mm)
-        v_gap = "0.5mm"  # half of vspace (1mm)
 
         # Helper functions to check if position is at a team boundary
         def is_at_right_team_boundary():
@@ -250,47 +254,62 @@ class HandoutGenerator:
             edges["top"] = EDGE_NONE
 
         # Calculate extensions for solid edges to close gaps
-        # But don't extend into team boundary gaps!
+        # Use inner spacing for gaps within teams, outer spacing for gaps between teams
+        # But don't extend into team boundary gaps (those use outer spacing and stay separate)
 
+        def get_h_gap_left():
+            """Get horizontal gap to the left (for extending into)"""
+            if col_idx == 0:
+                return "0pt"
+            # Check if left neighbor is in different team
+            if is_at_left_team_boundary():
+                return "0pt"  # Don't extend into outer gaps
+            return f"{inner_hspace / 2}mm"
+
+        def get_h_gap_right():
+            """Get horizontal gap to the right (for extending into)"""
+            if col_idx >= columns - 1:
+                return "0pt"
+            # Check if right neighbor is in different team
+            if is_at_right_team_boundary():
+                return "0pt"  # Don't extend into outer gaps
+            return f"{inner_hspace / 2}mm"
+
+        def get_v_gap_top():
+            """Get vertical gap above (for extending into)"""
+            if row_idx == 0:
+                return "0pt"
+            # Check if top neighbor is in different team
+            if is_at_top_team_boundary():
+                return "0pt"  # Don't extend into outer gaps
+            return f"{inner_vspace / 2}mm"
+
+        def get_v_gap_bottom():
+            """Get vertical gap below (for extending into)"""
+            if row_idx >= num_rows - 1:
+                return "0pt"
+            # Check if bottom neighbor is in different team
+            if is_at_bottom_team_boundary():
+                return "0pt"  # Don't extend into outer gaps
+            return f"{inner_vspace / 2}mm"
+
+        # For horizontal lines (top/bottom): extend into gaps to close corners
+        # Only extend where there's actually a gap (clipped at grid edges and team boundaries)
         if edges["top"] == EDGE_SOLID:
-            at_left_boundary = is_at_left_team_boundary()
-            ext_left = "-" + h_gap if col_idx > 0 and not at_left_boundary else "0pt"
-            at_right_boundary = is_at_right_team_boundary()
-            ext_right = (
-                h_gap if col_idx < columns - 1 and not at_right_boundary else "0pt"
-            )
-            ext["top"] = (ext_left, ext_right)
+            h_gap_left = get_h_gap_left()
+            h_gap_right = get_h_gap_right()
+            ext_left = "-" + h_gap_left if h_gap_left != "0pt" else "0pt"
+            ext["top"] = (ext_left, h_gap_right)
 
         if edges["bottom"] == EDGE_SOLID:
-            at_left_boundary = is_at_left_team_boundary()
-            ext_left = "-" + h_gap if col_idx > 0 and not at_left_boundary else "0pt"
-            at_right_boundary = is_at_right_team_boundary()
-            ext_right = (
-                h_gap if col_idx < columns - 1 and not at_right_boundary else "0pt"
-            )
-            ext["bottom"] = (ext_left, ext_right)
+            h_gap_left = get_h_gap_left()
+            h_gap_right = get_h_gap_right()
+            ext_left = "-" + h_gap_left if h_gap_left != "0pt" else "0pt"
+            ext["bottom"] = (ext_left, h_gap_right)
 
-        if edges["left"] == EDGE_SOLID:
-            at_top_boundary = is_at_top_team_boundary()
-            ext_top = v_gap if row_idx > 0 and not at_top_boundary else "0pt"
-            at_bottom_boundary = is_at_bottom_team_boundary()
-            ext_bottom = (
-                "-" + v_gap
-                if row_idx < num_rows - 1 and not at_bottom_boundary
-                else "0pt"
-            )
-            ext["left"] = (ext_top, ext_bottom)
-
-        if edges["right"] == EDGE_SOLID:
-            at_top_boundary = is_at_top_team_boundary()
-            ext_top = v_gap if row_idx > 0 and not at_top_boundary else "0pt"
-            at_bottom_boundary = is_at_bottom_team_boundary()
-            ext_bottom = (
-                "-" + v_gap
-                if row_idx < num_rows - 1 and not at_bottom_boundary
-                else "0pt"
-            )
-            ext["right"] = (ext_top, ext_bottom)
+        # For vertical lines (left/right): NO extensions
+        # Vertical extensions cause uneven perceived row heights
+        # ext["left"] and ext["right"] stay at default (0pt, 0pt)
 
         return edges, ext
 
@@ -303,6 +322,12 @@ class HandoutGenerator:
         handouts_per_team = block.get("handouts_per_team") or 3
         grouping = block.get("grouping") or "horizontal"
 
+        # Block-level spacing overrides (fall back to instance defaults)
+        inner_hspace = block.get("hspace") if block.get("hspace") is not None else self.inner_hspace
+        inner_vspace = block.get("vspace") if block.get("vspace") is not None else self.inner_vspace
+        outer_hspace = block.get("outer_hspace") if block.get("outer_hspace") is not None else (block.get("hspace") if block.get("hspace") is not None else self.outer_hspace)
+        outer_vspace = block.get("outer_vspace") if block.get("outer_vspace") is not None else (block.get("vspace") if block.get("vspace") is not None else self.outer_vspace)
+
         # Determine team rectangle dimensions
         team_cols, team_rows = self.get_cut_direction(
             columns, num_rows, handouts_per_team, grouping
@@ -312,12 +337,22 @@ class HandoutGenerator:
                 f"team_cols: {team_cols}, team_rows: {team_rows}, grouping: {grouping}"
             )
 
-        spaces = columns - 1
+        # Calculate total horizontal spacing
+        # Inner gaps are within teams, outer gaps are between teams
+        if team_cols and team_cols > 0:
+            num_teams_h = columns // team_cols
+            inner_gaps_h = num_teams_h * (team_cols - 1)  # gaps within all teams
+            outer_gaps_h = num_teams_h - 1  # gaps between teams
+        else:
+            inner_gaps_h = columns - 1
+            outer_gaps_h = 0
+        total_hspace = inner_gaps_h * inner_hspace + outer_gaps_h * outer_hspace
+
         boxwidth = self.args.boxwidth or round(
-            (self.get_page_width() - spaces * self.SPACE) / columns,
+            (self.get_page_width() - total_hspace) / columns,
             3,
         )
-        total_width = boxwidth * columns + spaces * self.SPACE
+        total_width = boxwidth * columns + total_hspace
         if self.args.debug:
             print(
                 f"columns: {columns}, boxwidth: {boxwidth}, total width: {total_width}"
@@ -342,21 +377,62 @@ class HandoutGenerator:
         else:
             block["centering"] = "\\centering"
 
+        # Helper to check if there's a team boundary between two adjacent columns
+        def is_team_boundary_h(col_idx):
+            """Is there a team boundary between col_idx and col_idx+1?"""
+            if not team_cols or col_idx >= columns - 1:
+                return False
+            return (col_idx + 1) % team_cols == 0
+
+        # Helper to check if there's a team boundary between two adjacent rows
+        def is_team_boundary_v(row_idx):
+            """Is there a team boundary between row_idx and row_idx+1?"""
+            if not team_rows or row_idx >= num_rows - 1:
+                return False
+            return (row_idx + 1) % team_rows == 0
+
         rows = []
         for row_idx in range(num_rows):
             row_boxes = []
             for col_idx in range(columns):
                 edges, ext = self.get_edge_styles(
-                    row_idx, col_idx, num_rows, columns, team_cols, team_rows
+                    row_idx, col_idx, num_rows, columns, team_cols, team_rows,
+                    inner_hspace, inner_vspace
                 )
                 row_boxes.append(self.make_tikzbox(block, edges, ext))
+
+            # Join boxes with appropriate horizontal spacing
+            # Use outer_hspace at team boundaries, inner_hspace elsewhere
+            row_parts = [row_boxes[0]]
+            for col_idx in range(1, columns):
+                hspace = outer_hspace if is_team_boundary_h(col_idx - 1) else inner_hspace
+                if hspace > 0:
+                    row_parts.append(f"%\n\\hspace{{{hspace}mm}}%\n")
+                else:
+                    row_parts.append("%\n")
+                row_parts.append(row_boxes[col_idx])
+
             row = (
                 TIKZBOX_START.replace("<CENTERING>", block["centering"])
-                + "\n".join(row_boxes)
+                + "\\mbox{%\n"
+                + "".join(row_parts)
+                + "%\n}%"
                 + TIKZBOX_END
             )
             rows.append(row)
-        return "\n".join(header) + "\n" + "\n\n\\vspace{1mm}\n\n".join(rows)
+
+        # Join rows with appropriate vertical spacing
+        # Use outer_vspace at team boundaries, inner_vspace elsewhere
+        row_parts = [rows[0]]
+        for row_idx in range(1, num_rows):
+            vspace = outer_vspace if is_team_boundary_v(row_idx - 1) else inner_vspace
+            if vspace > 0:
+                row_parts.append(f"\n\n\\vspace{{{vspace}mm}}\n\n")
+            else:
+                row_parts.append("\n\n")
+            row_parts.append(rows[row_idx])
+
+        return "\n".join(header) + "\n" + "".join(row_parts)
 
     def generate(self):
         for block in self.parse_input(self.args.filename):
