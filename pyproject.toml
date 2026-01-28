@@ -53,6 +53,9 @@ chgksuite = "chgksuite.__main__:main"
 [tool.hatch.version]
 path = "chgksuite/version.py"
 
+[tool.hatch.build.targets.sdist]
+exclude = [".venv*"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["chgksuite"]
 
