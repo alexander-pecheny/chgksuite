@@ -38,6 +38,7 @@ from chgksuite.common import (
     init_logger,
     load_settings,
     log_wrap,
+    read_text_file,
     set_lastdir,
 )
 from chgksuite.composer import gui_compose
@@ -47,7 +48,7 @@ from chgksuite.typotools import re_url
 from chgksuite.typotools import remove_excessive_whitespace as rew
 
 
-SEP = os.linesep
+SEP = "\n"
 EDITORS = {
     "win32": "notepad",
     "linux2": "xdg-open",  # python2
@@ -916,6 +917,9 @@ class UnknownEncodingException(Exception):
 
 def chgk_parse_txt(txtfile, encoding=None, defaultauthor="", args=None, logger=None):
     raw = open(txtfile, "rb").read()
+    # Fix corrupted line endings at byte level before decoding
+    if b"\r\r\n" in raw:
+        raw = raw.replace(b"\r\r\n", b"\n")
     if not encoding:
         if chardet.detect(raw)["confidence"] > 0.7:
             encoding = chardet.detect(raw)["encoding"]
@@ -926,9 +930,10 @@ def chgk_parse_txt(txtfile, encoding=None, defaultauthor="", args=None, logger=N
                 "or resave with a less exotic encoding".format(txtfile)
             )
     text = raw.decode(encoding)
-    text = text.replace("\r", "")
+    # Normalize any remaining line endings
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
     if text[0:10] == "Чемпионат:":
-        return chgk_parse_db(text.replace("\r", ""), debug=args.debug, logger=logger)
+        return chgk_parse_db(text, debug=args.debug, logger=logger)
     return chgk_parse(text.replace("_", "\\_"), defaultauthor=defaultauthor, args=args)
 
 

@@ -27,7 +27,7 @@ QUESTION_LABELS = [
     "number",
     "setcounter",
 ]
-SEP = os.linesep
+SEP = "\n"
 try:
     ENC = sys.stdout.encoding or "utf8"
 except AttributeError:
@@ -150,6 +150,19 @@ def ensure_utf8(s):
     if isinstance(s, bytes):
         return s.decode("utf8", errors="replace")
     return s
+
+
+def read_text_file(filepath, encoding="utf-8"):
+    """Read a text file, fixing corrupted line endings (\r\r\n -> \n) if present."""
+    with open(filepath, "rb") as f:
+        raw = f.read()
+    # Fix corrupted line endings at byte level before decoding
+    if b"\r\r\n" in raw:
+        raw = raw.replace(b"\r\r\n", b"\n")
+    text = raw.decode(encoding)
+    # Normalize any remaining line endings
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return text
 
 
 class DummyLogger(object):
@@ -370,6 +383,5 @@ def compose_4s(structure, args=None):
                         + SEP
                     )
             tmp = re.sub(r"{}+".format(SEP), SEP, tmp)
-            tmp = tmp.replace("\r\r", "\r")
             result += tmp + SEP
     return result
