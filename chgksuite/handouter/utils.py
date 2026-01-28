@@ -1,5 +1,6 @@
 import os
 
+from chgksuite.common import read_text_file
 from chgksuite.handouter.installer import escape_latex
 
 RESERVED_WORDS = [
@@ -23,9 +24,7 @@ RESERVED_WORDS = [
 
 
 def read_file(filepath):
-    with open(filepath, "r", encoding="utf8") as f:
-        contents = f.read()
-    return contents
+    return read_text_file(filepath)
 
 
 def write_file(filepath, contents):

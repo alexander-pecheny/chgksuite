@@ -18,6 +18,10 @@ from chgksuite.handouter.tex_internals import (
     EDGE_NONE,
     EDGE_SOLID,
     GREYTEXT,
+    GRID_END,
+    GRID_LINE,
+    GRID_NODE,
+    GRID_START,
     HEADER,
     IMG,
     IMGWIDTH,
@@ -313,6 +317,272 @@ class HandoutGenerator:
 
         return edges, ext
 
+    def generate_regular_block_single_tikz(self, block_):
+        """
+        Generate the entire grid as a single TikZ picture.
+        This ensures equal row heights and column widths, with properly connected lines.
+        """
+        block = block_.copy()
+        if not (block.get("image") or block.get("text")):
+            return
+        columns = block["columns"]
+        num_rows = block.get("rows") or 1
+        handouts_per_team = block.get("handouts_per_team") or 3
+        grouping = block.get("grouping") or "horizontal"
+
+        # Block-level spacing overrides (fall back to instance defaults)
+        inner_hspace = block.get("hspace") if block.get("hspace") is not None else self.inner_hspace
+        inner_vspace = block.get("vspace") if block.get("vspace") is not None else self.inner_vspace
+        outer_hspace = block.get("outer_hspace") if block.get("outer_hspace") is not None else (block.get("hspace") if block.get("hspace") is not None else self.outer_hspace)
+        outer_vspace = block.get("outer_vspace") if block.get("outer_vspace") is not None else (block.get("vspace") if block.get("vspace") is not None else self.outer_vspace)
+
+        # Determine team rectangle dimensions
+        team_cols, team_rows = self.get_cut_direction(
+            columns, num_rows, handouts_per_team, grouping
+        )
+        if self.args.debug:
+            print(f"[single-tikz] team_cols: {team_cols}, team_rows: {team_rows}, grouping: {grouping}")
+
+        # Calculate box dimensions
+        if team_cols and team_cols > 0:
+            num_teams_h = columns // team_cols
+            inner_gaps_h = num_teams_h * (team_cols - 1)
+            outer_gaps_h = num_teams_h - 1
+        else:
+            inner_gaps_h = columns - 1
+            outer_gaps_h = 0
+        total_hspace = inner_gaps_h * inner_hspace + outer_gaps_h * outer_hspace
+
+        boxwidth = self.args.boxwidth or round(
+            (self.get_page_width() - total_hspace) / columns, 3
+        )
+        boxwidthinner = self.args.boxwidthinner or (boxwidth - 2 * self.args.tikz_mm)
+
+        # Calculate vertical spacing totals
+        if team_rows and team_rows > 0:
+            num_teams_v = num_rows // team_rows
+            inner_gaps_v = num_teams_v * (team_rows - 1)
+            outer_gaps_v = num_teams_v - 1
+        else:
+            inner_gaps_v = num_rows - 1
+            outer_gaps_v = 0
+
+        if self.args.debug:
+            print(f"[single-tikz] boxwidth: {boxwidth}, inner_gaps_h: {inner_gaps_h}, outer_gaps_h: {outer_gaps_h}")
+
+        # Prepare content
+        contents = []
+        if block.get("image"):
+            img_qwidth = block.get("resize_image") or 1.0
+            imgwidth = IMGWIDTH.replace("<QWIDTH>", str(img_qwidth))
+            contents.append(
+                IMG.replace("<IMGPATH>", block["image"]).replace("<IMGWIDTH>", imgwidth)
+            )
+        if block.get("text"):
+            contents.append(block["text"])
+        content_str = "\\linebreak\n".join(contents)
+
+        fs = block.get("font_size") or self.args.font_size
+        fontsize = "\\fontsize{FSpt}{LHpt}\\selectfont ".replace("FS", str(fs)).replace(
+            "LH", str(round(fs * 1.2, 1))
+        )
+        if block.get("font_family"):
+            content_str = "\\fontspec{" + block["font_family"] + "}" + content_str
+
+        align = "" if block.get("no_center") else ", align=center"
+
+        # Start the TikZ picture
+        result = [
+            GRID_START
+            .replace("<TIKZ_MM>", str(self.args.tikz_mm))
+            .replace("<BOXWIDTH>", str(boxwidth))
+            .replace("<BOXWIDTHINNER>", str(boxwidthinner))
+            .replace("<ALIGN>", align)
+        ]
+
+        # Helper functions
+        def is_team_boundary_h(col_idx):
+            """Is there a team boundary between col_idx and col_idx+1?"""
+            if not team_cols or col_idx >= columns - 1:
+                return False
+            return (col_idx + 1) % team_cols == 0
+
+        def is_team_boundary_v(row_idx):
+            """Is there a team boundary between row_idx and row_idx+1?"""
+            if not team_rows or row_idx >= num_rows - 1:
+                return False
+            return (row_idx + 1) % team_rows == 0
+
+        # Calculate x positions for each column
+        x_positions = [0]
+        for col_idx in range(1, columns):
+            prev_x = x_positions[-1]
+            gap = outer_hspace if is_team_boundary_h(col_idx - 1) else inner_hspace
+            x_positions.append(prev_x + boxwidth + gap)
+
+        # We'll use a uniform box height for all cells
+        # TikZ will expand to fit content, but we need to draw lines at fixed positions
+        # We'll let TikZ measure the actual height by using a savebox
+        # For now, use a placeholder height that we'll measure
+
+        # Actually, for uniform height we need to pre-calculate or use a fixed height
+        # Let's use TikZ's matrix or manual positioning with a fixed row height
+
+        # Calculate y positions (top-to-bottom, so y decreases)
+        # We need to estimate row height - let's use font size as basis
+        # A typical row height is about 3x font size for handouts
+        estimated_row_height = fs * 0.5 + 2 * self.args.tikz_mm + 4  # rough estimate in mm
+
+        y_positions = [0]
+        for row_idx in range(1, num_rows):
+            prev_y = y_positions[-1]
+            gap = outer_vspace if is_team_boundary_v(row_idx - 1) else inner_vspace
+            y_positions.append(prev_y - estimated_row_height - gap)
+
+        total_width = x_positions[-1] + boxwidth
+        total_height = abs(y_positions[-1]) + estimated_row_height
+
+        # Draw all content nodes
+        for row_idx in range(num_rows):
+            for col_idx in range(columns):
+                x = x_positions[col_idx]
+                y = y_positions[row_idx]
+                node = (
+                    GRID_NODE
+                    .replace("<X>", str(round(x, 3)))
+                    .replace("<Y>", str(round(y, 3)))
+                    .replace("<FONTSIZE>", fontsize)
+                    .replace("<CONTENTS>", content_str)
+                )
+                result.append(node)
+
+        # Draw all lines
+        # Horizontal lines: at top and bottom of each row
+        # Vertical lines: at left and right of each column
+
+        def get_line_style(is_solid):
+            return "solid line" if is_solid else "dashed line"
+
+        # Calculate bottom of grid
+        grid_bottom = y_positions[-1] - estimated_row_height
+
+        # Draw horizontal lines
+        for row_idx in range(num_rows + 1):
+            if row_idx == 0:
+                # Top edge of grid
+                y = 0
+                is_solid = True
+            elif row_idx == num_rows:
+                # Bottom edge of grid
+                y = grid_bottom
+                is_solid = True
+            else:
+                # Line between rows
+                # y_positions[row_idx] is top of row row_idx
+                # The gap is between bottom of row_idx-1 and top of row_idx
+                gap = outer_vspace if is_team_boundary_v(row_idx - 1) else inner_vspace
+                is_solid = is_team_boundary_v(row_idx - 1)
+                if is_solid and gap > 0:
+                    # Team boundary with gap: draw TWO lines at the box edges
+                    # to make the gap visible as white space between them
+                    y_top = y_positions[row_idx] + gap  # bottom edge of previous row
+                    y_bottom = y_positions[row_idx]  # top edge of this row
+                    # Draw bottom edge of previous team
+                    line_top = (
+                        GRID_LINE
+                        .replace("<STYLE>", "solid line")
+                        .replace("<X1>", "0")
+                        .replace("<Y1>", str(round(y_top, 3)))
+                        .replace("<X2>", str(round(total_width, 3)))
+                        .replace("<Y2>", str(round(y_top, 3)))
+                    )
+                    result.append(line_top)
+                    # Draw top edge of this team
+                    line_bottom = (
+                        GRID_LINE
+                        .replace("<STYLE>", "solid line")
+                        .replace("<X1>", "0")
+                        .replace("<Y1>", str(round(y_bottom, 3)))
+                        .replace("<X2>", str(round(total_width, 3)))
+                        .replace("<Y2>", str(round(y_bottom, 3)))
+                    )
+                    result.append(line_bottom)
+                    continue  # Skip the default single line drawing
+                else:
+                    # Non-team boundary or zero gap: single line at center of gap
+                    y = y_positions[row_idx] + gap / 2
+
+            style = "solid line" if is_solid else "dashed line"
+            line = (
+                GRID_LINE
+                .replace("<STYLE>", style)
+                .replace("<X1>", "0")
+                .replace("<Y1>", str(round(y, 3)))
+                .replace("<X2>", str(round(total_width, 3)))
+                .replace("<Y2>", str(round(y, 3)))
+            )
+            result.append(line)
+
+        # Draw vertical lines
+        for col_idx in range(columns + 1):
+            if col_idx == 0:
+                # Left edge of grid
+                x = 0
+                is_solid = True
+            elif col_idx == columns:
+                # Right edge of grid
+                x = total_width
+                is_solid = True
+            else:
+                # Line between columns
+                # x_positions[col_idx] is left edge of column col_idx
+                # The gap is between right of col_idx-1 and left of col_idx
+                gap = outer_hspace if is_team_boundary_h(col_idx - 1) else inner_hspace
+                is_solid = is_team_boundary_h(col_idx - 1)
+                if is_solid and gap > 0:
+                    # Team boundary with gap: draw TWO lines at the box edges
+                    # to make the gap visible as white space between them
+                    x_left = x_positions[col_idx] - gap  # right edge of previous column
+                    x_right = x_positions[col_idx]  # left edge of this column
+                    # Draw right edge of previous team
+                    line_left = (
+                        GRID_LINE
+                        .replace("<STYLE>", "solid line")
+                        .replace("<X1>", str(round(x_left, 3)))
+                        .replace("<Y1>", "0")
+                        .replace("<X2>", str(round(x_left, 3)))
+                        .replace("<Y2>", str(round(grid_bottom, 3)))
+                    )
+                    result.append(line_left)
+                    # Draw left edge of this team
+                    line_right = (
+                        GRID_LINE
+                        .replace("<STYLE>", "solid line")
+                        .replace("<X1>", str(round(x_right, 3)))
+                        .replace("<Y1>", "0")
+                        .replace("<X2>", str(round(x_right, 3)))
+                        .replace("<Y2>", str(round(grid_bottom, 3)))
+                    )
+                    result.append(line_right)
+                    continue  # Skip the default single line drawing
+                else:
+                    # Non-team boundary or zero gap: single line at center of gap
+                    x = x_positions[col_idx] - gap / 2
+
+            style = "solid line" if is_solid else "dashed line"
+            line = (
+                GRID_LINE
+                .replace("<STYLE>", style)
+                .replace("<X1>", str(round(x, 3)))
+                .replace("<Y1>", "0")
+                .replace("<X2>", str(round(x, 3)))
+                .replace("<Y2>", str(round(grid_bottom, 3)))
+            )
+            result.append(line)
+
+        result.append(GRID_END)
+        return "\n".join(result)
+
     def generate_regular_block(self, block_):
         block = block_.copy()
         if not (block.get("image") or block.get("text")):
@@ -444,7 +714,8 @@ class HandoutGenerator:
             if block.get("for_question"):
                 self.blocks.append(self.generate_for_question(block["for_question"]))
             if block.get("columns"):
-                block = self.generate_regular_block(block)
+                # Use single-tikz approach for grids
+                block = self.generate_regular_block_single_tikz(block)
                 if block:
                     self.blocks.append(block)
         self.blocks.append("\\end{document}")

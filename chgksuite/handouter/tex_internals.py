@@ -34,6 +34,22 @@ TIKZBOX_INNER = r"""
 \end{tikzpicture}
 """.strip()
 
+# Single TikZ picture grid template - all boxes in one coordinate system
+GRID_START = r"""\begin{tikzpicture}[
+  box/.style={rectangle, inner sep=<TIKZ_MM>mm, minimum width=<BOXWIDTH>mm, text width=<BOXWIDTHINNER>mm<ALIGN>},
+  solid line/.style={line width=0.8pt},
+  dashed line/.style={dashed}
+]
+"""
+
+GRID_NODE = r"""\node[box, anchor=north west] at (<X>mm, <Y>mm) {<FONTSIZE><CONTENTS>\par};
+"""
+
+GRID_LINE = r"""\draw[<STYLE>] (<X1>mm, <Y1>mm) -- (<X2>mm, <Y2>mm);
+"""
+
+GRID_END = r"""\end{tikzpicture}"""
+
 # Line styles for box edges
 EDGE_SOLID = "line width=0.8pt"
 EDGE_DASHED = "dashed"
