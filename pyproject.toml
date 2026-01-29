@@ -54,7 +54,11 @@ chgksuite = "chgksuite.__main__:main"
 path = "chgksuite/version.py"
 
 [tool.hatch.build.targets.sdist]
-exclude = [".venv*"]
+include = [
+    "chgksuite/**/*",
+    "/LICENSE",
+    "/README.md",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["chgksuite"]
