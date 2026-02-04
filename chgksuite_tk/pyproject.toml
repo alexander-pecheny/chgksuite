@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chgksuite_tk"
+dynamic = ["version"]
+authors = [
+    {name = "Alexander Pecheny", email = "ap@pecheny.me"}
+]
+description = "A GUI wrapper for chgksuite using tkinter"
+readme = {text = "**chgksuite-tk** is a GUI wrapper around https://gitlab.com/peczony/chgksuite", content-type = "text/markdown"}
+requires-python = ">=3.9"
+license = "MIT"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "chgksuite",
+]
+
+[project.urls]
+Homepage = "https://gitlab.com/peczony/chgksuite_tk"
+
+[project.scripts]
+chgkt = "chgksuite_tk.__main__:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "chgksuite_tk.version.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["chgksuite_tk"]
