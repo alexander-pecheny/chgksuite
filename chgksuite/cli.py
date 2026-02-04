@@ -12,6 +12,7 @@ from chgksuite.common import (
     load_settings,
 )
 from chgksuite.composer import gui_compose
+from chgksuite.composer.telegram import get_saved_telegram_targets
 from chgksuite.handouter.runner import gui_handouter
 from chgksuite.parser import gui_parse
 from chgksuite.trello import gui_trello
@@ -34,7 +35,14 @@ class ArgparseBuilder:
         if self.use_wrapper:
             return getattr(parser, func)(*args, **kwargs)
         else:
-            for k in ("caption", "advanced", "argtype", "hide", "filetypes"):
+            for k in (
+                "caption",
+                "advanced",
+                "argtype",
+                "hide",
+                "filetypes",
+                "combobox_values",
+            ):
                 try:
                     kwargs.pop(k)
                 except KeyError:
@@ -654,12 +662,15 @@ class ArgparseBuilder:
             help="a made-up string designating account to use.",
             caption="Аккаунт для постинга",
         )
+        saved_targets = get_saved_telegram_targets()
         self.add_argument(
             cmdcompose_telegram,
             "--tgchannel",
             required=True,
             help="a channel to post questions to.",
             caption="Название канала, в который постим",
+            argtype="combobox",
+            combobox_values=saved_targets,
         )
         self.add_argument(
             cmdcompose_telegram,
@@ -667,6 +678,8 @@ class ArgparseBuilder:
             required=True,
             help="a chat connected to the channel.",
             caption="Название чата, привязанного к каналу",
+            argtype="combobox",
+            combobox_values=saved_targets,
         )
         self.add_argument(
             cmdcompose_telegram,

@@ -38,7 +38,6 @@ from chgksuite.common import (
     init_logger,
     load_settings,
     log_wrap,
-    read_text_file,
     set_lastdir,
 )
 from chgksuite.composer import gui_compose

@@ -17,6 +17,28 @@ from chgksuite.composer.composer_common import BaseExporter, parseimg
 from chgksuite.composer.telegram_bot import run_bot_in_thread
 
 
+def get_saved_telegram_targets():
+    """
+    Load all saved channel/chat usernames from resolve.db.
+    Returns a list of usernames that have been previously used.
+    """
+    chgksuite_dir = get_chgksuite_dir()
+    resolve_db_path = os.path.join(chgksuite_dir, "resolve.db")
+
+    if not os.path.exists(resolve_db_path):
+        return []
+
+    try:
+        conn = sqlite3.connect(resolve_db_path)
+        cursor = conn.cursor()
+        cursor.execute("SELECT username FROM resolve ORDER BY username")
+        results = cursor.fetchall()
+        conn.close()
+        return [row[0] for row in results]
+    except Exception:
+        return []
+
+
 def get_text(msg_data):
     if "message" in msg_data and "text" in msg_data["message"]:
         return msg_data["message"]["text"]
@@ -44,19 +66,14 @@ class TelegramExporter(BaseExporter):
         self.chat_id = None  # Discussion group ID linked to the channel
         self.auth_uuid = uuid.uuid4().hex[:8]
         self.chat_auth_uuid = uuid.uuid4().hex[:8]
+        self.session = requests.Session()
         self.init_telegram()
 
     def check_connectivity(self):
-        req_me = requests.get(f"https://api.telegram.org/bot{self.bot_token}/getMe")
-        if req_me.status_code != 200:
-            raise Exception(
-                f"getMe request wasn't successful: {req_me.status_code} {req_me.text}"
-            )
-        obj = req_me.json()
-        assert obj["ok"]
+        result = self.send_api_request("getMe")
         if self.args.debug:
-            print(f"connection successful! {obj}")
-        self.bot_id = obj["result"]["id"]
+            print(f"connection successful! {result}")
+        self.bot_id = result["id"]
 
     def init_temp_db(self):
         self.db_conn = sqlite3.connect(self.temp_db_path)
@@ -102,8 +119,6 @@ class TelegramExporter(BaseExporter):
             ).fetchall()
             if messages and json.loads(messages[0][0])["status"] == "ok":
                 break
-        # Request user authentication
-        self.authenticate_user()
 
     def authenticate_user(self):
         print("\n" + "=" * 50)
@@ -208,32 +223,46 @@ class TelegramExporter(BaseExporter):
     def send_api_request(self, method, data=None, files=None):
         """Send a request to the Telegram Bot API."""
         url = f"https://api.telegram.org/bot{self.bot_token}/{method}"
+        retry_delay = 10  # Start with 10 seconds
+        max_retry_delay = 120  # Cap at 2 minutes
 
-        try:
-            if files:
-                response = requests.post(url, data=data, files=files, timeout=60)
-            else:
-                response = requests.post(url, json=data, timeout=30)
+        while True:
+            try:
+                if files:
+                    response = self.session.post(
+                        url, data=data, files=files, timeout=60
+                    )
+                else:
+                    response = self.session.post(url, json=data, timeout=30)
 
-            response_data = response.json()
+                response_data = response.json()
 
-            if not response_data.get("ok"):
-                error_message = response_data.get("description", "Unknown error")
-                self.logger.error(f"Telegram API error: {error_message}")
+                if not response_data.get("ok"):
+                    error_message = response_data.get("description", "Unknown error")
+                    self.logger.error(f"Telegram API error: {error_message}")
 
-                # Handle rate limiting
-                if "retry_after" in response_data:
-                    retry_after = response_data["retry_after"]
-                    self.logger.info(f"Rate limited. Waiting for {retry_after} seconds")
-                    time.sleep(retry_after + 1)
-                    return self.send_api_request(method, data, files)
+                    # Handle rate limiting
+                    if "retry_after" in response_data:
+                        retry_after = response_data["retry_after"]
+                        self.logger.info(
+                            f"Rate limited. Waiting for {retry_after} seconds"
+                        )
+                        time.sleep(retry_after + 1)
+                        return self.send_api_request(method, data, files)
 
-                raise Exception(f"Telegram API error: {error_message}")
+                    raise Exception(f"Telegram API error: {error_message}")
 
-            return response_data["result"]
-        except requests.exceptions.RequestException as e:
-            self.logger.error(f"Request error: {e}")
-            raise
+                return response_data["result"]
+            except requests.exceptions.RequestException as e:
+                if "Connection reset by peer" in str(e):
+                    self.logger.warning(
+                        f"Connection reset by peer. Retrying in {retry_delay} seconds..."
+                    )
+                    time.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, max_retry_delay)
+                    continue
+                self.logger.error(f"Request error: {e}")
+                raise
 
     def get_message_link(self, chat_id, message_id, username=None):
         """Generate a link to a Telegram message."""
@@ -851,66 +880,82 @@ class TelegramExporter(BaseExporter):
         channel_result = self.extract_id_from_link(self.args.tgchannel)
         chat_result = self.extract_id_from_link(self.args.tgchat)
 
-        # Handle channel resolution
+        # First, try to resolve both IDs without user interaction
+        channel_id = None
+        chat_id = None
+        needs_channel_interaction = False
+        needs_chat_interaction = False
+
         if isinstance(channel_result, int):
             channel_id = channel_result
         elif isinstance(channel_result, str):
             channel_id = self.resolve_username_to_id(channel_result)
             if not channel_id:
-                print("\n" + "=" * 50)
-                print("Please forward any message from the target channel to the bot.")
-                print("This will allow me to extract the channel ID automatically.")
-                print("=" * 50 + "\n")
-
-                # Wait for a forwarded message with channel information
-                channel_id = self.wait_for_forwarded_message(
-                    entity_type="channel", check_type=True
-                )
-                if channel_id:
-                    self.save_username(channel_result, channel_id)
-                else:
-                    raise Exception("Failed to get channel ID from forwarded message")
+                needs_channel_interaction = True
         else:
             raise Exception("Channel ID is undefined")
 
-        # Handle chat resolution
         if isinstance(chat_result, int):
             chat_id = chat_result
         elif isinstance(chat_result, str):
             chat_id = self.resolve_username_to_id(chat_result)
             if not chat_id:
-                print("\n" + "=" * 50)
-                print(
-                    f"Please write a message in the discussion group with text: {self.chat_auth_uuid}"
-                )
-                print("This will allow me to extract the group ID automatically.")
-                print(
-                    "The bot MUST be added do the group and made admin, else it won't work!"
-                )
-                print("=" * 50 + "\n")
-
-                # Wait for a forwarded message with chat information
-                chat_id = self.wait_for_forwarded_message(
-                    entity_type="chat", check_type=False
-                )
-                if not chat_id:
-                    self.logger.error("Failed to get chat ID from forwarded message")
-                    return False
-                while chat_id == channel_id:
-                    error_msg = (
-                        "Chat ID and channel ID are the same. The problem may be that "
-                        "you posted a message in the channel, not in the discussion group."
-                    )
-                    self.logger.error(error_msg)
-                    chat_id = self.wait_for_forwarded_message(
-                        entity_type="chat",
-                        check_type=False,
-                        add_msg=error_msg,
-                    )
-                if chat_id:
-                    self.save_username(chat_result, chat_id)
+                needs_chat_interaction = True
         else:
             raise Exception("Chat ID is undefined")
+
+        # Only authenticate if we need user interaction
+        if needs_channel_interaction or needs_chat_interaction:
+            self.authenticate_user()
+
+        # Handle channel resolution with user interaction if needed
+        if needs_channel_interaction:
+            print("\n" + "=" * 50)
+            print("Please forward any message from the target channel to the bot.")
+            print("This will allow me to extract the channel ID automatically.")
+            print("=" * 50 + "\n")
+
+            # Wait for a forwarded message with channel information
+            channel_id = self.wait_for_forwarded_message(
+                entity_type="channel", check_type=True
+            )
+            if channel_id:
+                self.save_username(channel_result, channel_id)
+            else:
+                raise Exception("Failed to get channel ID from forwarded message")
+
+        # Handle chat resolution with user interaction if needed
+        if needs_chat_interaction:
+            print("\n" + "=" * 50)
+            print(
+                f"Please write a message in the discussion group with text: {self.chat_auth_uuid}"
+            )
+            print("This will allow me to extract the group ID automatically.")
+            print(
+                "The bot MUST be added do the group and made admin, else it won't work!"
+            )
+            print("=" * 50 + "\n")
+
+            # Wait for a forwarded message with chat information
+            chat_id = self.wait_for_forwarded_message(
+                entity_type="chat", check_type=False
+            )
+            if not chat_id:
+                self.logger.error("Failed to get chat ID from forwarded message")
+                return False
+            while chat_id == channel_id:
+                error_msg = (
+                    "Chat ID and channel ID are the same. The problem may be that "
+                    "you posted a message in the channel, not in the discussion group."
+                )
+                self.logger.error(error_msg)
+                chat_id = self.wait_for_forwarded_message(
+                    entity_type="chat",
+                    check_type=False,
+                    add_msg=error_msg,
+                )
+            if chat_id:
+                self.save_username(chat_result, chat_id)
 
         if not channel_id:
             raise Exception("Channel ID is undefined")
@@ -1234,14 +1279,15 @@ class TelegramExporter(BaseExporter):
             return None
 
     def verify_access(self, telegram_id, hr_type=None):
-        url = f"https://api.telegram.org/bot{self.bot_token}/getChatAdministrators"
         if not str(telegram_id).startswith("-100"):
             telegram_id = f"-100{telegram_id}"
-        req = requests.post(url, data={"chat_id": telegram_id})
-        if self.args.debug:
-            print(req.status_code, req.text)
-        if req.status_code != 200:
-            raise Exception(f"Bot isn't added to {hr_type}")
-        obj = req.json()
-        admin_ids = {x["user"]["id"] for x in obj["result"]}
-        return self.bot_id in admin_ids
+        try:
+            result = self.send_api_request(
+                "getChatAdministrators", {"chat_id": telegram_id}
+            )
+            if self.args.debug:
+                print(f"getChatAdministrators result: {result}")
+            admin_ids = {x["user"]["id"] for x in result}
+            return self.bot_id in admin_ids
+        except Exception as e:
+            raise Exception(f"Bot isn't added to {hr_type}: {e}")
