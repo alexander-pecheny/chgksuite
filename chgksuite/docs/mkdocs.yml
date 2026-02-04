@@ -1,0 +1,35 @@
+site_name: chgksuite
+site_url: https://peczony.gitlab.io/chgksuite
+site_dir: public
+nav:
+  - "index.md"
+  - "4s.md"
+  - "word.md"
+  - "lj.md"
+  - "base.md"
+  - "pptx.md"
+  - "telegram.md"
+  - "openquiz.md"
+  - "add_stats.md"
+  - "trello.md"
+  - "i14n.md"
+theme:
+  name: material
+  language: ru
+  # features:
+  #   - navigation.instant
+  #   - navigation.tracking
+  #   - navigation.tabs
+  #   - navigation.tabs.sticky
+  font:
+    text: Open Sans
+    mono: Source Code Pro
+  palette:
+    scheme: default
+extra_css:
+  - stylesheets/extra.css
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - attr_list

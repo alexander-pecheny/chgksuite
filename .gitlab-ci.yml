@@ -6,10 +6,10 @@ before_script:
 pages:
   stage: deploy
   script:
-  - cd docs
+  - cd chgksuite/docs
   - zensical build
-  - mv public ../public
-  - cd ..
+  - mv public ../../public
+  - cd ../..
   artifacts:
     paths:
     - public

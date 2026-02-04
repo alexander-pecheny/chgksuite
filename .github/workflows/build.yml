@@ -77,8 +77,8 @@ jobs:
 
           # Fallback to reading from version.py if no tag
           if [ -z "$VERSION" ] || [[ ! "$VERSION" =~ ^[0-9] ]]; then
-            VERSION=$(grep -oP '__version__\s*=\s*"\K[^"]+' chgksuite/version.py 2>/dev/null || \
-                      grep -o '__version__\s*=\s*"[^"]*"' chgksuite/version.py | cut -d'"' -f2 || \
+            VERSION=$(grep -oP '__version__\s*=\s*"\K[^"]+' chgksuite/chgksuite/version.py 2>/dev/null || \
+                      grep -o '__version__\s*=\s*"[^"]*"' chgksuite/chgksuite/version.py | cut -d'"' -f2 || \
                       echo "0.0.0")
           fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
