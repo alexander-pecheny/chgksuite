@@ -273,11 +273,36 @@ jobs:
       - name: List artifacts
         run: ls -la artifacts/
 
+      - name: Checkout (for tag message)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Get tag message
+        id: tag_message
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          # Get annotated tag message; fall back to auto-generated notes if lightweight tag
+          MSG=$(git tag -l --format='%(contents)' "$TAG" 2>/dev/null || true)
+          if [ -z "$MSG" ]; then
+            echo "body=" >> $GITHUB_OUTPUT
+            echo "use_auto=true" >> $GITHUB_OUTPUT
+          else
+            {
+              echo "body<<TAGMSG_EOF"
+              echo "$MSG"
+              echo "TAGMSG_EOF"
+            } >> $GITHUB_OUTPUT
+            echo "use_auto=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           files: artifacts/*
-          generate_release_notes: true
+          body: ${{ steps.tag_message.outputs.body }}
+          generate_release_notes: ${{ steps.tag_message.outputs.use_auto == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

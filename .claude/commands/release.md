@@ -34,9 +34,9 @@ For each project with changes, show:
    - Tk: `chgksuite_tk/chgksuite_tk/version.py`
 4. The latest PyPI version for each project being released:
    ```
-   pip index versions chgksuite
-   pip index versions chgksuite-qt
-   pip index versions chgksuite-tk
+   curl -s "https://pypi.org/pypi/chgksuite/json" | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['version'])"
+   curl -s "https://pypi.org/pypi/chgksuite-qt/json" | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['version'])"
+   curl -s "https://pypi.org/pypi/chgksuite-tk/json" | python3 -c "import sys,json; print(json.load(sys.stdin)['info']['version'])"
    ```
 
 Present all of this to the user and proceed to step 3.
@@ -79,15 +79,25 @@ Wait for the user to provide this information before continuing.
    git push
    ```
 
-2. Create git tags using `glab`. Tag naming conventions:
+2. Create git tags. Tag naming conventions:
    - Core (`chgksuite`): `v{version}` (e.g. `v0.29.0`)
    - Qt (`chgksuite_qt`): `qt-v{version}` (e.g. `qt-v0.0.8`)
    - Tk (`chgksuite_tk`): `tk-v{version}` (e.g. `tk-v0.0.6`)
 
-   Create and push each tag:
+   The **core tag must be annotated** with the release notes (this is how release notes propagate to GitHub via the CI workflow):
    ```
-   git tag <tag-name>
-   git push origin <tag-name>
+   git tag -a v{version} -m "<release notes>"
+   ```
+
+   Qt and Tk tags can be lightweight:
+   ```
+   git tag qt-v{version}
+   git tag tk-v{version}
+   ```
+
+   Push all tags:
+   ```
+   git push origin v{version} qt-v{version} tk-v{version}
    ```
 
 3. Create a GitLab release **only for chgksuite core** using the release notes:
