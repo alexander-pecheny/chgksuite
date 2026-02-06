@@ -124,7 +124,7 @@ def search_for_imgfile(imgfile, tmp_dir, targetdir):
     if os.path.isfile(imgfile):
         return imgfile
     for dirname in [tmp_dir, targetdir]:
-        if not os.path.isdir(dirname):
+        if dirname is None or not os.path.isdir(dirname):
             continue
         imgfile2 = os.path.join(dirname, os.path.basename(imgfile))
         if os.path.isfile(imgfile2):
