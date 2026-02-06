@@ -69,6 +69,7 @@ def generate_handouts(args):
 
     cnt = read_file(args.filename)
     parsed = parse_4s(cnt)
+    targetdir = os.path.dirname(os.path.abspath(args.filename))
 
     questions = [q[1] for q in parsed if q[0] == "Question"]
     handouts = []
@@ -85,7 +86,7 @@ def generate_handouts(args):
             img = [el for el in elems if el[0] == "img"]
             if img:
                 try:
-                    parsed_img = parseimg(img[0][1])
+                    parsed_img = parseimg(img[0][1], targetdir=targetdir)
                 except Exception as e:
                     print(
                         f"Image file for question {q['number']} not found, add it by hand (exception {type(e)} {e})"
@@ -122,7 +123,7 @@ def generate_handouts(args):
         ) + f"columns: 3\n\n{prefix}{value}"
         result.append(formatted)
         result_by_question[handout["for_question"]].append(formatted)
-    output_dir = os.path.dirname(os.path.abspath(args.filename))
+    output_dir = targetdir
     bn, _ = os.path.splitext(os.path.basename(args.filename))
 
     if args.separate:
