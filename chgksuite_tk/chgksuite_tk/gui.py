@@ -215,7 +215,10 @@ class ParserWrapper(object):
             else:
                 result.append(to_append)
                 result_to_print.append(to_append)
-        print("Command line call: {}".format(shlex.join(result_to_print)))
+        self.cmdline_call_display = "Command line call: {}".format(
+            shlex.join(result_to_print)
+        )
+        print(self.cmdline_call_display)
         return result
 
     def ok_button_press(self):
@@ -231,6 +234,7 @@ class ParserWrapper(object):
 
         # Capture stdout/stderr in a thread
         self.output_buffer = io.StringIO()
+        self.output_buffer.write(self.cmdline_call_display + "\n")
         self.worker_done = False
 
         # Create input requester for GUI input dialogs
