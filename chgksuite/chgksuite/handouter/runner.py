@@ -9,7 +9,7 @@ import toml
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-from chgksuite.common import get_source_dirs
+from chgksuite.common import get_source_dirs, set_lastdir
 from chgksuite.handouter.gen import generate_handouts
 from chgksuite.handouter.pack import pack_handouts
 from chgksuite.handouter.installer import get_tectonic_path, install_tectonic
@@ -463,6 +463,8 @@ def run_handouter(args):
 
 
 def gui_handouter(args):
+    if hasattr(args, "filename") and args.filename:
+        set_lastdir(os.path.dirname(os.path.abspath(args.filename)))
     if args.handoutssubcommand == "run":
         run_handouter(args)
     elif args.handoutssubcommand == "generate":
