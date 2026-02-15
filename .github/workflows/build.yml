@@ -264,27 +264,15 @@ jobs:
       contents: write
 
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - name: List artifacts
-        run: ls -la artifacts/
-
-      - name: Checkout (for tag message)
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-
       - name: Get tag message
         id: tag_message
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ inputs.tag || github.ref_name }}"
-          # Get annotated tag message; fall back to auto-generated notes if lightweight tag
-          MSG=$(git tag -l --format='%(contents)' "$TAG" 2>/dev/null || true)
+          # Get annotated tag message via API (git checkout mangles tag objects)
+          MSG=$(gh api repos/${{ github.repository }}/git/refs/tags/"$TAG" --jq '.object.sha' \
+            | xargs -I{} gh api repos/${{ github.repository }}/git/tags/{} --jq '.message' 2>/dev/null || true)
           if [ -z "$MSG" ]; then
             echo "body=" >> $GITHUB_OUTPUT
             echo "use_auto=true" >> $GITHUB_OUTPUT
@@ -296,6 +284,15 @@ jobs:
             } >> $GITHUB_OUTPUT
             echo "use_auto=false" >> $GITHUB_OUTPUT
           fi
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts/
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
