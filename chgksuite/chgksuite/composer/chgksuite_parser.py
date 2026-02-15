@@ -231,7 +231,7 @@ def parse_4s(s, randomize=False, debug=False, logger=None, debug_dir=None):
             )
 
     if randomize:
-        random.shuffle(final_structure, lambda: 0.3)
+        random.shuffle(final_structure)
         i = 1
         for element in final_structure:
             if element[0] == "Question":
