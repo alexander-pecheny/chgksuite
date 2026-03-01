@@ -754,12 +754,19 @@ class ChgkParser:
                     else:
                         break
                 if len(list_candidate) > 1:
-                    if element[0] != "question" or (
+                    positions = [x[2] for x in list_candidate]
+                    positions_monotonic = all(
+                        positions[i] < positions[i + 1]
+                        for i in range(len(positions) - 1)
+                    )
+                    if not positions_monotonic:
+                        pass  # false positive: a duplicate number matched at wrong position
+                    elif element[0] != "question" or (
                         element[0] == "question"
                         and "дуплет" in element[1].lower()
                         or "блиц" in element[1].lower()
                     ):
-                        part = partition(element[1], [x[2] for x in list_candidate])
+                        part = partition(element[1], positions)
                         lc = 0
                         while lc < len(list_candidate):
                             part[lc + 1] = part[lc + 1].replace(
