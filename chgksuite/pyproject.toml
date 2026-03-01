@@ -25,7 +25,7 @@ classifiers = [
 ]
 dependencies = [
     "beautifulsoup4",
-    "chardet",
+    "chardet==5.2.0",
     "dateparser",
     "mammoth",
     "openpyxl",
@@ -68,4 +68,9 @@ dev = [
     "ipython>=8.18.1",
     "pytest>=8.4.2",
     "ruff>=0.14.10",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "tex",
 ]
