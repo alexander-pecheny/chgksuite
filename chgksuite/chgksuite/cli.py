@@ -715,6 +715,22 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdcompose_telegram,
+            "--add_polls",
+            advanced=True,
+            action="store_true",
+            help="add polls after questions/tours/packet.",
+            caption="Добавлять опросы после вопросов/туров/пакета",
+        )
+        self.add_argument(
+            cmdcompose_telegram,
+            "--poll_config",
+            help="path to poll config TOML file.",
+            caption="Файл конфигурации опросов",
+            argtype="filename",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdcompose_telegram,
             "--nospoilers",
             "-n",
             action="store_true",
@@ -1128,6 +1144,8 @@ def single_action(args, use_wrapper, resourcedir):
         args.pptx_config = os.path.join(resourcedir, "pptx_config.toml")
     if not args.tex_header:
         args.tex_header = os.path.join(resourcedir, "cheader.tex")
+    if not getattr(args, "poll_config", None):
+        args.poll_config = os.path.join(resourcedir, "poll_config.toml")
     if args.config:
         with open(args.config, "r") as f:
             config = json.load(f)

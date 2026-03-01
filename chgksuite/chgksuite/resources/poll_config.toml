@@ -1,0 +1,17 @@
+# Poll posting mode: "comment" (reply in discussion group) or "channel" (separate channel post)
+mode = "comment"
+
+[question_poll]
+text = "Ваша оценка вопроса {NUMBER}"
+variants = ["🔥", "👍", "👌", "🥱", "👎", "😡", "Посмотреть результаты"]
+quiz_right_answer = "Посмотреть результаты"
+
+[tour_poll]
+text = "Ваша оценка тура {NUMBER}"
+variants = ["🔥", "👍", "👌", "🥱", "👎", "😡", "Посмотреть результаты"]
+quiz_right_answer = "Посмотреть результаты"
+
+[packet_poll]
+text = "Ваша оценка пакета {TITLE}"
+variants = ["🔥", "👍", "👌", "🥱", "👎", "😡", "Посмотреть результаты"]
+quiz_right_answer = "Посмотреть результаты"

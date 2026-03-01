@@ -574,6 +574,8 @@ class TelegramExporter(BaseExporter):
             self.logger.error("Failed to find discussion message")
             return
 
+        self._last_discussion_msg_id = root_msg_in_discussion_id
+
         root_msg_in_discussion = {
             "message_id": root_msg_in_discussion_id,
             "chat": {"id": self.chat_id},
@@ -613,13 +615,20 @@ class TelegramExporter(BaseExporter):
         return messages
 
     def post_wrapper(self, posts):
-        """Wrapper for post() that handles section links."""
+        """Wrapper for post() that handles section links and tour tracking."""
         messages = self.post(posts)
         if messages and self.section and not self.args.dry_run:
-            self.section_links.append(
-                self.get_message_link(self.channel_id, messages[0]["message_id"])
-            )
+            link = self.get_message_link(self.channel_id, messages[0]["message_id"])
+            self.section_links.append((link, self._tour_number))
+            self._tour_discussion_msg_id = self._last_discussion_msg_id
         self.section = False
+
+    def _extract_tour_number(self, section_text):
+        """Extract tour number from section text, e.g. 'Тур 3' -> '3'."""
+        m = re.search(r"(\d+)", section_text)
+        if m:
+            return m.group(1)
+        return section_text
 
     def tg_process_element(self, pair):
         if pair[0] == "Question":
@@ -641,6 +650,8 @@ class TelegramExporter(BaseExporter):
                 self.buffer_images = []
             posts = self.tg_format_question(pair[1], number=number)
             self.post_wrapper(posts)
+            if self._polls_enabled:
+                self._post_question_poll(number)
         elif self.args.skip_until and (
             not tryint(self.number) or tryint(self.number) < self.args.skip_until
         ):
@@ -658,7 +669,12 @@ class TelegramExporter(BaseExporter):
                 self.post_wrapper(posts)
                 self.buffer_texts = []
                 self.buffer_images = []
+            # Post tour poll for the previous tour before starting a new one
+            if self._polls_enabled:
+                self._post_tour_poll()
             text, images = self.tg_element_layout(pair[1])
+            self._tour_number = self._extract_tour_number(text)
+            self._tour_seq += 1
             self.buffer_texts.append(f"<b>{text}</b>")
             self.buffer_images.extend(images)
             self.section = True
@@ -876,12 +892,136 @@ class TelegramExporter(BaseExporter):
             return
         return tryint(str_)
 
+    def _load_poll_config(self):
+        """Load poll configuration from TOML file."""
+        with open(self.args.poll_config, "r", encoding="utf-8") as f:
+            cfg = toml.load(f)
+        self.poll_mode = cfg.get("mode", "comment")
+        self.poll_config = {}
+        for key in ("question_poll", "tour_poll", "packet_poll"):
+            if key in cfg:
+                self.poll_config[key] = cfg[key]
+
+    def _post_poll(self, chat_id, poll_cfg, substitutions, reply_to_message_id=None):
+        """Post a poll to Telegram.
+
+        Args:
+            chat_id: Chat to post to.
+            poll_cfg: Dict with 'text', 'variants', and optional 'quiz_right_answer'.
+            substitutions: Dict for {NUMBER}, {TITLE} replacement.
+            reply_to_message_id: Optional message ID to reply to.
+        """
+        question_text = poll_cfg["text"]
+        for k, v in substitutions.items():
+            question_text = question_text.replace(f"{{{k}}}", str(v))
+
+        options = poll_cfg["variants"]
+
+        data = {
+            "chat_id": chat_id,
+            "question": question_text,
+            "options": json.dumps(options),
+            "is_anonymous": True,
+            "disable_notification": True,
+        }
+
+        if "quiz_right_answer" in poll_cfg:
+            data["type"] = "quiz"
+            try:
+                data["correct_option_id"] = options.index(poll_cfg["quiz_right_answer"])
+            except ValueError:
+                self.logger.warning(
+                    f"quiz_right_answer '{poll_cfg['quiz_right_answer']}' not in variants, falling back to regular poll"
+                )
+                data["type"] = "regular"
+        else:
+            data["type"] = "regular"
+
+        if reply_to_message_id:
+            data["reply_to_message_id"] = reply_to_message_id
+
+        if self.args.dry_run:
+            self.logger.info(f"[dry_run] Would post poll: {question_text}")
+            return None
+
+        try:
+            result = self.send_api_request("sendPoll", data)
+            self.logger.info(f"Posted poll: {question_text}")
+            time.sleep(random.randint(2, 4))
+            return result
+        except Exception as e:
+            self.logger.error(f"Failed to post poll: {e}")
+            return None
+
+    def _disable_reactions(self, channel_id):
+        """Disable emoji reactions on the channel when polls are active."""
+        if self.args.dry_run:
+            self.logger.info("[dry_run] Would disable reactions on channel")
+            return
+        try:
+            self.send_api_request(
+                "setChatAvailableReactions",
+                {"chat_id": channel_id, "available_reactions": json.dumps([])},
+            )
+            self.logger.info("Disabled emoji reactions on channel")
+        except Exception as e:
+            self.logger.warning(f"Could not disable reactions (bot may lack permissions): {e}")
+
+    def _post_question_poll(self, number):
+        """Post a question poll if configured."""
+        if not self.poll_config.get("question_poll"):
+            return
+        cfg = self.poll_config["question_poll"]
+        if self.poll_mode == "comment" and self._last_discussion_msg_id:
+            self._post_poll(
+                self.chat_id, cfg, {"NUMBER": number},
+                reply_to_message_id=self._last_discussion_msg_id,
+            )
+        else:
+            self._post_poll(self.channel_id, cfg, {"NUMBER": number})
+
+    def _post_tour_poll(self):
+        """Post a tour poll for the current tour if configured."""
+        if not self.poll_config.get("tour_poll"):
+            return
+        if self._tour_number is None:
+            return
+        cfg = self.poll_config["tour_poll"]
+        if self.poll_mode == "comment" and self._tour_discussion_msg_id:
+            self._post_poll(
+                self.chat_id, cfg, {"NUMBER": self._tour_number},
+                reply_to_message_id=self._tour_discussion_msg_id,
+            )
+        else:
+            self._post_poll(self.channel_id, cfg, {"NUMBER": self._tour_number})
+
+    def _post_packet_poll(self, nav_discussion_msg_id=None):
+        """Post a packet poll if configured."""
+        if not self.poll_config.get("packet_poll"):
+            return
+        cfg = self.poll_config["packet_poll"]
+        title = self.tg_heading or ""
+        if self.poll_mode == "comment" and nav_discussion_msg_id:
+            self._post_poll(
+                self.chat_id, cfg, {"TITLE": title},
+                reply_to_message_id=nav_discussion_msg_id,
+            )
+        else:
+            self._post_poll(self.channel_id, cfg, {"TITLE": title})
+
     def export(self):
         """Main export function to send the structure to Telegram."""
         self.section_links = []
         self.buffer_texts = []
         self.buffer_images = []
         self.section = False
+        self._last_discussion_msg_id = None
+        self._tour_discussion_msg_id = None
+        self._tour_number = None
+        self._tour_seq = 0
+        self._polls_enabled = getattr(self.args, "add_polls", False)
+        self.poll_config = {}
+        self.poll_mode = "comment"
 
         if not self.args.tgchannel or not self.args.tgchat:
             raise Exception("Please provide channel and chat links or IDs.")
@@ -992,6 +1132,11 @@ class TelegramExporter(BaseExporter):
                 bad.append("discussion group")
             raise Exception(f"The bot doesn't have access to {' and '.join(bad)}")
 
+        # Load poll config if polls are enabled
+        if self._polls_enabled:
+            self._load_poll_config()
+            self._disable_reactions(self.channel_id)
+
         # Process all elements
         for pair in self.structure:
             self.tg_process_element(pair)
@@ -1003,6 +1148,10 @@ class TelegramExporter(BaseExporter):
             self.buffer_texts = []
             self.buffer_images = []
 
+        # Post tour poll for the last tour (not triggered by a next section)
+        if self._polls_enabled:
+            self._post_tour_poll()
+
         # Create and pin navigation message with links to sections
         if not self.args.skip_until:
             navigation_text = [self.labels["general"]["general_impressions_text"]]
@@ -1011,15 +1160,24 @@ class TelegramExporter(BaseExporter):
                     f"<b>{self.tg_heading}</b>",
                     "",
                 ] + navigation_text
-            for i, link in enumerate(self.section_links):
+            for link, tour_number in self.section_links:
+                display = tour_number if tour_number else ""
                 navigation_text.append(
-                    f"{self.labels['general']['section']} {i + 1}: {link}"
+                    f"{self.labels['general']['section']} {display}: {link}"
                 )
             navigation_text = "\n".join(navigation_text)
 
             # Post the navigation message
             if not self.args.dry_run:
                 message = self._post(self.channel_id, navigation_text.strip(), None)
+
+                # Post packet poll under navigation message's discussion thread
+                if self._polls_enabled:
+                    time.sleep(2.1)
+                    nav_discussion_msg_id = self.get_discussion_message(
+                        self.channel_id, message["message_id"]
+                    )
+                    self._post_packet_poll(nav_discussion_msg_id)
 
                 # Pin the message
                 try:
