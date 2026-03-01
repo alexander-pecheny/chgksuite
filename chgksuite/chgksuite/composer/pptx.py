@@ -32,6 +32,20 @@ class PptxExporter(BaseExporter):
         )
         self.re_handout_2 = re.compile("^" + hs + ".(?P<body>.+?)$")
 
+    def _get_heading_font_name(self):
+        try:
+            font_cfg = self.c.get("font", {})
+            return font_cfg.get("heading_name") or font_cfg.get("name")
+        except Exception:
+            return None
+
+    def _apply_font_to_text_frame(self, text_frame, font_name=None):
+        if not font_name:
+            return
+        for p in text_frame.paragraphs:
+            for r in p.runs:
+                r.font.name = font_name
+
     def get_textbox_qnumber(self, slide):
         kwargs = {}
         for param in ("left", "top", "width", "height"):
@@ -187,6 +201,9 @@ class PptxExporter(BaseExporter):
                     p, self._replace_no_break(self.pptx_process_text(section[0][1]))
                 )
                 r.font.size = PptxPt(self.c["text_size_grid"]["section"])
+                heading_font = self._get_heading_font_name()
+                if heading_font:
+                    r.font.name = heading_font
                 add_line_break = True
         if editor:
             r = self.add_run(
@@ -235,6 +252,15 @@ class PptxExporter(BaseExporter):
                     subtitle = slide.placeholders[1]
                     subtitle.text = date_text[0][1]
                 except KeyError:
+                    pass
+            heading_font = self._get_heading_font_name()
+            if heading_font:
+                if title is not None and hasattr(title, "text_frame"):
+                    self._apply_font_to_text_frame(title.text_frame, heading_font)
+                try:
+                    if subtitle is not None and hasattr(subtitle, "text_frame"):
+                        self._apply_font_to_text_frame(subtitle.text_frame, heading_font)
+                except NameError:
                     pass
         for block in (editor_block, section_block):
             self._process_block(block)
@@ -359,7 +385,7 @@ class PptxExporter(BaseExporter):
             return self.get_textbox(slide), 1
 
     def add_slide_with_image(self, image, number=None):
-        slide = self.prs.slides.add_slide(self.BLANK_SLIDE)
+        slide = self.prs.slides.add_slide(self.QUESTION_SLIDE)
         if number:
             self.set_question_number(slide, number)
         img_width = PptxInches(image["width"])
@@ -410,7 +436,7 @@ class PptxExporter(BaseExporter):
             return "\n".join(self.recursive_join(x) for x in s)
 
     def add_slide_with_handout(self, handout, number=None):
-        slide = self.prs.slides.add_slide(self.BLANK_SLIDE)
+        slide = self.prs.slides.add_slide(self.QUESTION_SLIDE)
         textbox = self.get_textbox(slide)
         tf = textbox.text_frame
         self.apply_vertical_alignment_if_needed(tf)
@@ -433,7 +459,7 @@ class PptxExporter(BaseExporter):
             self.add_slide_with_image(image, number=self.number)
         elif handout and add_handout_on_separate_slide:
             self.add_slide_with_handout(handout, number=self.number)
-        slide = self.prs.slides.add_slide(self.BLANK_SLIDE)
+        slide = self.prs.slides.add_slide(self.QUESTION_SLIDE)
         text_is_duplicated = bool(self.c.get("text_is_duplicated"))
         self.put_question_on_slide(
             image, slide, q, allowbigimage=not text_is_duplicated
@@ -442,7 +468,7 @@ class PptxExporter(BaseExporter):
             self.add_slide_with_image(image, number=self.number)
 
     def add_answer_slide(self, q):
-        slide = self.prs.slides.add_slide(self.BLANK_SLIDE)
+        slide = self.prs.slides.add_slide(self.ANSWER_SLIDE)
         if self.c.get("override_answer_caption"):
             self.set_question_number(slide, self.c["override_answer_caption"])
         else:
@@ -543,7 +569,7 @@ class PptxExporter(BaseExporter):
             self.process_question_text(q)
 
         if self.c["add_plug"]:
-            slide = self.prs.slides.add_slide(self.BLANK_SLIDE)
+            slide = self.prs.slides.add_slide(self.PLUG_SLIDE)
             self.set_question_number(slide, self.number)
         self.add_answer_slide(q)
 
@@ -574,8 +600,18 @@ class PptxExporter(BaseExporter):
         template = os.path.abspath(self.c["template_path"])
         os.chdir(wd)
         self.prs = Presentation(template)
-        self.TITLE_SLIDE = self.prs.slide_layouts[0]
-        self.BLANK_SLIDE = self.prs.slide_layouts[6]
+        template_version = self.c.get("template_version", 1)
+        layouts = self.prs.slide_layouts
+        self.TITLE_SLIDE = layouts[self.c.get("title_slide_index", 0)]
+        self.BLANK_SLIDE = layouts[self.c.get("blank_slide_index", 6)]
+        if template_version >= 2:
+            self.QUESTION_SLIDE = layouts[self.c.get("question_slide_index", 1)]
+            self.ANSWER_SLIDE = layouts[self.c.get("answer_slide_index", 2)]
+            self.PLUG_SLIDE = layouts[self.c.get("plug_slide_index", 3)]
+        else:
+            self.QUESTION_SLIDE = self.BLANK_SLIDE
+            self.ANSWER_SLIDE = self.BLANK_SLIDE
+            self.PLUG_SLIDE = self.BLANK_SLIDE
         buffer = []
         for element in self.structure:
             if element[0] != "Question":

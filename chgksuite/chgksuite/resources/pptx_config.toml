@@ -1,4 +1,5 @@
 template_path = "template.pptx"
+template_version = 2
 add_plug = true
 add_comment = true
 add_zachet = true
