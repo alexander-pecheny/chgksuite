@@ -683,6 +683,14 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdcompose_telegram,
+            "--resize_images",
+            advanced=True,
+            action="store_true",
+            help="resize images to max 800px on the longest side.",
+            caption="Уменьшить размер картинок до 800px по длинной стороне",
+        )
+        self.add_argument(
+            cmdcompose_telegram,
             "--dry_run",
             advanced=True,
             action="store_true",

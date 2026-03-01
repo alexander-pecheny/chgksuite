@@ -230,10 +230,10 @@ class TelegramExporter(BaseExporter):
             try:
                 if files:
                     response = self.session.post(
-                        url, data=data, files=files, timeout=60
+                        url, data=data, files=files, timeout=300
                     )
                 else:
-                    response = self.session.post(url, json=data, timeout=30)
+                    response = self.session.post(url, json=data, timeout=300)
 
                 response_data = response.json()
 
@@ -373,7 +373,11 @@ class TelegramExporter(BaseExporter):
                     )
                     imgfile = parsed_image["imgfile"]
                     if os.path.isfile(imgfile):
-                        image = self.prepare_image_for_telegram(imgfile)
+                        max_side = 800 if self.args.resize_images else None
+                        orig_size = Image.open(imgfile).size
+                        image = self.prepare_image_for_telegram(imgfile, max_side=max_side)
+                        if max_side and max(orig_size) > max_side:
+                            self.logger.info(f"Resized image {imgfile}: {orig_size[0]}x{orig_size[1]} -> max {max_side}px")
                     else:
                         raise Exception(f"image {run[1]} doesn't exist")
             else:
@@ -383,12 +387,18 @@ class TelegramExporter(BaseExporter):
         return res, image
 
     @classmethod
-    def prepare_image_for_telegram(cls, imgfile):
+    def prepare_image_for_telegram(cls, imgfile, max_side=None):
         """Prepare an image for uploading to Telegram (resize if needed)."""
         img = Image.open(imgfile)
         width, height = img.size
         file_size = os.path.getsize(imgfile)
         modified = False
+
+        if max_side and max(width, height) > max_side:
+            scale = max_side / max(width, height)
+            img = img.resize((int(width * scale), int(height * scale)), Image.LANCZOS)
+            width, height = img.size
+            modified = True
 
         aspect_ratio = max(width, height) / min(width, height)
         if aspect_ratio >= 20:

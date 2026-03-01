@@ -26,11 +26,14 @@ class TelegramSidecarBot:
         return self._local.connection
 
     async def handle_message(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
+        message = update.message or update.channel_post
+        if message is None:
+            return
         cursor = self.conn.cursor()
         raw_data = json.dumps(update.to_dict(), ensure_ascii=False)
         cursor.execute(
             "INSERT INTO messages (raw_data, chat_id, created_at) VALUES (?, ?, ?)",
-            (raw_data, update.message.chat.id, datetime.now().isoformat()),
+            (raw_data, message.chat.id, datetime.now().isoformat()),
         )
         self.conn.commit()
 
@@ -70,9 +73,9 @@ class TelegramSidecarBot:
         application = (
             Application.builder()
             .token(self.token)
-            .connect_timeout(30.0)
-            .read_timeout(30.0)
-            .write_timeout(30.0)
+            .connect_timeout(300.0)
+            .read_timeout(300.0)
+            .write_timeout(300.0)
             .build()
         )
         application.add_handler(MessageHandler(filters.ALL, self.handle_message))
