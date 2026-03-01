@@ -197,7 +197,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4" },
-    { name = "chardet" },
+    { name = "chardet", specifier = "==5.2.0" },
     { name = "dateparser" },
     { name = "mammoth" },
     { name = "openpyxl" },
