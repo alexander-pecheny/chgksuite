@@ -15,7 +15,7 @@ from chgksuite.composer import gui_compose
 from chgksuite.composer.telegram import get_saved_telegram_targets
 from chgksuite.handouter.runner import gui_handouter
 from chgksuite.parser import gui_parse
-from chgksuite.trello import gui_trello
+from chgksuite.boards import gui_boards
 from chgksuite.version import __version__
 
 LANGS = ["az", "by", "by_tar", "en", "kz_cyr", "ru", "sr", "ua", "uz", "uz_cyr"] + [
@@ -807,25 +807,31 @@ class ArgparseBuilder:
             filetypes=[("chgksuite markup files", "*.4s")],
         )
 
-        cmdtrello = subparsers.add_parser("trello")
-        cmdtrello_subcommands = cmdtrello.add_subparsers(dest="trellosubcommand")
-        cmdtrello_download = self.add_parser(
-            cmdtrello_subcommands, "download", caption="Скачать из Трелло"
+        cmdboards = subparsers.add_parser("boards")
+        cmdboards.add_argument(
+            "--provider",
+            choices=["trello", "github"],
+            default="trello",
+            help="Board provider to use (default: trello).",
+        )
+        cmdboards_subcommands = cmdboards.add_subparsers(dest="boardsubcommand")
+        cmdboards_download = self.add_parser(
+            cmdboards_subcommands, "download", caption="Скачать с доски"
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboards_download,
             "folder",
-            help="path to the folderto synchronize with a trello board.",
+            help="path to the folder to synchronize with a board.",
             caption="Папка",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboards_download,
             "--lists",
             help="Download only specified lists.",
             caption="Скачать только указанные списки (через запятую)",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboards_download,
             "--si",
             action="store_true",
             help="This flag includes card captions "
@@ -835,7 +841,7 @@ class ArgparseBuilder:
             caption="Формат Своей игры",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboards_download,
             "--replace_double_line_breaks",
             "-rd",
             action="store_true",
@@ -843,7 +849,7 @@ class ArgparseBuilder:
             caption="Убрать двойные переносы строк",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboards_download,
             "--fix_trello_new_editor",
             "-ftne",
             choices=["on", "off"],
@@ -854,71 +860,71 @@ class ArgparseBuilder:
             argtype="radiobutton",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboards_download,
             "--onlyanswers",
             action="store_true",
             help="This flag forces SI download to only include answers.",
             caption="Только ответы",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboards_download,
             "--noanswers",
             action="store_true",
             help="This flag forces SI download to not include answers.",
             caption="Без ответов",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboards_download,
             "--singlefile",
             action="store_true",
             help="This flag forces SI download all themes to single file.",
             caption="Склеить всё в один файл",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboards_download,
             "--qb",
             action="store_true",
             help="Quizbowl format",
             caption="Формат квизбола",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboards_download,
             "--labels",
             action="store_true",
             help="Use this if you also want to have lists based on labels.",
-            caption="Создать файлы из лейблов Трелло",
+            caption="Создать файлы из лейблов",
         )
 
-        cmdtrello_upload = self.add_parser(
-            cmdtrello_subcommands, "upload", caption="Загрузить в Трелло"
+        cmdboards_upload = self.add_parser(
+            cmdboards_subcommands, "upload", caption="Загрузить на доску"
         )
         self.add_argument(
-            cmdtrello_upload, "board_id", help="trello board id.", caption="ID доски"
+            cmdboards_upload, "board_id", help="board id (Trello) or repo (GitHub owner/repo).", caption="ID доски"
         )
         self.add_argument(
-            cmdtrello_upload,
+            cmdboards_upload,
             "filename",
             nargs="*",
-            help="file(s) to upload to trello.",
+            help="file(s) to upload.",
             caption="Имя 4s-файла",
         )
         self.add_argument(
-            cmdtrello_upload,
+            cmdboards_upload,
             "--author",
             action="store_true",
             help="Display authors in cards' captions",
             caption="Дописать авторов в заголовок карточки",
         )
         self.add_argument(
-            cmdtrello_upload,
+            cmdboards_upload,
             "--list_name",
-            help="List name where to upload cards",
+            help="List/status name where to upload cards",
             caption="Имя списка для загрузки карточек",
         )
 
-        cmdtrello_token = cmdtrello_subcommands.add_parser("token")
+        cmdboards_token = cmdboards_subcommands.add_parser("token")
         self.add_argument(
-            cmdtrello_token,
+            cmdboards_token,
             "--no-browser",
             action="store_true",
             help="Don't try to open in browser",
@@ -1169,8 +1175,8 @@ def single_action(args, use_wrapper, resourcedir):
         gui_parse(args)
     if args.action == "compose":
         gui_compose(args)
-    if args.action == "trello":
-        gui_trello(args)
+    if args.action == "boards":
+        gui_boards(args)
     if args.action == "handouts":
         gui_handouter(args)
 
