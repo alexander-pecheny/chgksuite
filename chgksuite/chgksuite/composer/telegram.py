@@ -1270,7 +1270,7 @@ class TelegramExporter(BaseExporter):
                         forward_msg_id = msg_data["message"].get(
                             "forward_from_message_id"
                         )
-                        self.logger.info(
+                        self.logger.debug(
                             f"forward_msg_id: {forward_msg_id}, forward_id: {forward_info.get('id')}, search_channel_id: {search_channel_id}, message_id: {message_id}"
                         )
                         # Check if this matches our original message
