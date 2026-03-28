@@ -375,9 +375,29 @@ class HandoutGenerator:
         return "\n\n".join(self.blocks)
 
 
+def get_num_teams(filepath):
+    """Extract the number of teams from the first regular block of a .hndt file."""
+    contents = read_file(filepath)
+    blocks = parse_handouts(contents)
+    for block in blocks:
+        if block.get("columns"):
+            columns = block["columns"]
+            num_rows = block.get("rows") or 1
+            handouts_per_team = block.get("handouts_per_team") or 3
+            total = columns * num_rows
+            if total % handouts_per_team == 0:
+                return total // handouts_per_team
+    return None
+
+
 def process_file(args, file_dir, bn):
     tex_contents = HandoutGenerator(args).generate()
-    tex_path = os.path.join(file_dir, f"{bn}_{args.language}.tex")
+    num_teams = get_num_teams(args.filename)
+    if num_teams is not None:
+        pdf_bn = f"{bn}_{num_teams}teams_{args.language}"
+    else:
+        pdf_bn = f"{bn}_{args.language}"
+    tex_path = os.path.join(file_dir, f"{pdf_bn}.tex")
     write_file(tex_path, tex_contents)
 
     tectonic_path = get_tectonic_path()
