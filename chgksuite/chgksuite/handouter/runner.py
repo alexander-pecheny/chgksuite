@@ -465,11 +465,19 @@ def run_handouter(args):
 def gui_handouter(args):
     if hasattr(args, "filename") and args.filename:
         set_lastdir(os.path.dirname(os.path.abspath(args.filename)))
-    if args.handoutssubcommand == "run":
+    if args.handoutssubcommand in ("hndt2pdf", "run"):
         run_handouter(args)
-    elif args.handoutssubcommand == "generate":
+    elif args.handoutssubcommand in ("4s2hndt", "generate"):
         generate_handouts(args)
     elif args.handoutssubcommand == "pack":
         pack_handouts(args)
     elif args.handoutssubcommand == "install":
         install_tectonic(args)
+    elif args.handoutssubcommand == "create_html":
+        from chgksuite.handouter.html_handout import create_html
+
+        create_html(args)
+    elif args.handoutssubcommand == "html2img":
+        from chgksuite.handouter.html_handout import html2img
+
+        html2img(args)
