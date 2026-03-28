@@ -140,7 +140,7 @@ def generate_handouts(args):
                 print(output_fn)
                 write_file(output_fn, v[0])
     else:
-        output_fn = os.path.join(output_dir, bn + "_handouts.txt")
+        output_fn = os.path.join(output_dir, bn + ".hndt")
         print(f"output filename: {output_fn}")
         write_file(output_fn, "\n---\n".join(result))
 

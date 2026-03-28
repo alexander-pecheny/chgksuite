@@ -972,7 +972,7 @@ class ArgparseBuilder:
             "filename",
             help="file with handouts",
             caption="Имя файла с раздатками",
-            filetypes=[("handouts files", "*.hndts"), ("text files", "*.txt")],
+            filetypes=[("handouts files", "*.hndt"), ("text files", "*.txt")],
         )
         self.add_argument(
             cmdhandouts_run,

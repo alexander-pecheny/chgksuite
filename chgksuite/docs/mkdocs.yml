@@ -12,6 +12,7 @@ nav:
   - "openquiz.md"
   - "add_stats.md"
   - "trello.md"
+  - "handouts.md"
   - "i14n.md"
 theme:
   name: material
