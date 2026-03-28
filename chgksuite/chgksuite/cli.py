@@ -927,7 +927,46 @@ class ArgparseBuilder:
 
         cmdhandouts = subparsers.add_parser("handouts")
         cmdhandouts_subcommands = cmdhandouts.add_subparsers(dest="handoutssubcommand")
-        cmdhandouts_run = self.add_parser(cmdhandouts_subcommands, "run")
+        cmdhandouts_generate = self.add_parser(
+            cmdhandouts_subcommands, "4s2hndt", aliases=["generate"]
+        )
+        self.add_argument(
+            cmdhandouts_generate,
+            "filename",
+            help="file with questions packet",
+            caption="Имя файла с пакетом",
+            filetypes=[("chgksuite files", "*.4s")],
+        )
+        self.add_argument(
+            cmdhandouts_generate,
+            "--language",
+            "-lang",
+            default="ru",
+            help="language",
+            caption="Язык",
+            argtype="radiobutton",
+            choices=sorted(HANDOUT_LANGS),
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_generate,
+            "--separate",
+            action="store_true",
+            help="Generate separate handouts for each question",
+            caption="Сгенерировать отдельный файл с раздатками для каждого вопроса",
+        )
+        self.add_argument(
+            cmdhandouts_generate,
+            "--list-handouts",
+            "-l",
+            action="store_true",
+            help="Generate a file with a list of handouts",
+            caption="Сгенерировать файл со списком раздаток",
+        )
+
+        cmdhandouts_run = self.add_parser(
+            cmdhandouts_subcommands, "hndt2pdf", aliases=["run"]
+        )
         self.add_argument(
             cmdhandouts_run,
             "filename",
@@ -1051,39 +1090,45 @@ class ArgparseBuilder:
             advanced=True,
         )
 
-        cmdhandouts_generate = self.add_parser(cmdhandouts_subcommands, "generate")
+        cmdhandouts_create_html = self.add_parser(cmdhandouts_subcommands, "create_html")
         self.add_argument(
-            cmdhandouts_generate,
+            cmdhandouts_create_html,
+            "fraction",
+            help="fraction of A4 width: 1/6, 1/3, 1/2, or 1",
+            caption="Доля ширины A4",
+            choices=["1/6", "1/3", "1/2", "1"],
+        )
+        self.add_argument(
+            cmdhandouts_create_html,
+            "--font",
+            "-f",
+            help="font family",
+            caption="Шрифт",
+        )
+        self.add_argument(
+            cmdhandouts_create_html,
+            "--output",
+            "-o",
+            help="output HTML filename",
+            caption="Имя выходного HTML файла",
+        )
+
+        cmdhandouts_html2img = self.add_parser(cmdhandouts_subcommands, "html2img")
+        self.add_argument(
+            cmdhandouts_html2img,
             "filename",
-            help="file with questions packet",
-            caption="Имя файла с пакетом",
-            filetypes=[("chgksuite files", "*.4s")],
+            help="HTML file to convert",
+            caption="HTML файл для конвертации",
+            filetypes=[("HTML files", "*.html")],
         )
         self.add_argument(
-            cmdhandouts_generate,
-            "--language",
-            "-lang",
-            default="ru",
-            help="language",
-            caption="Язык",
-            argtype="radiobutton",
-            choices=sorted(HANDOUT_LANGS),
-            advanced=True,
-        )
-        self.add_argument(
-            cmdhandouts_generate,
-            "--separate",
-            action="store_true",
-            help="Generate separate handouts for each question",
-            caption="Сгенерировать отдельный файл с раздатками для каждого вопроса",
-        )
-        self.add_argument(
-            cmdhandouts_generate,
-            "--list-handouts",
-            "-l",
-            action="store_true",
-            help="Generate a file with a list of handouts",
-            caption="Сгенерировать файл со списком раздаток",
+            cmdhandouts_html2img,
+            "--scale",
+            "-s",
+            type=int,
+            default=4,
+            help="PNG scale factor for high-DPI (default: 4)",
+            caption="Масштаб PNG для высокого разрешения",
         )
 
         cmdhandouts_pack = self.add_parser(cmdhandouts_subcommands, "pack")
