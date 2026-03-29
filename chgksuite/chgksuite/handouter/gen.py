@@ -131,12 +131,12 @@ def generate_handouts(args):
             if len(v) > 1:
                 for i, cnt in enumerate(v):
                     output_fn = os.path.join(
-                        output_dir, f"{bn}_q{k.zfill(2)}_{i + 1}.txt"
+                        output_dir, f"{bn}_q{k.zfill(2)}_{i + 1}.hndt"
                     )
                     print(output_fn)
                     write_file(output_fn, cnt)
             else:
-                output_fn = os.path.join(output_dir, f"{bn}_q{str(k).zfill(2)}.txt")
+                output_fn = os.path.join(output_dir, f"{bn}_q{str(k).zfill(2)}.hndt")
                 print(output_fn)
                 write_file(output_fn, v[0])
     else:

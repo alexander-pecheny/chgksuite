@@ -15,6 +15,7 @@ RESERVED_WORDS = [
     "color",
     "handouts_per_team",
     "grouping",
+    "rotate",
 ]
 
 
@@ -48,6 +49,13 @@ def wrap_val(key, val):
         if val not in ("horizontal", "vertical"):
             raise ValueError(
                 f"Invalid grouping value: {val}. Must be 'horizontal' or 'vertical'."
+            )
+        return val
+    if key == "rotate":
+        val = val.strip().lower()
+        if val not in ("r", "l"):
+            raise ValueError(
+                f"Invalid rotate value: {val}. Must be 'r' (right) or 'l' (left)."
             )
         return val
     return val.strip()

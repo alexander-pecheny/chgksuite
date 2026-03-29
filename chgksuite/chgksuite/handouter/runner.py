@@ -3,9 +3,12 @@
 import os
 import shutil
 import subprocess
+import tempfile
 import time
 
 import toml
+from PIL import Image
+from pypdf import PdfReader, PdfWriter
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -28,11 +31,42 @@ from chgksuite.handouter.tex_internals import (
 from chgksuite.handouter.utils import parse_handouts, read_file, replace_ext, write_file
 
 
+def rotate_image(image_path, direction):
+    """Rotate an image or PDF 90 degrees and save to a temp file.
+    direction: 'r' for right (clockwise), 'l' for left (counter-clockwise).
+    Returns the path to the rotated temp file.
+    """
+    ext = os.path.splitext(image_path)[1].lower() or ".png"
+
+    if ext == ".pdf":
+        reader = PdfReader(image_path)
+        writer = PdfWriter()
+        angle = 270 if direction == "r" else 90
+        for page in reader.pages:
+            page.rotate(angle)
+            writer.add_page(page)
+        fd, tmp_path = tempfile.mkstemp(suffix=ext)
+        os.close(fd)
+        with open(tmp_path, "wb") as f:
+            writer.write(f)
+        return tmp_path
+
+    img = Image.open(image_path)
+    # PIL's rotate is counter-clockwise, so right = -90, left = 90
+    angle = -90 if direction == "r" else 90
+    rotated = img.rotate(angle, expand=True)
+    fd, tmp_path = tempfile.mkstemp(suffix=ext)
+    os.close(fd)
+    rotated.save(tmp_path)
+    return tmp_path
+
+
 class HandoutGenerator:
     SPACE = 1.5  # mm
 
     def __init__(self, args):
         self.args = args
+        self._temp_files = []
         _, resourcedir = get_source_dirs()
         self.labels = toml.loads(
             read_file(os.path.join(resourcedir, f"labels_{args.language}.toml"))
@@ -329,10 +363,14 @@ class HandoutGenerator:
         ]
         contents = []
         if block.get("image"):
+            image_path = block["image"]
+            if block.get("rotate"):
+                image_path = rotate_image(image_path, block["rotate"])
+                self._temp_files.append(image_path)
             img_qwidth = block.get("resize_image") or 1.0
             imgwidth = IMGWIDTH.replace("<QWIDTH>", str(img_qwidth))
             contents.append(
-                IMG.replace("<IMGPATH>", block["image"]).replace("<IMGWIDTH>", imgwidth)
+                IMG.replace("<IMGPATH>", image_path).replace("<IMGWIDTH>", imgwidth)
             )
         if block.get("text"):
             contents.append(block["text"])
@@ -391,7 +429,8 @@ def get_num_teams(filepath):
 
 
 def process_file(args, file_dir, bn):
-    tex_contents = HandoutGenerator(args).generate()
+    generator = HandoutGenerator(args)
+    tex_contents = generator.generate()
     num_teams = get_num_teams(args.filename)
     if num_teams is not None:
         pdf_bn = f"{bn}_{num_teams}teams_{args.language}"
@@ -413,6 +452,12 @@ def process_file(args, file_dir, bn):
     subprocess.run(
         [tectonic_path, os.path.basename(tex_path)], check=True, cwd=file_dir
     )
+
+    for tmp in generator._temp_files:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
     output_file = replace_ext(tex_path, "pdf")
 
