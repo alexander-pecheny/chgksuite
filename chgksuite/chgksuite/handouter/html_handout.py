@@ -108,30 +108,33 @@ def html2img(args):
         width_mm = _parse_width_from_html(html_path)
         width_px = _mm_to_px(width_mm)
 
-        # First pass: set viewport to the correct width, measure content height
+        # First pass: set viewport to the correct width, measure content
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         page.set_viewport_size({"width": width_px, "height": 1})
         page.goto(f"file://{html_path}")
 
-        height_px = page.evaluate(
+        height_px, content_width_px = page.evaluate(
             """() => {
             const body = document.body;
             const html = document.documentElement;
-            return Math.max(body.scrollHeight, html.scrollHeight);
+            return [
+                Math.max(body.scrollHeight, html.scrollHeight),
+                Math.max(body.scrollWidth, html.scrollWidth),
+            ];
         }"""
         )
 
         page.set_viewport_size({"width": width_px, "height": height_px})
 
-        # PDF: render at exact content size using mm dimensions
-        width_mm_str = f"{width_mm:.2f}mm"
+        # PDF: use full content width (including overflow) as page width
+        # so Chromium's print engine doesn't shrink-to-fit the content.
+        content_width_mm = content_width_px * 25.4 / 96
         height_mm = height_px * 25.4 / 96
-        height_mm_str = f"{height_mm:.2f}mm"
         page.pdf(
             path=pdf_path,
-            width=width_mm_str,
-            height=height_mm_str,
+            width=f"{content_width_mm:.2f}mm",
+            height=f"{height_mm:.2f}mm",
             margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
             print_background=True,
         )
@@ -150,7 +153,7 @@ def html2img(args):
         )
         browser.close()
 
-    print(f"Created {pdf_path} ({width_mm:.1f} x {height_mm:.1f} mm)")
+    print(f"Created {pdf_path} ({content_width_mm:.1f} x {height_mm:.1f} mm)")
     print(f"Created {png_path} (scale: {scale}x)")
 
 
