@@ -157,6 +157,7 @@ jobs:
           export PYAPP_UV_ENABLED="1"
           export PYAPP_PIP_EXTRA_ARGS="${{ steps.config.outputs.pip_pre }}"
           export PYAPP_PASS_LOCATION="1"
+          export PYAPP_EXPOSE_PYTHON="1"
 
           echo "Building Qt GUI with:"
           echo "  PYAPP_PROJECT_DEPENDENCY_FILE=$PYAPP_PROJECT_DEPENDENCY_FILE"
@@ -186,6 +187,7 @@ jobs:
           export PYAPP_UV_ENABLED="1"
           export PYAPP_PIP_EXTRA_ARGS="${{ steps.config.outputs.pip_pre }}"
           export PYAPP_PASS_LOCATION="1"
+          export PYAPP_EXPOSE_PYTHON="1"
 
           echo "Building Tk GUI with:"
           echo "  PYAPP_PROJECT_DEPENDENCY_FILE=$PYAPP_PROJECT_DEPENDENCY_FILE"

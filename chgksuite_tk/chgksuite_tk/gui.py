@@ -22,6 +22,7 @@ except ImportError:
 import builtins
 import io
 import json
+import re
 import shlex
 import threading
 
@@ -61,33 +62,74 @@ def get_installed_version(package_name):
         return None
 
 
-def check_pypi_version(package_name):
-    """Get latest version of a package from PyPI."""
+def _parse_pep440(v):
+    """Parse PEP 440 version string into a sortable tuple."""
+    m = re.match(
+        r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:(a|b|rc)(\d+))?(?:\.post(\d+))?",
+        v,
+    )
+    if not m:
+        return (0,)
+    major, minor, patch = int(m[1]), int(m[2] or 0), int(m[3] or 0)
+    pre_order = {"a": -3, "b": -2, "rc": -1}
+    pre = (pre_order.get(m[4], 0), int(m[5] or 0))
+    post = int(m[6] or 0)
+    return (major, minor, patch) + pre + (post,)
+
+
+def check_pypi_version(package_name, channel="beta"):
+    """Get latest version of a package from PyPI based on update channel."""
     try:
         url = f"https://pypi.org/pypi/{package_name}/json"
         with urllib.request.urlopen(url, timeout=10) as response:
             data = json.loads(response.read().decode())
+            if channel == "stable":
+                return data["info"]["version"]
+            # Beta: find latest version including pre-releases
+            versions = []
+            for v, files in data["releases"].items():
+                if files:  # only versions with uploaded files
+                    try:
+                        versions.append((_parse_pep440(v), v))
+                    except Exception:
+                        pass
+            if versions:
+                versions.sort(key=lambda x: x[0])
+                return versions[-1][1]
             return data["info"]["version"]
     except Exception:
         return None
 
 
-def check_for_updates():
-    """Check PyPI for updates to chgksuite and chgksuite-tk. Returns (has_update, details_str, error)."""
+def get_default_channel():
+    """Detect update channel based on installed version."""
+    v = get_installed_version("chgksuite")
+    if v and re.search(r"(a|b|rc|dev)\d*", v):
+        return "beta"
+    return "stable"
+
+
+def check_for_updates(channel="beta"):
+    """Check PyPI for updates to chgksuite and chgksuite-tk.
+
+    Returns (has_update, details_str, error, target_versions).
+    """
     packages = ["chgksuite", "chgksuite-tk"]
     updates = []
+    target_versions = {}
 
     for pkg in packages:
         installed = get_installed_version(pkg)
-        latest = check_pypi_version(pkg)
+        latest = check_pypi_version(pkg, channel)
         if installed is None or latest is None:
             continue
+        target_versions[pkg] = latest
         if installed != latest:
             updates.append((pkg, installed, latest))
 
     if updates:
         details = "\n".join(f"{pkg}: {inst} → {lat}" for pkg, inst, lat in updates)
-        return True, details, None
+        return True, details, None, target_versions
 
     # No updates - show current versions
     current = ", ".join(
@@ -95,7 +137,7 @@ def check_for_updates():
         for pkg in packages
         if get_installed_version(pkg)
     )
-    return False, current, None
+    return False, current, None, target_versions
 
 
 class InputRequester:
@@ -294,18 +336,23 @@ class ParserWrapper(object):
         """Check for updates and run self-update if available."""
         self.update_button.config(state="disabled", text="Проверка обновлений...")
 
+        channel = self._channel_var.get()
+
         def check_thread():
-            has_update, details, error = check_for_updates()
-            # Schedule UI update on main thread
+            has_update, details, error, target_versions = check_for_updates(channel)
             self.tk.after(
-                0, lambda: self._handle_update_check(has_update, details, error)
+                0,
+                lambda: self._handle_update_check(
+                    has_update, details, error, target_versions
+                ),
             )
 
         threading.Thread(target=check_thread, daemon=True).start()
 
-    def _handle_update_check(self, has_update, details, error):
+    def _handle_update_check(self, has_update, details, error, target_versions):
         """Handle update check result on main thread."""
         self.update_button.config(state="normal", text="Обновить chgksuite")
+        self._target_versions = target_versions
 
         if has_update is None or (not has_update and not details):
             messagebox.showwarning(
@@ -330,9 +377,20 @@ class ParserWrapper(object):
         if reply:
             self._run_self_update()
 
+    def _build_pip_install_script(self):
+        """Build a Python script that installs pinned package versions via pip."""
+        pkgs = ", ".join(
+            f"'{pkg}=={ver}'" for pkg, ver in self._target_versions.items()
+        )
+        return (
+            "import subprocess, sys; "
+            "subprocess.run([sys.executable, '-m', 'ensurepip', '--default-pip'], "
+            "capture_output=True); "
+            f"subprocess.run([sys.executable, '-m', 'pip', 'install', {pkgs}])"
+        )
+
     def _run_self_update(self):
-        """Run pyapp self-update command and close the application."""
-        # Check for macOS App Translocation
+        """Run update and close the application."""
         if is_app_translocated(self.pyapp_executable):
             messagebox.showwarning(
                 "Обновление невозможно",
@@ -345,23 +403,30 @@ class ParserWrapper(object):
             return
 
         try:
-            # Start the update process detached from current process
+            if self._target_versions and self._has_self_python:
+                cmd = [
+                    self.pyapp_executable,
+                    "self",
+                    "python",
+                    "-c",
+                    self._build_pip_install_script(),
+                ]
+            else:
+                cmd = [self.pyapp_executable, "self", "update"]
+
             if sys.platform == "win32":
-                # On Windows, use CREATE_NEW_PROCESS_GROUP to detach
                 subprocess.Popen(
-                    [self.pyapp_executable, "self", "update"],
+                    cmd,
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
                     | subprocess.DETACHED_PROCESS,
                     close_fds=True,
                 )
             else:
-                # On Unix, use start_new_session to detach
                 subprocess.Popen(
-                    [self.pyapp_executable, "self", "update"],
+                    cmd,
                     start_new_session=True,
                     close_fds=True,
                 )
-            # Close the application
             self.tk.quit()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось запустить обновление: {e}")
@@ -413,16 +478,43 @@ class ParserWrapper(object):
         self.output_scrollbar.pack(side="right", fill="y")
         self.output_text.config(state="disabled")
 
-        # Update button (only shown when running inside pyapp)
+        # Update section (only shown when running inside pyapp)
         self.pyapp_executable = get_pyapp_executable()
         if self.pyapp_executable:
+            # Check if self python is available (needs PYAPP_EXPOSE_PYTHON)
+            try:
+                r = subprocess.run(
+                    [self.pyapp_executable, "self", "python", "--version"],
+                    capture_output=True, timeout=5,
+                )
+                self._has_self_python = r.returncode == 0
+            except Exception:
+                self._has_self_python = False
+            self._target_versions = {}
+
+            update_frame = tk.Frame(self.mainframe)
+            update_frame.pack(side="top", pady=5)
+
+            tk.Label(update_frame, text="Канал обновлений:").pack(side="left")
+
+            default_channel = get_default_channel()
+            self._channel_var = tk.StringVar(value=default_channel)
+
+            tk.Radiobutton(
+                update_frame, text="Стабильный",
+                variable=self._channel_var, value="stable",
+            ).pack(side="left")
+            tk.Radiobutton(
+                update_frame, text="Бета",
+                variable=self._channel_var, value="beta",
+            ).pack(side="left")
+
             self.update_button = tk.Button(
-                self.mainframe,
+                update_frame,
                 text="Обновить chgksuite",
                 command=self.check_and_update,
-                width=20,
             )
-            self.update_button.pack(side="top", pady=5)
+            self.update_button.pack(side="left", padx=(10, 0))
 
     def add_argument(self, *args, **kwargs):
         if kwargs.pop("advanced", False):

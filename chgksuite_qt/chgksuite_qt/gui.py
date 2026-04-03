@@ -7,6 +7,7 @@ import builtins
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -57,33 +58,74 @@ def get_installed_version(package_name):
         return None
 
 
-def check_pypi_version(package_name):
-    """Get latest version of a package from PyPI."""
+def _parse_pep440(v):
+    """Parse PEP 440 version string into a sortable tuple."""
+    m = re.match(
+        r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:(a|b|rc)(\d+))?(?:\.post(\d+))?",
+        v,
+    )
+    if not m:
+        return (0,)
+    major, minor, patch = int(m[1]), int(m[2] or 0), int(m[3] or 0)
+    pre_order = {"a": -3, "b": -2, "rc": -1}
+    pre = (pre_order.get(m[4], 0), int(m[5] or 0))
+    post = int(m[6] or 0)
+    return (major, minor, patch) + pre + (post,)
+
+
+def check_pypi_version(package_name, channel="beta"):
+    """Get latest version of a package from PyPI based on update channel."""
     try:
         url = f"https://pypi.org/pypi/{package_name}/json"
         with urllib.request.urlopen(url, timeout=10) as response:
             data = json.loads(response.read().decode())
+            if channel == "stable":
+                return data["info"]["version"]
+            # Beta: find latest version including pre-releases
+            versions = []
+            for v, files in data["releases"].items():
+                if files:  # only versions with uploaded files
+                    try:
+                        versions.append((_parse_pep440(v), v))
+                    except Exception:
+                        pass
+            if versions:
+                versions.sort(key=lambda x: x[0])
+                return versions[-1][1]
             return data["info"]["version"]
     except Exception:
         return None
 
 
-def check_for_updates():
-    """Check PyPI for updates to chgksuite and chgksuite-qt. Returns (has_update, details_str, error)."""
+def get_default_channel():
+    """Detect update channel based on installed version."""
+    v = get_installed_version("chgksuite")
+    if v and re.search(r"(a|b|rc|dev)\d*", v):
+        return "beta"
+    return "stable"
+
+
+def check_for_updates(channel="beta"):
+    """Check PyPI for updates to chgksuite and chgksuite-qt.
+
+    Returns (has_update, details_str, error, target_versions).
+    """
     packages = ["chgksuite", "chgksuite-qt"]
     updates = []
+    target_versions = {}
 
     for pkg in packages:
         installed = get_installed_version(pkg)
-        latest = check_pypi_version(pkg)
+        latest = check_pypi_version(pkg, channel)
         if installed is None or latest is None:
             continue
+        target_versions[pkg] = latest
         if installed != latest:
             updates.append((pkg, installed, latest))
 
     if updates:
         details = "\n".join(f"{pkg}: {inst} → {lat}" for pkg, inst, lat in updates)
-        return True, details, None
+        return True, details, None, target_versions
 
     # No updates - show current versions
     current = ", ".join(
@@ -91,17 +133,21 @@ def check_for_updates():
         for pkg in packages
         if get_installed_version(pkg)
     )
-    return False, current, None
+    return False, current, None, target_versions
 
 
 class UpdateChecker(QObject):
     """Worker to check for updates in background thread."""
 
-    finished = pyqtSignal(object, object, object)  # has_update, details, error
+    finished = pyqtSignal(object, object, object, object)
+
+    def __init__(self, channel="beta"):
+        super().__init__()
+        self.channel = channel
 
     def run(self):
-        has_update, details, error = check_for_updates()
-        self.finished.emit(has_update, details, error)
+        has_update, details, error, target_versions = check_for_updates(self.channel)
+        self.finished.emit(has_update, details, error, target_versions)
 
 
 LANGS = ["by", "by_tar", "en", "kz_cyr", "ru", "sr", "ua", "uz", "uz_cyr"] + ["custom"]
@@ -339,19 +385,21 @@ class ParserWrapper(object):
         self.update_button.setEnabled(False)
         self.update_button.setText("Проверка обновлений...")
 
-        # Check for updates in a QThread to safely update UI
+        channel = "stable" if self.stable_radio.isChecked() else "beta"
+
         self._update_thread = QThread()
-        self._update_checker = UpdateChecker()
+        self._update_checker = UpdateChecker(channel)
         self._update_checker.moveToThread(self._update_thread)
         self._update_thread.started.connect(self._update_checker.run)
         self._update_checker.finished.connect(self._handle_update_check)
         self._update_checker.finished.connect(self._update_thread.quit)
         self._update_thread.start()
 
-    def _handle_update_check(self, has_update, details, error):
+    def _handle_update_check(self, has_update, details, error, target_versions):
         """Handle update check result on main thread."""
         self.update_button.setEnabled(True)
         self.update_button.setText("Обновить chgksuite")
+        self._target_versions = target_versions
 
         if has_update is None or (not has_update and not details):
             QtWidgets.QMessageBox.warning(
@@ -382,9 +430,20 @@ class ParserWrapper(object):
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
             self._run_self_update()
 
+    def _build_pip_install_script(self):
+        """Build a Python script that installs pinned package versions via pip."""
+        pkgs = ", ".join(
+            f"'{pkg}=={ver}'" for pkg, ver in self._target_versions.items()
+        )
+        return (
+            "import subprocess, sys; "
+            "subprocess.run([sys.executable, '-m', 'ensurepip', '--default-pip'], "
+            "capture_output=True); "
+            f"subprocess.run([sys.executable, '-m', 'pip', 'install', {pkgs}])"
+        )
+
     def _run_self_update(self):
-        """Run pyapp self-update command and close the application."""
-        # Check for macOS App Translocation
+        """Run update and close the application."""
         if is_app_translocated(self.pyapp_executable):
             QtWidgets.QMessageBox.warning(
                 self.window,
@@ -398,23 +457,30 @@ class ParserWrapper(object):
             return
 
         try:
-            # Start the update process detached from current process
+            if self._target_versions and self._has_self_python:
+                cmd = [
+                    self.pyapp_executable,
+                    "self",
+                    "python",
+                    "-c",
+                    self._build_pip_install_script(),
+                ]
+            else:
+                cmd = [self.pyapp_executable, "self", "update"]
+
             if sys.platform == "win32":
-                # On Windows, use CREATE_NEW_PROCESS_GROUP to detach
                 subprocess.Popen(
-                    [self.pyapp_executable, "self", "update"],
+                    cmd,
                     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
                     | subprocess.DETACHED_PROCESS,
                     close_fds=True,
                 )
             else:
-                # On Unix, use start_new_session to detach
                 subprocess.Popen(
-                    [self.pyapp_executable, "self", "update"],
+                    cmd,
                     start_new_session=True,
                     close_fds=True,
                 )
-            # Close the application
             self.app.quit()
         except Exception as e:
             QtWidgets.QMessageBox.critical(
@@ -456,12 +522,45 @@ class ParserWrapper(object):
         self.output_text.setMinimumHeight(150)
         self.window_layout.addWidget(self.output_text)
 
-        # Update button (only shown when running inside pyapp)
+        # Update section (only shown when running inside pyapp)
         self.pyapp_executable = get_pyapp_executable()
         if self.pyapp_executable:
+            # Check if self python is available (needs PYAPP_EXPOSE_PYTHON)
+            try:
+                r = subprocess.run(
+                    [self.pyapp_executable, "self", "python", "--version"],
+                    capture_output=True, timeout=5,
+                )
+                self._has_self_python = r.returncode == 0
+            except Exception:
+                self._has_self_python = False
+            self._target_versions = {}
+
+            update_frame = QtWidgets.QWidget()
+            update_layout = QtWidgets.QHBoxLayout(update_frame)
+            init_layout(update_frame, update_layout)
+
+            channel_label = QtWidgets.QLabel("Канал обновлений:")
+            update_layout.addWidget(channel_label)
+
+            default_channel = get_default_channel()
+            self.channel_group = QtWidgets.QButtonGroup()
+            self.stable_radio = QtWidgets.QRadioButton("Стабильный")
+            self.beta_radio = QtWidgets.QRadioButton("Бета")
+            self.channel_group.addButton(self.stable_radio)
+            self.channel_group.addButton(self.beta_radio)
+            if default_channel == "stable":
+                self.stable_radio.setChecked(True)
+            else:
+                self.beta_radio.setChecked(True)
+            update_layout.addWidget(self.stable_radio)
+            update_layout.addWidget(self.beta_radio)
+
             self.update_button = QtWidgets.QPushButton("Обновить chgksuite")
             self.update_button.clicked.connect(self.check_and_update)
-            self.window_layout.addWidget(self.update_button)
+            update_layout.addWidget(self.update_button)
+
+            self.window_layout.addWidget(update_frame)
 
     def add_argument(self, *args, **kwargs):
         if kwargs.pop("advanced", False):
