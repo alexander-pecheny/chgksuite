@@ -55,6 +55,32 @@ jobs:
         shell: bash
         run: mkdir -p artifacts
 
+      # Generate platform-specific icon files from source PNG
+      - name: Generate macOS icon (.icns)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p icon.iconset
+          for size in 16 32 128 256 512; do
+            sips -z $size $size icon.png --out "icon.iconset/icon_${size}x${size}.png" > /dev/null
+            double=$((size * 2))
+            sips -z $double $double icon.png --out "icon.iconset/icon_${size}x${size}@2x.png" > /dev/null
+          done
+          iconutil -c icns icon.iconset -o icon.icns
+          rm -rf icon.iconset
+
+      - name: Generate Windows icon (.ico)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          magick icon.png -define icon:auto-resize=256,48,32,16 icon.ico
+
+      - name: Download rcedit (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -L -o rcedit.exe https://github.com/electron/rcedit/releases/download/v2.0.0/rcedit-x64.exe
+
       # Determine versions and create requirements files
       - name: Setup build configuration
         id: config
@@ -141,6 +167,7 @@ jobs:
           # Copy binary with platform-specific naming
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp target/${{ matrix.rust_target }}/release/pyapp.exe ../artifacts/chgkq-${{ matrix.platform }}.exe
+            ../rcedit.exe ../artifacts/chgkq-${{ matrix.platform }}.exe --set-icon ../icon.ico
           else
             cp target/${{ matrix.rust_target }}/release/pyapp ../artifacts/chgkq-${{ matrix.platform }}
           fi
@@ -169,6 +196,7 @@ jobs:
           # Copy binary with platform-specific naming
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp target/${{ matrix.rust_target }}/release/pyapp.exe ../artifacts/chgkt-${{ matrix.platform }}.exe
+            ../rcedit.exe ../artifacts/chgkt-${{ matrix.platform }}.exe --set-icon ../icon.ico
           else
             cp target/${{ matrix.rust_target }}/release/pyapp ../artifacts/chgkt-${{ matrix.platform }}
           fi
@@ -181,7 +209,9 @@ jobs:
           # Create Qt .app bundle
           if [ -f "artifacts/chgkq-${{ matrix.platform }}" ]; then
             mkdir -p "artifacts/chgkq.app/Contents/MacOS"
+            mkdir -p "artifacts/chgkq.app/Contents/Resources"
             mv "artifacts/chgkq-${{ matrix.platform }}" "artifacts/chgkq.app/Contents/MacOS/chgkq"
+            cp icon.icns "artifacts/chgkq.app/Contents/Resources/icon.icns"
             cat > "artifacts/chgkq.app/Contents/Info.plist" << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -191,6 +221,8 @@ jobs:
             <string>chgkq</string>
             <key>CFBundleIdentifier</key>
             <string>me.pecheny.chgkq</string>
+            <key>CFBundleIconFile</key>
+            <string>icon</string>
             <key>CFBundleName</key>
             <string>chgksuite-qt</string>
             <key>CFBundlePackageType</key>
@@ -215,7 +247,9 @@ jobs:
           # Create Tk .app bundle
           if [ -f "artifacts/chgkt-${{ matrix.platform }}" ]; then
             mkdir -p "artifacts/chgkt.app/Contents/MacOS"
+            mkdir -p "artifacts/chgkt.app/Contents/Resources"
             mv "artifacts/chgkt-${{ matrix.platform }}" "artifacts/chgkt.app/Contents/MacOS/chgkt"
+            cp icon.icns "artifacts/chgkt.app/Contents/Resources/icon.icns"
             cat > "artifacts/chgkt.app/Contents/Info.plist" << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -225,6 +259,8 @@ jobs:
             <string>chgkt</string>
             <key>CFBundleIdentifier</key>
             <string>me.pecheny.chgkt</string>
+            <key>CFBundleIconFile</key>
+            <string>icon</string>
             <key>CFBundleName</key>
             <string>chgksuite-tk</string>
             <key>CFBundlePackageType</key>
