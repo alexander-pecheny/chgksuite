@@ -201,6 +201,39 @@ jobs:
             cp target/${{ matrix.rust_target }}/release/pyapp ../artifacts/chgkt-${{ matrix.platform }}
           fi
 
+      # Ship .desktop files and icon for Linux
+      - name: Create Linux desktop entries
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cp icon.png artifacts/chgksuite.png
+
+          # Qt .desktop (skip on linux-arm64 where Qt is not built)
+          if [ -f "artifacts/chgkq-${{ matrix.platform }}" ]; then
+            cat > "artifacts/chgkq.desktop" << 'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=chgksuite (Qt)
+          Comment=CHGK quiz package toolkit
+          Exec=chgkq
+          Icon=chgksuite
+          Categories=Utility;Education;
+          Terminal=false
+          DESKTOP
+          fi
+
+          # Tk .desktop
+          cat > "artifacts/chgkt.desktop" << 'DESKTOP'
+          [Desktop Entry]
+          Type=Application
+          Name=chgksuite (Tk)
+          Comment=CHGK quiz package toolkit
+          Exec=chgkt
+          Icon=chgksuite
+          Categories=Utility;Education;
+          Terminal=false
+          DESKTOP
+
       # Create macOS .app bundles (required for Finder launch)
       - name: Create macOS app bundles
         if: runner.os == 'macOS'
