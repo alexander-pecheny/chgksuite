@@ -23,7 +23,7 @@ def escape_latex(text):
     text = text.replace("^", "\\textasciicircum")
     for char in ("%", "&", "$", "#", "{", "}", "_"):
         text = text.replace(char, "\\" + char)
-    text = text.replace("\n", "\\linebreak\n")
+    text = text.replace("\n", "\\linebreak\n\\hstrut ")
     return text
 
 

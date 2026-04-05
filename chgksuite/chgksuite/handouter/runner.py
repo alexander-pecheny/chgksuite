@@ -374,7 +374,7 @@ class HandoutGenerator:
             )
         if block.get("text"):
             contents.append(block["text"])
-        block["contents"] = "\\linebreak\n".join(contents)
+        block["contents"] = "\\linebreak\n\\hstrut ".join(contents)
         if block.get("no_center"):
             block["centering"] = ""
         else:

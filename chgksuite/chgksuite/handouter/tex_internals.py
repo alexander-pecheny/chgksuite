@@ -14,6 +14,7 @@ HEADER = r"""
 \fontsize{14pt}{16pt}\selectfont
 \setlength\parindent{0pt}
 \tikzstyle{box}=[rectangle, inner sep=<TIKZ_MM>mm]
+\newcommand{\hstrut}{\vphantom{Ayg}}
 \raggedright
 \raggedbottom
 """.strip()
@@ -25,7 +26,7 @@ TIKZBOX_START = r"""{<CENTERING>
 
 TIKZBOX_INNER = r"""
 \begin{tikzpicture}
-\node[box, minimum width=\boxwidth<TEXTWIDTH><ALIGN>] (b) {<FONTSIZE><CONTENTS>\par};
+\node[box, minimum width=\boxwidth<TEXTWIDTH><ALIGN>] (b) {<FONTSIZE>\hstrut <CONTENTS>\par};
 \useasboundingbox (b.south west) rectangle (b.north east);
 \draw[<TOP>] ([xshift=<TOP_EXT_L>]b.north west) -- ([xshift=<TOP_EXT_R>]b.north east);
 \draw[<BOTTOM>] ([xshift=<BOTTOM_EXT_L>]b.south west) -- ([xshift=<BOTTOM_EXT_R>]b.south east);
