@@ -995,10 +995,11 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdhandouts_run,
-            "--compress",
-            action="store_true",
-            help="compress",
-            caption="Сжать файл после вёрстки (требует установленного ghostscript)",
+            "--compress_pdf",
+            choices=["on", "off"],
+            default="on",
+            help="compress output PDF",
+            caption="Сжать PDF после вёрстки",
             advanced=True,
         )
         self.add_argument(cmdhandouts_run, "--font", "-f", help="font", caption="Шрифт")
@@ -1009,14 +1010,6 @@ class ArgparseBuilder:
             default=14,
             help="font size",
             caption="Размер шрифта",
-        )
-        self.add_argument(
-            cmdhandouts_run,
-            "--pdfsettings",
-            choices=["screen", "ebook", "printer", "prepress", "default"],
-            default="default",
-            advanced=True,
-            caption="Настройки pdfsettings для ghostscript",
         )
         self.add_argument(
             cmdhandouts_run,
@@ -1092,7 +1085,7 @@ class ArgparseBuilder:
             cmdhandouts_run,
             "--tikz_mm",
             type=float,
-            default=2,
+            default=None,
             help="tikz_mm width",
             caption="Ширина tikz_mm",
             advanced=True,
@@ -1178,6 +1171,15 @@ class ArgparseBuilder:
             "-f",
             help="font",
             caption="Шрифт",
+        )
+        self.add_argument(
+            cmdhandouts_pack,
+            "--compress_pdf",
+            choices=["on", "off"],
+            default="on",
+            help="compress output PDF",
+            caption="Сжать PDF после сборки",
+            advanced=True,
         )
 
         cmdhandouts_install = self.add_parser(cmdhandouts_subcommands, "install")

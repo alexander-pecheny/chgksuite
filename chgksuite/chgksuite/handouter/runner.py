@@ -28,7 +28,7 @@ from chgksuite.handouter.tex_internals import (
     TIKZBOX_INNER,
     TIKZBOX_START,
 )
-from chgksuite.handouter.utils import parse_handouts, read_file, replace_ext, write_file
+from chgksuite.handouter.utils import compress_pdf, parse_handouts, read_file, replace_ext, write_file
 
 
 def rotate_image(image_path, direction):
@@ -63,6 +63,7 @@ def rotate_image(image_path, direction):
 
 class HandoutGenerator:
     SPACE = 1.5  # mm
+    DEFAULT_TIKZ_MM = 2  # mm
 
     def __init__(self, args):
         self.args = args
@@ -82,7 +83,7 @@ class HandoutGenerator:
             .replace("<MARGIN_RIGHT>", str(self.args.margin_right))
             .replace("<MARGIN_TOP>", str(self.args.margin_top))
             .replace("<MARGIN_BOTTOM>", str(self.args.margin_bottom))
-            .replace("<TIKZ_MM>", str(self.args.tikz_mm))
+            .replace("<TIKZ_MM>", str(self.args.tikz_mm if self.args.tikz_mm is not None else self.DEFAULT_TIKZ_MM))
         )
         if self.args.font:
             header = header.replace("Arial", self.args.font)
@@ -367,7 +368,12 @@ class HandoutGenerator:
             print(
                 f"columns: {columns}, boxwidth: {boxwidth}, total width: {total_width}"
             )
-        effective_tikz_mm = tikz_mm if tikz_mm is not None else self.args.tikz_mm
+        if self.args.tikz_mm is not None:
+            effective_tikz_mm = self.args.tikz_mm
+        elif tikz_mm is not None:
+            effective_tikz_mm = tikz_mm
+        else:
+            effective_tikz_mm = self.DEFAULT_TIKZ_MM
         boxwidthinner = self.args.boxwidthinner or (boxwidth - 2 * effective_tikz_mm)
         header = [
             r"\setlength{\boxwidth}{<Q>mm}%".replace("<Q>", str(boxwidth)),
@@ -400,7 +406,7 @@ class HandoutGenerator:
                     row_idx, col_idx, num_rows, columns, team_cols, team_rows,
                     hspace=hspace, vspace=vspace_val if vspace_val is not None else 1.0,
                 )
-                row_boxes.append(self.make_tikzbox(block, edges, ext, inner_sep=tikz_mm))
+                row_boxes.append(self.make_tikzbox(block, edges, ext, inner_sep=effective_tikz_mm))
             row = (
                 TIKZBOX_START.replace("<CENTERING>", block["centering"])
                 + "\n".join(row_boxes)
@@ -476,28 +482,8 @@ def process_file(args, file_dir, bn):
 
     output_file = replace_ext(tex_path, "pdf")
 
-    if args.compress:
-        print(f"compressing {output_file}")
-        size_before = round(os.stat(output_file).st_size / 1024)
-        output_file_compressed = output_file[:-4] + ".compressed.pdf"
-        subprocess.run(
-            [
-                "gs",
-                "-sDEVICE=pdfwrite",
-                "-dCompatibilityLevel=1.5",
-                f"-dPDFSETTINGS=/{args.pdfsettings}",
-                "-dNOPAUSE",
-                "-dQUIET",
-                "-dBATCH",
-                f"-sOutputFile={output_file_compressed}",
-                output_file,
-            ],
-            check=True,
-        )
-        shutil.move(output_file_compressed, output_file)
-        size_after = round(os.stat(output_file).st_size / 1024)
-        q = round(size_after / size_before, 1)
-        print(f"before: {size_before}kb, after: {size_after}kb, compression: {q}")
+    if args.compress_pdf == "on":
+        compress_pdf(output_file)
 
     print(f"Output file: {output_file}")
 

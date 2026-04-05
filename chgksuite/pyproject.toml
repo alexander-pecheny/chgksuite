@@ -33,6 +33,7 @@ dependencies = [
     "Pillow",
     "playwright",
     "ply",
+    "pymupdf>=1.26.5",
     "pypandoc",
     "pypdf",
     "pyperclip",

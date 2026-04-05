@@ -6,7 +6,7 @@ import subprocess
 
 from pypdf import PdfWriter
 
-from chgksuite.handouter.utils import parse_handouts
+from chgksuite.handouter.utils import compress_pdf, parse_handouts
 
 
 def run_hndt(fullpath, args):
@@ -19,7 +19,7 @@ def run_hndt(fullpath, args):
     return lines[-1].split("Output file:")[1].strip()
 
 
-def pdf_output(pages, filename):
+def pdf_output(pages, filename, compress=True):
     print(f"merging to {filename}, total pages {len(pages)}...")
     merger = PdfWriter()
 
@@ -28,6 +28,8 @@ def pdf_output(pages, filename):
 
     merger.write(filename)
     merger.close()
+    if compress:
+        compress_pdf(filename)
 
 
 def pack_handouts(args):
@@ -69,13 +71,16 @@ def pack_handouts(args):
             color_pages += [output_file] * pages
         else:
             bw_pages += [output_file] * pages
+    compress = args.compress_pdf == "on"
     if color_pages:
         pdf_output(
             color_pages,
             os.path.join(args.folder, args.output_filename_prefix + "_color.pdf"),
+            compress=compress,
         )
     if bw_pages:
         pdf_output(
             bw_pages,
             os.path.join(args.folder, args.output_filename_prefix + "_bw.pdf"),
+            compress=compress,
         )

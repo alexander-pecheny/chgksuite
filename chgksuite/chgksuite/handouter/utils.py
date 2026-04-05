@@ -1,4 +1,7 @@
 import os
+import shutil
+
+import pymupdf
 
 from chgksuite.handouter.installer import escape_latex
 
@@ -20,6 +23,17 @@ RESERVED_WORDS = [
     "hspace",
     "vspace",
 ]
+
+
+def compress_pdf(path):
+    size_before = os.stat(path).st_size
+    tmp = path + ".tmp"
+    doc = pymupdf.open(path)
+    doc.save(tmp, garbage=4, deflate=True)
+    doc.close()
+    shutil.move(tmp, path)
+    size_after = os.stat(path).st_size
+    print(f"compressed: {size_before // 1024}kb -> {size_after // 1024}kb ({round(size_after / size_before * 100)}%)")
 
 
 def read_file(filepath):
