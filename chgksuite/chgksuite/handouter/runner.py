@@ -431,7 +431,8 @@ def get_num_teams(filepath):
 def process_file(args, file_dir, bn):
     generator = HandoutGenerator(args)
     tex_contents = generator.generate()
-    num_teams = get_num_teams(args.filename)
+    add_n_teams = getattr(args, "add_n_teams", "off") == "on"
+    num_teams = get_num_teams(args.filename) if add_n_teams else None
     if num_teams is not None:
         pdf_bn = f"{bn}_{num_teams}teams_{args.language}"
     else:

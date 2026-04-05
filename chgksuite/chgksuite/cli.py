@@ -1089,6 +1089,15 @@ class ArgparseBuilder:
             caption="Ширина tikz_mm",
             advanced=True,
         )
+        self.add_argument(
+            cmdhandouts_run,
+            "--add_n_teams",
+            choices=["on", "off"],
+            default="off",
+            help="add _{n}teams suffix to output filename",
+            caption="Добавить суффикс с количеством команд",
+            advanced=True,
+        )
 
         cmdhandouts_create_html = self.add_parser(cmdhandouts_subcommands, "create_html")
         self.add_argument(
