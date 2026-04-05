@@ -98,7 +98,7 @@ class HandoutGenerator:
         )
         return GREYTEXT.replace("<GREYTEXT>", handout_text)
 
-    def make_tikzbox(self, block, edges=None, ext=None):
+    def make_tikzbox(self, block, edges=None, ext=None, inner_sep=None):
         """
         Create a TikZ box with configurable edge styles and extensions.
         edges is a dict with keys 'top', 'bottom', 'left', 'right'
@@ -132,10 +132,14 @@ class HandoutGenerator:
         contents = block["contents"]
         if block.get("font_family"):
             contents = "\\fontspec{" + block["font_family"] + "}" + contents
+        inner_sep_str = (
+            f", inner sep={inner_sep}mm" if inner_sep is not None else ""
+        )
         return (
             TIKZBOX_INNER.replace("<CONTENTS>", contents)
             .replace("<ALIGN>", align)
             .replace("<TEXTWIDTH>", textwidth)
+            .replace("<INNER_SEP_OVERRIDE>", inner_sep_str)
             .replace("<FONTSIZE>", fontsize)
             .replace("<TOP>", edges["top"])
             .replace("<BOTTOM>", edges["bottom"])
@@ -199,7 +203,8 @@ class HandoutGenerator:
         return valid_layouts[0]
 
     def get_edge_styles(
-        self, row_idx, col_idx, num_rows, columns, team_cols, team_rows
+        self, row_idx, col_idx, num_rows, columns, team_cols, team_rows,
+        hspace=None, vspace=None,
     ):
         """
         Determine edge styles and extensions for a box at position (row_idx, col_idx).
@@ -224,8 +229,10 @@ class HandoutGenerator:
         }
 
         # Gap sizes (half of spacing to extend into)
-        h_gap = "0.75mm"  # half of SPACE (1.5mm)
-        v_gap = "0.5mm"  # half of vspace (1mm)
+        h_sp = hspace if hspace is not None else self.SPACE
+        v_sp = vspace if vspace is not None else 1.0
+        h_gap = f"{h_sp / 2}mm"
+        v_gap = f"{v_sp / 2}mm"
 
         # Helper functions to check if position is at a team boundary
         def is_at_right_team_boundary():
@@ -346,17 +353,22 @@ class HandoutGenerator:
                 f"team_cols: {team_cols}, team_rows: {team_rows}, grouping: {grouping}"
             )
 
+        hspace = block.get("hspace") or self.SPACE
+        vspace_val = block.get("vspace")
+        tikz_mm = block.get("tikz_mm")
+
         spaces = columns - 1
         boxwidth = self.args.boxwidth or round(
-            (self.get_page_width() - spaces * self.SPACE) / columns,
+            (self.get_page_width() - spaces * hspace) / columns,
             3,
         )
-        total_width = boxwidth * columns + spaces * self.SPACE
+        total_width = boxwidth * columns + spaces * hspace
         if self.args.debug:
             print(
                 f"columns: {columns}, boxwidth: {boxwidth}, total width: {total_width}"
             )
-        boxwidthinner = self.args.boxwidthinner or (boxwidth - 2 * self.args.tikz_mm)
+        effective_tikz_mm = tikz_mm if tikz_mm is not None else self.args.tikz_mm
+        boxwidthinner = self.args.boxwidthinner or (boxwidth - 2 * effective_tikz_mm)
         header = [
             r"\setlength{\boxwidth}{<Q>mm}%".replace("<Q>", str(boxwidth)),
             r"\setlength{\boxwidthinner}{<Q>mm}%".replace("<Q>", str(boxwidthinner)),
@@ -385,16 +397,18 @@ class HandoutGenerator:
             row_boxes = []
             for col_idx in range(columns):
                 edges, ext = self.get_edge_styles(
-                    row_idx, col_idx, num_rows, columns, team_cols, team_rows
+                    row_idx, col_idx, num_rows, columns, team_cols, team_rows,
+                    hspace=hspace, vspace=vspace_val if vspace_val is not None else 1.0,
                 )
-                row_boxes.append(self.make_tikzbox(block, edges, ext))
+                row_boxes.append(self.make_tikzbox(block, edges, ext, inner_sep=tikz_mm))
             row = (
                 TIKZBOX_START.replace("<CENTERING>", block["centering"])
                 + "\n".join(row_boxes)
                 + TIKZBOX_END
             )
             rows.append(row)
-        return "\n".join(header) + "\n" + "\n\n\\vspace{1mm}\n\n".join(rows)
+        vs = vspace_val if vspace_val is not None else 1
+        return "\n".join(header) + "\n" + f"\n\n\\vspace{{{vs}mm}}\n\n".join(rows)
 
     def generate(self):
         for block in self.parse_input(self.args.filename):
