@@ -10,13 +10,11 @@ from chgksuite.handouter.utils import parse_handouts
 
 
 def run_hndt(fullpath, args):
-    spargs = ["hndt"]
+    spargs = ["chgksuite", "handouts", "hndt2pdf"]
     if args.font:
         spargs.extend(["--font", args.font])
     spargs.append(fullpath)
     proc = subprocess.run(spargs, cwd=args.folder, check=True, capture_output=True)
-    ns = globals()
-    ns.update(locals())
     lines = [line for line in proc.stdout.decode("utf8").split("\n") if line]
     return lines[-1].split("Output file:")[1].strip()
 
@@ -41,12 +39,16 @@ def pack_handouts(args):
     bw_pages = []
 
     for fn in sorted(os.listdir(args.folder)):
-        if not fn.endswith(".txt"):
+        if not fn.endswith((".hndt", ".txt")):
             continue
         fullpath = os.path.join(args.folder, fn)
         with open(fullpath, encoding="utf8") as f:
             contents = f.read()
-        parsed = parse_handouts(contents)
+        try:
+            parsed = parse_handouts(contents)
+        except:
+            print(f"couldn't parse {fn}, skipping")
+            continue
         if len(parsed) > 1:
             print(f"skipping {fn}: more than one handout per txt is not supported")
             continue
