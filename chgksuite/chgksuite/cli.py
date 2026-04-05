@@ -485,6 +485,14 @@ class ArgparseBuilder:
             help="one line break after question instead of two.",
             caption="Один перенос строки после вопроса вместо двух",
         )
+        self.add_argument(
+            cmdcompose_docx,
+            "--ignore_missing_images",
+            action="store_true",
+            help="insert placeholder text instead of failing when an image is not found.",
+            advanced=True,
+            caption="Игнорировать отсутствующие картинки",
+        )
 
         cmdcompose_tex = cmdcompose_filetype.add_parser("tex")
         self.add_argument(

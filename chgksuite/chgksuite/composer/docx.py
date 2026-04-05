@@ -1,5 +1,6 @@
 import os
 import re
+import shlex
 import shutil
 import sys
 import tempfile
@@ -269,12 +270,23 @@ def format_docx_element(
                 if run[1].endswith(".shtml"):
                     r = para.add_run("(ТУТ БЫЛА ССЫЛКА НА ПРОТУХШУЮ КАРТИНКУ)\n")
                     continue
-                parsed_image = parseimg(
-                    run[1],
-                    dimensions="inches",
-                    tmp_dir=kwargs.get("tmp_dir"),
-                    targetdir=kwargs.get("targetdir"),
-                )
+                try:
+                    parsed_image = parseimg(
+                        run[1],
+                        dimensions="inches",
+                        tmp_dir=kwargs.get("tmp_dir"),
+                        targetdir=kwargs.get("targetdir"),
+                    )
+                except Exception as e:
+                    if kwargs.get("ignore_missing_images"):
+                        filename = shlex.split(run[1])[-1]
+                        sys.stderr.write(
+                            f"MISSING IMAGE: {filename}\n"
+                        )
+                        r = para.add_run(f"\nMISSING IMAGE {filename}\n")
+                        r.bold = True
+                        continue
+                    raise
                 imgfile = parsed_image["imgfile"]
                 width = parsed_image["width"]
                 height = parsed_image["height"]
@@ -526,6 +538,8 @@ class DocxExporter(BaseExporter):
 
     def _docx_format(self, *args, **kwargs):
         kwargs.update(self.dir_kwargs)
+        if getattr(self.args, "ignore_missing_images", False):
+            kwargs["ignore_missing_images"] = True
         return format_docx_element(
             self.doc,
             *args,
@@ -558,6 +572,9 @@ class DocxExporter(BaseExporter):
     def add_question(
         self, element, skip_qcount=False, screen_mode=False, external_para=None
     ):
+        extra_kwargs = dict(self.dir_kwargs)
+        if getattr(self.args, "ignore_missing_images", False):
+            extra_kwargs["ignore_missing_images"] = True
         self.qcount = add_question_to_docx(
             self.doc,
             element[1],
@@ -573,7 +590,7 @@ class DocxExporter(BaseExporter):
             self.args.language,
             self.args.only_question_number,
             self.logger,
-            **self.dir_kwargs,
+            **extra_kwargs,
         )
 
     def _add_question_columns(self, element):
