@@ -79,6 +79,21 @@ def unquote(bytestring):
     return urllib.parse.unquote(bytestring.decode("utf8")).encode("utf8")
 
 
+GAME_EXTENSIONS = {"si": "si4s", "brain": "br4s"}
+_EXT_TO_GAME = {v: k for k, v in GAME_EXTENSIONS.items()}
+
+
+def game_to_ext(game):
+    """Return the 4s-family file extension for a game mode."""
+    return GAME_EXTENSIONS.get(game, "4s")
+
+
+def ext_to_game(filename):
+    """Detect game mode from a .si4s / .br4s / .4s file extension."""
+    ext = os.path.splitext(filename)[1].lstrip(".")
+    return _EXT_TO_GAME.get(ext)
+
+
 def make_filename(s, ext, args, addsuffix=""):
     bn = os.path.splitext(os.path.basename(s))[0]
     if addsuffix:
@@ -411,6 +426,7 @@ class BaseExporter:
         self.structure = args[0]
         self.args = args[1]
         self.dir_kwargs = args[2]
+        self.game = getattr(self.args, "game", None)
         with open(self.args.labels_file, encoding="utf8") as f:
             self.labels = toml.load(f)
         with open(self.args.regexes_file, encoding="utf8") as f:

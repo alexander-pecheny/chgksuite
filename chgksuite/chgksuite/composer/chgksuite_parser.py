@@ -71,7 +71,7 @@ def process_list(element):
 
 RE_COUNTER = "4SCOUNTER(?P<counter_id>[0-9a-zA-Z_]*)"
 RE_SET_COUNTER = (
-    "set 4SCOUNTER(?P<counter_id_set>[0-9a-zA-Z_]*) = (?P<counter_value>[0-9+])"
+    "set 4SCOUNTER(?P<counter_id_set>[0-9a-zA-Z_]*) = (?P<counter_value>[0-9+]+)"
 )
 RE_COUNTER_UNIFY = re.compile(f"({RE_COUNTER}|{RE_SET_COUNTER})")
 
@@ -95,13 +95,19 @@ def replace_counters(string_):
     return string_
 
 
-def parse_4s(s, randomize=False, debug=False, logger=None, debug_dir=None):
+def parse_4s(
+    s, randomize=False, debug=False, logger=None, debug_dir=None, required_fields=None,
+    game=None,
+):
     logger = logger or init_logger("composer")
     mapping = {
         "#": "meta",
         "##": "section",
         "###": "heading",
         "###LJ": "ljheading",
+        "#B": "battle",
+        "#R": "round",
+        "#T": "theme",
         "#EDITOR": "editor",
         "#DATE": "date",
         "?": "question",
@@ -155,7 +161,15 @@ def parse_4s(s, randomize=False, debug=False, logger=None, debug_dir=None):
         process_list(element)
 
         if element[0] in QUESTION_LABELS:
-            if element[0] in current_question:
+            # Pass through standalone fields that aren't part of a question
+            if not current_question and element[0] not in (
+                "question",
+                "answer",
+                "number",
+                "setcounter",
+            ):
+                final_structure.append([element[0], element[1]])
+            elif element[0] in current_question:
                 if isinstance(current_question[element[0]], str) and isinstance(
                     element[1], str
                 ):
@@ -209,6 +223,10 @@ def parse_4s(s, randomize=False, debug=False, logger=None, debug_dir=None):
                 current_question = {}
 
         else:
+            if element[0] == "theme":
+                counter = 10
+            elif game == "brain" and element[0] in ("battle", "section"):
+                counter = 1
             final_structure.append([element[0], element[1]])
 
     if current_question != {}:
@@ -230,6 +248,21 @@ def parse_4s(s, randomize=False, debug=False, logger=None, debug_dir=None):
                 "be omitted.".format(log_wrap(current_question))
             )
 
+    # Number SI themes inline so every consumer can rely on the same numbering.
+    # The theme counter resets on each battle and section boundary.
+    theme_number = 0
+    for element in final_structure:
+        if element[0] in ("battle", "section"):
+            theme_number = 0
+        elif element[0] == "theme" and isinstance(element[1], str):
+            theme_number += 1
+            name = element[1]
+            element[1] = {
+                "name": name,
+                "number": theme_number,
+                "label": f"Тема {theme_number}. {name}",
+            }
+
     if randomize:
         random.shuffle(final_structure)
         i = 1
@@ -244,7 +277,7 @@ def parse_4s(s, randomize=False, debug=False, logger=None, debug_dir=None):
 
     for element in final_structure:
         if element[0] == "Question":
-            check_question(element[1], logger=logger)
+            check_question(element[1], logger=logger, required_fields=required_fields)
             for field in [
                 "handout",
                 "question",

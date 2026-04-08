@@ -39,6 +39,31 @@ def get_saved_telegram_targets():
         return []
 
 
+_TG_TAGS = (
+    "b", "strong", "i", "em", "u", "ins", "s", "strike", "del",
+    "tg-spoiler", "tg-emoji", "a", "code", "pre", "span", "blockquote",
+)
+_TG_TAG_RE = re.compile(
+    r"</?(?:" + "|".join(_TG_TAGS) + r")(?:\s[^>]*)?>", re.IGNORECASE
+)
+
+
+def tg_len(html):
+    """Return text length after stripping Telegram-supported HTML tags."""
+    return len(_TG_TAG_RE.sub("", html))
+
+
+# Telegram silently drops entities beyond this limit per message.
+_TG_MAX_ENTITIES = 100
+
+_TG_ENTITY_RE = re.compile(r"<(?:b|strong|i|em|u|s|a |code|pre)")
+
+
+def tg_entity_count(html):
+    """Estimate the number of Telegram entities in an HTML string."""
+    return len(_TG_ENTITY_RE.findall(html))
+
+
 def get_text(msg_data):
     if "message" in msg_data and "text" in msg_data["message"]:
         return msg_data["message"]["text"]
@@ -67,6 +92,7 @@ class TelegramExporter(BaseExporter):
         self.auth_uuid = uuid.uuid4().hex[:8]
         self.chat_auth_uuid = uuid.uuid4().hex[:8]
         self.session = requests.Session()
+        self.si_mode = self.game == "si"
         self.init_telegram()
 
     def check_connectivity(self):
@@ -163,7 +189,7 @@ class TelegramExporter(BaseExporter):
 
     def structure_has_stats(self):
         for element in self.structure:
-            if element[0] == "Question" and "\nВзятия:" in element[1].get("comment"):
+            if element[0] == "Question" and "Взятия:" in (element[1].get("comment") or ""):
                 return True
         return False
 
@@ -254,9 +280,9 @@ class TelegramExporter(BaseExporter):
 
                 return response_data["result"]
             except requests.exceptions.RequestException as e:
-                if "Connection reset by peer" in str(e):
+                if isinstance(e, requests.exceptions.ConnectionError) or "Connection reset by peer" in str(e):
                     self.logger.warning(
-                        f"Connection reset by peer. Retrying in {retry_delay} seconds..."
+                        f"Connection error: {e}. Retrying in {retry_delay} seconds..."
                     )
                     time.sleep(retry_delay)
                     retry_delay = min(retry_delay * 2, max_retry_delay)
@@ -375,9 +401,13 @@ class TelegramExporter(BaseExporter):
                     if os.path.isfile(imgfile):
                         max_side = 800 if self.args.resize_images else None
                         orig_size = Image.open(imgfile).size
-                        image = self.prepare_image_for_telegram(imgfile, max_side=max_side)
+                        image = self.prepare_image_for_telegram(
+                            imgfile, max_side=max_side
+                        )
                         if max_side and max(orig_size) > max_side:
-                            self.logger.info(f"Resized image {imgfile}: {orig_size[0]}x{orig_size[1]} -> max {max_side}px")
+                            self.logger.info(
+                                f"Resized image {imgfile}: {orig_size[0]}x{orig_size[1]} -> max {max_side}px"
+                            )
                     else:
                         raise Exception(f"image {run[1]} doesn't exist")
             else:
@@ -541,7 +571,8 @@ class TelegramExporter(BaseExporter):
             self.logger.info("Skipping posting due to dry run")
             for post in posts:
                 self.logger.info(post)
-            return
+            self._dry_run_msg_counter = getattr(self, "_dry_run_msg_counter", 0) + 1
+            return [{"message_id": self._dry_run_msg_counter, "chat": {"id": 0}}]
 
         messages = []
         text, im = posts[0]
@@ -617,10 +648,26 @@ class TelegramExporter(BaseExporter):
     def post_wrapper(self, posts):
         """Wrapper for post() that handles section links and tour tracking."""
         messages = self.post(posts)
-        if messages and self.section and not self.args.dry_run:
+        if messages:
             link = self.get_message_link(self.channel_id, messages[0]["message_id"])
-            self.section_links.append((link, self._tour_number))
-            self._tour_discussion_msg_id = self._last_discussion_msg_id
+            if self.si_mode and self._si_pending_group is not None:
+                self._si_nav.append(
+                    {"type": "group", "name": self._si_pending_group, "link": link}
+                )
+                self._si_pending_group = None
+            if self.section:
+                if self.si_mode:
+                    self._si_nav.append(
+                        {
+                            "type": "theme",
+                            "num": self._si_current_theme_number,
+                            "name": self._si_current_theme_name,
+                            "link": link,
+                        }
+                    )
+                else:
+                    self.section_links.append((link, self._tour_number))
+                self._tour_discussion_msg_id = self._last_discussion_msg_id
         self.section = False
 
     def _extract_tour_number(self, section_text):
@@ -636,22 +683,28 @@ class TelegramExporter(BaseExporter):
             if "setcounter" in q:
                 self.qcount = int(q["setcounter"])
             number = self.qcount if "number" not in q else q["number"]
-            self.qcount += 1
+            if not self.si_mode:
+                self.qcount += 1
             self.number = number
             if self.args.skip_until and (
                 not tryint(number) or tryint(number) < self.args.skip_until
             ):
                 self.logger.info(f"skipping question {number}")
                 return
-            if self.buffer_texts or self.buffer_images:
-                posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
+            if self.si_mode:
+                text, images = self.tg_format_si_question_text(pair[1], number=number)
+                self.buffer_texts.append(text)
+                self.buffer_images.extend(images)
+            else:
+                if self.buffer_texts or self.buffer_images:
+                    posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
+                    self.post_wrapper(posts)
+                    self.buffer_texts = []
+                    self.buffer_images = []
+                posts = self.tg_format_question(pair[1], number=number)
                 self.post_wrapper(posts)
-                self.buffer_texts = []
-                self.buffer_images = []
-            posts = self.tg_format_question(pair[1], number=number)
-            self.post_wrapper(posts)
-            if self._polls_enabled:
-                self._post_question_poll(number)
+                if self._polls_enabled:
+                    self._post_question_poll(number)
         elif self.args.skip_until and (
             not tryint(self.number) or tryint(self.number) < self.args.skip_until
         ):
@@ -677,11 +730,67 @@ class TelegramExporter(BaseExporter):
             self._tour_seq += 1
             self.buffer_texts.append(f"<b>{text}</b>")
             self.buffer_images.extend(images)
+            if self.si_mode:
+                self._si_pending_group = text
+            else:
+                self.section = True
+        elif pair[0] == "battle":
+            if self.buffer_texts or self.buffer_images:
+                posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
+                self.post_wrapper(posts)
+                self.buffer_texts = []
+                self.buffer_images = []
+            text, images = self.tg_element_layout(pair[1])
+            self.buffer_texts.append(f"<b>{text}</b>")
+            self.buffer_images.extend(images)
+            self._si_pending_group = text
+        elif pair[0] == "theme":
+            if self.buffer_texts or self.buffer_images:
+                posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
+                self.post_wrapper(posts)
+                self.buffer_texts = []
+                self.buffer_images = []
+            if self._polls_enabled:
+                self._post_tour_poll()
+            self._si_current_theme_name = pair[1]["name"]
+            self._si_current_theme_number = pair[1]["number"]
+            theme_label = pair[1]["label"]
+            text, images = self.tg_element_layout(theme_label)
+            self._tour_number = str(pair[1]["number"])
+            self._tour_seq += 1
+            self.buffer_texts.append(f"<b>{text}</b>")
+            self.buffer_images.extend(images)
             self.section = True
+        elif pair[0] == "round":
+            if self.buffer_texts or self.buffer_images:
+                posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
+                self.post_wrapper(posts)
+                self.buffer_texts = []
+                self.buffer_images = []
+            text, images = self.tg_element_layout(pair[1])
+            self.buffer_texts.append(f"<b>{text}</b>")
+            self.buffer_images.extend(images)
+            self._si_pending_group = text
+        elif pair[0] in ("comment", "author") and self.si_mode:
+            field_label = self.labels["question_labels"].get(
+                pair[0], pair[0].capitalize()
+            )
+            text, images = self.tg_element_layout(pair[1])
+            if text:
+                formatted = f"<b>{field_label}:</b> {text}"
+                if self.buffer_texts:
+                    self.buffer_texts[-1] += "\n" + formatted
+                else:
+                    self.buffer_texts.append(formatted)
+            if images:
+                self.buffer_images.extend(images)
         else:
             text, images = self.tg_element_layout(pair[1])
             if text:
-                self.buffer_texts.append(text)
+                if self.si_mode and self.buffer_texts:
+                    self.buffer_texts[-1] += "\n" + text
+                else:
+                    self.buffer_texts.append(text)
             if images:
                 self.buffer_images.extend(images)
 
@@ -700,7 +809,7 @@ class TelegramExporter(BaseExporter):
         while res.endswith("\n"):
             res = res[:-1]
         if res.endswith("\n</tg-spoiler>"):
-            res = res[:-3] + "</tg-spoiler>"
+            res = res[:-len("\n</tg-spoiler>")] + "</tg-spoiler>"
         if self.args.nospoilers:
             res = res.replace("<tg-spoiler>", "")
             res = res.replace("</tg-spoiler>", "")
@@ -715,16 +824,20 @@ class TelegramExporter(BaseExporter):
             threshold = 1024
         else:
             im = None
-            threshold = 2048
+            threshold = 4096
         if not texts:
             return "", im, texts, images
-        if len(texts[0]) <= threshold:
+        if tg_len(texts[0]) <= threshold:
             for i in range(0, len(texts)):
                 if i:
-                    text = self.assemble(texts[:-i])
+                    candidate = texts[:-i]
                 else:
-                    text = self.assemble(texts)
-                if len(text) <= threshold:
+                    candidate = texts
+                if self.si_mode:
+                    text = "\n\n".join(t for t in candidate if t)
+                else:
+                    text = self.assemble(candidate)
+                if tg_len(text) <= threshold:
                     if i:
                         texts = texts[-i:]
                     else:
@@ -768,13 +881,65 @@ class TelegramExporter(BaseExporter):
             return l_[0] + "\n" + "\n".join([x for x in l_[1:]])
         return "\n".join(l_)
 
+    def tg_format_si_question_text(self, q, number=None):
+        """Format an SI question as a text block for buffering.
+
+        Returns (text, images) where text is the full formatted question
+        and images is a list of image paths.
+        """
+        txt_q, images_q = self.tgyapper(q["question"])
+        txt_q = "<b>{}:</b> {}".format(str(number), txt_q)
+        images = list(images_q)
+        txt_a, images_ = self.tgyapper(q["answer"])
+        images.extend(images_)
+        txt_a = "<b>{}:</b> {}".format(self.get_label(q, "answer"), txt_a)
+        txt_z = ""
+        txt_nz = ""
+        txt_comm = ""
+        txt_s = ""
+        txt_au = ""
+        if "zachet" in q:
+            txt_z, imgs = self.tgyapper(q["zachet"])
+            images.extend(imgs)
+            txt_z = "<b>{}:</b> {}".format(self.get_label(q, "zachet"), txt_z)
+        if "nezachet" in q:
+            txt_nz, imgs = self.tgyapper(q["nezachet"])
+            images.extend(imgs)
+            txt_nz = "<b>{}:</b> {}".format(self.get_label(q, "nezachet"), txt_nz)
+        if "comment" in q:
+            txt_comm, imgs = self.tgyapper(q["comment"])
+            images.extend(imgs)
+            txt_comm = "<b>{}:</b> {}".format(self.get_label(q, "comment"), txt_comm)
+        if "source" in q:
+            txt_s, imgs = self.tgyapper(q["source"])
+            images.extend(imgs)
+            txt_s = f"<b>{self.get_label(q, 'source')}:</b> {txt_s}"
+        if "author" in q:
+            txt_au, imgs = self.tgyapper(q["author"])
+            images.extend(imgs)
+            txt_au = f"<b>{self.get_label(q, 'author')}:</b> {txt_au}"
+        text = self.assemble(
+            [
+                txt_q,
+                self.swrap(txt_a, t="left"),
+                txt_z,
+                txt_nz,
+                txt_comm,
+                self.swrap(txt_s, t="right"),
+                txt_au,
+            ],
+            lb_after_first=True,
+        )
+        return text, images
+
     def tg_format_question(self, q, number=None):
         txt_q, images_q = self.tgyapper(q["question"])
-        txt_q = "<b>{}:</b> {}  \n".format(
-            self.get_label(q, "question", number=number),
-            txt_q,
-        )
-        if "number" not in q:
+        if self.si_mode:
+            q_label = str(number)
+        else:
+            q_label = self.get_label(q, "question", number=number)
+        txt_q = "<b>{}:</b> {}  \n".format(q_label, txt_q)
+        if not self.si_mode and "number" not in q:
             self.qcount += 1
         images_a = []
         txt_a, images_ = self.tgyapper(q["answer"])
@@ -805,7 +970,7 @@ class TelegramExporter(BaseExporter):
             txt_au, images_ = self.tgyapper(q["author"])
             images_a.extend(images_)
             txt_au = f"<b>{self.get_label(q, 'author')}:</b> {txt_au}"
-        q_threshold = 2048 if not images_q else 1024
+        q_threshold = 4096 if not images_q else 1024
         full_question = self.assemble(
             [
                 txt_q,
@@ -818,12 +983,12 @@ class TelegramExporter(BaseExporter):
             ],
             lb_after_first=True,
         )
-        if len(full_question) <= q_threshold:
+        if tg_len(full_question) <= q_threshold:
             res = [(full_question, images_q[0] if images_q else None)]
             for i in images_a:
                 res.append(("", i))
             return res
-        elif images_q and len(full_question) <= 2048:
+        elif images_q and tg_len(full_question) <= 4096:
             full_question = re.sub(
                 "\\[" + self.labels["question_labels"]["handout"] + ": +?\\]\n",
                 "",
@@ -843,7 +1008,7 @@ class TelegramExporter(BaseExporter):
             ],
             lb_after_first=True,
         )
-        if len(q_without_s) <= q_threshold:
+        if tg_len(q_without_s) <= q_threshold:
             res = [(q_without_s, images_q[0] if images_q else None)]
             res.extend(
                 self.split_to_messages(
@@ -852,7 +1017,7 @@ class TelegramExporter(BaseExporter):
             )
             return res
         q_a_only = self.assemble([txt_q, self.swrap(txt_a)], lb_after_first=True)
-        if len(q_a_only) <= q_threshold:
+        if tg_len(q_a_only) <= q_threshold:
             res = [(q_a_only, images_q[0] if images_q else None)]
             res.extend(
                 self.split_to_messages(
@@ -965,7 +1130,9 @@ class TelegramExporter(BaseExporter):
             )
             self.logger.info("Disabled emoji reactions on channel")
         except Exception as e:
-            self.logger.warning(f"Could not disable reactions (bot may lack permissions): {e}")
+            self.logger.warning(
+                f"Could not disable reactions (bot may lack permissions): {e}"
+            )
 
     def _post_question_poll(self, number):
         """Post a question poll if configured."""
@@ -974,7 +1141,9 @@ class TelegramExporter(BaseExporter):
         cfg = self.poll_config["question_poll"]
         if self.poll_mode == "comment" and self._last_discussion_msg_id:
             self._post_poll(
-                self.chat_id, cfg, {"NUMBER": number},
+                self.chat_id,
+                cfg,
+                {"NUMBER": number},
                 reply_to_message_id=self._last_discussion_msg_id,
             )
         else:
@@ -989,7 +1158,9 @@ class TelegramExporter(BaseExporter):
         cfg = self.poll_config["tour_poll"]
         if self.poll_mode == "comment" and self._tour_discussion_msg_id:
             self._post_poll(
-                self.chat_id, cfg, {"NUMBER": self._tour_number},
+                self.chat_id,
+                cfg,
+                {"NUMBER": self._tour_number},
                 reply_to_message_id=self._tour_discussion_msg_id,
             )
         else:
@@ -1003,7 +1174,9 @@ class TelegramExporter(BaseExporter):
         title = self.tg_heading or ""
         if self.poll_mode == "comment" and nav_discussion_msg_id:
             self._post_poll(
-                self.chat_id, cfg, {"TITLE": title},
+                self.chat_id,
+                cfg,
+                {"TITLE": title},
                 reply_to_message_id=nav_discussion_msg_id,
             )
         else:
@@ -1019,6 +1192,10 @@ class TelegramExporter(BaseExporter):
         self._tour_discussion_msg_id = None
         self._tour_number = None
         self._tour_seq = 0
+        self._si_nav = []
+        self._si_pending_group = None
+        self._si_current_theme_name = None
+        self._si_current_theme_number = None
         self._polls_enabled = getattr(self.args, "add_polls", False)
         self.poll_config = {}
         self.poll_mode = "comment"
@@ -1154,22 +1331,104 @@ class TelegramExporter(BaseExporter):
 
         # Create and pin navigation message with links to sections
         if not self.args.skip_until:
-            navigation_text = [self.labels["general"]["general_impressions_text"]]
+            navigation_lines = [self.labels["general"]["general_impressions_text"]]
             if self.tg_heading:
-                navigation_text = [
+                navigation_lines = [
                     f"<b>{self.tg_heading}</b>",
                     "",
-                ] + navigation_text
-            for link, tour_number in self.section_links:
-                display = tour_number if tour_number else ""
-                navigation_text.append(
-                    f"{self.labels['general']['section']} {display}: {link}"
-                )
-            navigation_text = "\n".join(navigation_text)
+                ] + navigation_lines
+
+            if self.si_mode:
+                # SI navigation: main post has stages/battles only,
+                # comments have full detail with themes
+                header_block = "\n".join(navigation_lines)
+
+                # Build main nav (groups only) and detail nav (groups + themes)
+                main_lines = [header_block]
+                detail_blocks = [header_block]
+                current_themes = []
+                current_group_line = None
+                for entry in self._si_nav:
+                    if entry["type"] == "group":
+                        if current_group_line is not None:
+                            block = current_group_line
+                            if current_themes:
+                                block += "\n" + ", ".join(current_themes)
+                            detail_blocks.append(block)
+                            current_themes = []
+                        current_group_line = (
+                            f'<b><a href="{entry["link"]}">{entry["name"]}</a></b>'
+                        )
+                        main_lines.append(current_group_line)
+                    elif entry["type"] == "theme":
+                        current_themes.append(
+                            '<a href="{}">{}.{}{}</a>'.format(
+                                entry["link"],
+                                entry["num"],
+                                "\u00a0" if len(str(entry["num"])) < 2 else " ",
+                                entry["name"],
+                            )
+                        )
+                if current_group_line is not None:
+                    block = current_group_line
+                    if current_themes:
+                        block += "\n" + ", ".join(current_themes)
+                    detail_blocks.append(block)
+
+                # Main post: just stages/battles
+                main_nav_text = "\n".join(main_lines)
+                navigation_posts = [(main_nav_text, None)]
+
+                # Detail posts for comments: full blocks with themes
+                # Split on both text length (4096) and entity count (100).
+                detail_posts = []
+                current_msg = ""
+                for block in detail_blocks:
+                    candidate = (
+                        block if not current_msg
+                        else current_msg + "\n\n" + block
+                    )
+                    if (tg_len(candidate) <= 4096
+                            and tg_entity_count(candidate) < _TG_MAX_ENTITIES):
+                        current_msg = candidate
+                    else:
+                        if current_msg:
+                            detail_posts.append((current_msg, None))
+                        current_msg = block
+                if current_msg:
+                    detail_posts.append((current_msg, None))
+            else:
+                nav_label = self.labels["general"]["section"]
+                for link, tour_number in self.section_links:
+                    display = tour_number if tour_number else ""
+                    navigation_lines.append(f"{nav_label} {display}: {link}")
+                navigation_text = "\n".join(navigation_lines)
+                navigation_posts = [(navigation_text, None)]
 
             # Post the navigation message
             if not self.args.dry_run:
-                message = self._post(self.channel_id, navigation_text.strip(), None)
+                message = self._post(
+                    self.channel_id, navigation_posts[0][0].strip(), None
+                )
+
+                # Post detail navigation with themes in discussion thread
+                comment_posts = (
+                    detail_posts if self.si_mode and detail_posts
+                    else navigation_posts[1:]
+                )
+                if comment_posts:
+                    time.sleep(2.1)
+                    nav_discussion_msg_id = self.get_discussion_message(
+                        self.channel_id, message["message_id"]
+                    )
+                    for post in comment_posts:
+                        self._post(
+                            self.chat_id,
+                            post[0],
+                            post[1],
+                            reply_to_message_id=nav_discussion_msg_id,
+                        )
+                        time.sleep(random.randint(2, 4))
 
                 # Post packet poll under navigation message's discussion thread
                 if self._polls_enabled:
@@ -1358,7 +1617,7 @@ class TelegramExporter(BaseExporter):
             cursor.execute(
                 f"""
                 SELECT raw_data, created_at
-                FROM messages 
+                FROM messages
                 WHERE created_at > {threshold}
                 ORDER BY created_at DESC
             """
@@ -1395,12 +1654,11 @@ class TelegramExporter(BaseExporter):
                         # Skip this message and continue waiting
                         continue
                 elif entity_type == "channel":
+                    if "message" not in msg_data:
+                        continue
                     if msg_data["message"]["chat"]["id"] != self.control_chat_id:
                         continue
-                    if (
-                        "message" in msg_data
-                        and "forward_from_chat" in msg_data["message"]
-                    ):
+                    if "forward_from_chat" in msg_data["message"]:
                         forward_info = msg_data["message"]["forward_from_chat"]
 
                         # Extract chat ID from the message

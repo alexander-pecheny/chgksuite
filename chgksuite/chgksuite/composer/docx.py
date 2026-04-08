@@ -277,12 +277,10 @@ def format_docx_element(
                         tmp_dir=kwargs.get("tmp_dir"),
                         targetdir=kwargs.get("targetdir"),
                     )
-                except Exception as e:
+                except Exception:
                     if kwargs.get("ignore_missing_images"):
                         filename = shlex.split(run[1])[-1]
-                        sys.stderr.write(
-                            f"MISSING IMAGE: {filename}\n"
-                        )
+                        sys.stderr.write(f"MISSING IMAGE: {filename}\n")
                         r = para.add_run(f"\nMISSING IMAGE {filename}\n")
                         r.bold = True
                         continue

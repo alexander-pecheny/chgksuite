@@ -92,7 +92,7 @@ def gui_trello_upload(args):
     if isinstance(args.filename, (list, tuple)):
         if len(args.filename) == 1 and os.path.isdir(args.filename[0]):
             for filename in os.listdir(args.filename[0]):
-                if filename.endswith(".4s"):
+                if filename.endswith((".4s", ".si4s", ".br4s")):
                     filepath = os.path.join(args.filename[0], filename)
                     upload_file(filepath, trelloconfig, list_name=args.list_name)
             set_lastdir(args.filename[0])
@@ -103,7 +103,7 @@ def gui_trello_upload(args):
     elif isinstance(args.filename, str):
         if os.path.isdir(args.filename):
             for filename in os.listdir(args.filename):
-                if filename.endswith(".4s"):
+                if filename.endswith((".4s", ".si4s", ".br4s")):
                     filepath = os.path.join(args.filename, filename)
                     upload_file(filepath, trelloconfig, list_name=args.list_name)
                     set_lastdir(filepath)

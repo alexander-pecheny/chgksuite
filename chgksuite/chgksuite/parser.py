@@ -41,7 +41,7 @@ from chgksuite.common import (
     set_lastdir,
 )
 from chgksuite.composer import gui_compose
-from chgksuite.composer.composer_common import make_filename
+from chgksuite.composer.composer_common import make_filename, game_to_ext
 from chgksuite.parser_db import chgk_parse_db
 from chgksuite.typotools import re_url
 from chgksuite.typotools import remove_excessive_whitespace as rew
@@ -1185,7 +1185,8 @@ def chgk_parse_wrapper(path, args, logger=None):
     else:
         sys.stderr.write("Error: unsupported file format." + SEP)
         sys.exit()
-    outfilename = os.path.join(target_dir, make_filename(abspath, "4s", args))
+    ext = game_to_ext(getattr(args, "game", None))
+    outfilename = os.path.join(target_dir, make_filename(abspath, ext, args))
     logger.info("Output: {}".format(os.path.abspath(outfilename)))
     with open(outfilename, "w", encoding="utf-8") as output_file:
         output_file.write(compose_4s(final_structure, args=args))
@@ -1200,9 +1201,10 @@ def gui_parse(args):
         if os.path.isdir(args.filename):
             ld = args.filename
             set_lastdir(ld)
+            ext = game_to_ext(getattr(args, "game", None))
             for filename in os.listdir(args.filename):
                 if filename.endswith((".docx", ".txt")) and not os.path.isfile(
-                    os.path.join(args.filename, make_filename(filename, "4s", args))
+                    os.path.join(args.filename, make_filename(filename, ext, args))
                 ):
                     outfilename = chgk_parse_wrapper(
                         os.path.join(args.filename, filename),
@@ -1228,7 +1230,7 @@ def gui_parse(args):
         if outfilename and not args.console_mode:
             print(
                 "Please review the resulting file {}:".format(
-                    make_filename(args.filename, "4s", args)
+                    make_filename(args.filename, game_to_ext(getattr(args, "game", None)), args)
                 )
             )
             texteditor = load_settings().get("editor") or EDITORS[sys.platform]

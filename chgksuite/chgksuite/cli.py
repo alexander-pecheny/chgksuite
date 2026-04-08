@@ -12,9 +12,12 @@ from chgksuite.common import (
     load_settings,
 )
 from chgksuite.composer import gui_compose
+from chgksuite.composer.composer_common import ext_to_game
+from chgksuite.composer.si_compose import gui_compose_si
 from chgksuite.composer.telegram import get_saved_telegram_targets
 from chgksuite.handouter.runner import gui_handouter
 from chgksuite.parser import gui_parse
+from chgksuite.si_parser import gui_parse_si
 from chgksuite.trello import gui_trello
 from chgksuite.version import __version__
 
@@ -100,6 +103,15 @@ class ArgparseBuilder:
             nargs="?",
             caption="Имя файла",
             filetypes=[("chgksuite parsable files", ("*.docx", "*.txt"))],
+        )
+        self.add_argument(
+            cmdparse,
+            "--game",
+            choices=["chgk", "brain", "si"],
+            default="chgk",
+            help="game format: chgk (default), brain, or si.",
+            caption="Формат игры",
+            argtype="radiobutton",
         )
         self.add_argument(
             cmdparse,
@@ -417,7 +429,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", "*.4s")],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
         )
         self.add_argument(
             cmdcompose_docx,
@@ -509,7 +521,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", "*.4s")],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
         )
         self.add_argument(
             cmdcompose_tex,
@@ -526,7 +538,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", "*.4s")],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
         )
         self.add_argument(
             cmdcompose_lj,
@@ -587,7 +599,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", "*.4s")],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
         )
         self.add_argument(
             cmdcompose_base,
@@ -610,7 +622,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", "*.4s")],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
         )
         cmdcompose_markdown = cmdcompose_filetype.add_parser("markdown")
         self.add_argument(
@@ -619,7 +631,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", "*.4s")],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
         )
         cmdcompose_pptx = cmdcompose_filetype.add_parser("pptx")
         self.add_argument(
@@ -628,7 +640,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", "*.4s")],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
         )
         self.add_argument(
             cmdcompose_pptx,
@@ -661,7 +673,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", "*.4s")],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
         )
         self.add_argument(
             cmdcompose_telegram,
@@ -766,7 +778,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", "*.4s")],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
         )
         self.add_argument(
             cmdcompose_add_stats,
@@ -812,7 +824,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", "*.4s")],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
         )
 
         cmdtrello = subparsers.add_parser("trello")
@@ -943,7 +955,7 @@ class ArgparseBuilder:
             "filename",
             help="file with questions packet",
             caption="Имя файла с пакетом",
-            filetypes=[("chgksuite files", "*.4s")],
+            filetypes=[("chgksuite files", ("*.4s", "*.si4s", "*.br4s"))],
         )
         self.add_argument(
             cmdhandouts_generate,
@@ -1100,7 +1112,9 @@ class ArgparseBuilder:
             advanced=True,
         )
 
-        cmdhandouts_create_html = self.add_parser(cmdhandouts_subcommands, "create_html")
+        cmdhandouts_create_html = self.add_parser(
+            cmdhandouts_subcommands, "create_html"
+        )
         self.add_argument(
             cmdhandouts_create_html,
             "fraction",
@@ -1229,10 +1243,26 @@ def single_action(args, use_wrapper, resourcedir):
             setattr(args, key, val)
 
     args.passthrough = False
-    if args.action == "parse":
-        gui_parse(args)
+    # For compose, detect game from file extension (no --game flag needed)
     if args.action == "compose":
-        gui_compose(args)
+        filename = getattr(args, "filename", None)
+        if isinstance(filename, list) and filename:
+            filename = filename[0]
+        if filename:
+            args.game = ext_to_game(filename) or "chgk"
+        else:
+            args.game = "chgk"
+    if args.action == "parse":
+        game = getattr(args, "game", "chgk")
+        if game == "si":
+            gui_parse_si(args)
+        else:
+            gui_parse(args)
+    if args.action == "compose":
+        if args.game == "si":
+            gui_compose_si(args)
+        else:
+            gui_compose(args)
     if args.action == "trello":
         gui_trello(args)
     if args.action == "handouts":

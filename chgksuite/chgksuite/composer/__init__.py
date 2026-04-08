@@ -16,7 +16,7 @@ from chgksuite.common import (
     set_lastdir,
 )
 from chgksuite.composer.chgksuite_parser import parse_4s
-from chgksuite.composer.composer_common import make_filename, make_temp_directory
+from chgksuite.composer.composer_common import ext_to_game, make_filename, make_temp_directory
 from chgksuite.composer.db import DbExporter
 from chgksuite.composer.docx import DocxExporter
 from chgksuite.composer.latex import LatexExporter
@@ -75,10 +75,12 @@ def process_file_wrapper(filename, sourcedir, targetdir, args):
 
 def parse_filepath(filepath, args=None):
     args = args or DefaultArgs()
+    game = getattr(args, "game", None) or ext_to_game(filepath)
     input_text = read_text_file(filepath)
     debug_dir = os.path.dirname(os.path.abspath(filepath))
     return parse_4s(
-        input_text, randomize=args.randomize, debug=args.debug, debug_dir=debug_dir
+        input_text, randomize=args.randomize, debug=args.debug, debug_dir=debug_dir,
+        game=game,
     )
 
 

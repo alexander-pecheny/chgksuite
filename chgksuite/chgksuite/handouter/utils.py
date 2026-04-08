@@ -33,7 +33,9 @@ def compress_pdf(path):
     doc.close()
     shutil.move(tmp, path)
     size_after = os.stat(path).st_size
-    print(f"compressed: {size_before // 1024}kb -> {size_after // 1024}kb ({round(size_after / size_before * 100)}%)")
+    print(
+        f"compressed: {size_before // 1024}kb -> {size_after // 1024}kb ({round(size_after / size_before * 100)}%)"
+    )
 
 
 def read_file(filepath):
