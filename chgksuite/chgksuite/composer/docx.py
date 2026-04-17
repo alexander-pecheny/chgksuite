@@ -345,6 +345,7 @@ def add_question_to_docx(
     only_question_number=False,
     add_question_label=True,
     logger=None,
+    game=None,
     **kwargs,
 ):
     """
@@ -364,6 +365,7 @@ def add_question_to_docx(
         spoilers: Spoiler handling mode ("none", "whiten", "dots", "pagebreak")
         language: Language code
         only_question_number: Whether to show only question numbers
+        game: Game mode ("chgk", "brain", "si") — affects label formatting
         logger: Logger instance
         **kwargs: Additional arguments passed to format_docx_element
 
@@ -377,13 +379,17 @@ def add_question_to_docx(
     if logger is None:
         logger = DummyLogger()
 
+    si_mode = game == "si"
+
     q = question_data
     if external_para is None:
         p = doc.add_paragraph()
     else:
         p = external_para
     if add_question_label:
-        p.paragraph_format.space_before = DocxPt(18)
+        # SI questions sit under a theme heading with tighter spacing;
+        # ChGK ones headline their own paragraph.
+        p.paragraph_format.space_before = DocxPt(12 if si_mode else 18)
     p.paragraph_format.keep_together = True
 
     # Handle question numbering
@@ -396,15 +402,19 @@ def add_question_to_docx(
 
     # Add question label
     if add_question_label:
-        question_label = get_label_standalone(
-            q,
-            "question",
-            labels,
-            language,
-            only_question_number,
-            number=qcount if "number" not in q else q["number"],
-        )
-        p.add_run(f"{question_label}. ").bold = True
+        if si_mode:
+            number = q.get("number") if "number" in q else qcount
+            p.add_run(f"{number}. ").bold = True
+        else:
+            question_label = get_label_standalone(
+                q,
+                "question",
+                labels,
+                language,
+                only_question_number,
+                number=qcount if "number" not in q else q["number"],
+            )
+            p.add_run(f"{question_label}. ").bold = True
 
     # Add handout if present
     if "handout" in q:
@@ -426,7 +436,7 @@ def add_question_to_docx(
         )
         p.add_run("\n]")
 
-    if not noparagraph:
+    if not si_mode and not noparagraph:
         p.add_run("\n")
 
     # Add question text
@@ -526,7 +536,7 @@ class DocxExporter(BaseExporter):
         super().__init__(*args, **kwargs)
         self.qcount = 0
 
-        if self.args.font_face:
+        if getattr(self.args, "font_face", None):
             self.args.docx_template = replace_font_in_docx(
                 self.args.docx_template, self.args.font_face
             )
@@ -543,7 +553,7 @@ class DocxExporter(BaseExporter):
         return format_docx_element(
             self.doc,
             *args,
-            spoilers=self.args.spoilers,
+            spoilers=getattr(self.args, "spoilers", "off"),
             logger=self.logger,
             labels=self.labels,
             regexes=self.regexes,
@@ -584,12 +594,13 @@ class DocxExporter(BaseExporter):
             skip_qcount,
             screen_mode,
             external_para,
-            self.args.noparagraph,
-            self.args.noanswers,
-            self.args.spoilers,
+            getattr(self.args, "noparagraph", False),
+            getattr(self.args, "noanswers", False),
+            getattr(self.args, "spoilers", "off") or "off",
             self.args.language,
-            self.args.only_question_number,
-            self.logger,
+            getattr(self.args, "only_question_number", False),
+            game=self.game,
+            logger=self.logger,
             **extra_kwargs,
         )
 
@@ -625,55 +636,120 @@ class DocxExporter(BaseExporter):
 
         self.doc.add_paragraph()
 
+    def _style_para(self, para, style_name):
+        """Apply a named Word style (no-op if the template doesn't define it)."""
+        for st in self.doc.styles:
+            if st.name == style_name:
+                para.style = st
+                return True
+        return False
+
+    def _standalone_field(self, element):
+        """Render a stand-alone theme-level field such as ``@`` author or ``/`` comment."""
+        para = self.doc.add_paragraph()
+        label = self.labels["question_labels"].get(
+            element[0], element[0].capitalize()
+        )
+        run = para.add_run(f"{label}: ")
+        run.bold = True
+        self._docx_format(element[1], para, False, replace_no_break_spaces=True)
+        return para
+
     def export(self, outfilename):
         self.logger.debug(self.args.docx_template)
         self.doc = Document(self.args.docx_template)
         self.logger.debug(log_wrap(self.structure))
 
-        firsttour = True
+        si_mode = self.game == "si"
+        firsttour = True  # chgk: tracks `section` to insert page breaks
+        first_battle = True  # si: tracks first battle for page breaks
+        first_theme = True  # si: controls spacing between themes within a battle
         prev_element = None
         para = None
         page_break_before_heading = False
+
         for element in self.structure:
-            if element[0] == "meta":
+            etype = element[0]
+
+            if etype == "meta":
                 para = self.doc.add_paragraph()
                 if prev_element and prev_element[0] == "Question":
                     para.paragraph_format.space_before = DocxPt(18)
                 self._docx_format(element[1], para, False, replace_no_break_spaces=True)
                 self.doc.add_paragraph()
 
-            if element[0] in ["editor", "date", "heading", "section"]:
-                if element[0] == "heading" and para is not None:
+            elif etype in ("editor", "date", "heading", "section"):
+                # SI treats `heading` as an inline parenthetical note — no page
+                # break. ChGK treats only the first `heading` as the title and
+                # page-breaks before subsequent ones.
+                if not si_mode and etype == "heading" and para is not None:
                     page_break_before_heading = True
                 if para is None:
                     para = self.doc.paragraphs[0]
                 else:
                     para = self.doc.add_paragraph()
                 self._docx_format(element[1], para, False, replace_no_break_spaces=True)
-                if element[0] == "heading" and page_break_before_heading:
+                if etype == "heading" and page_break_before_heading:
                     para.paragraph_format.page_break_before = True
-                if element[0] == "section":
+                if etype == "section":
                     if not firsttour:
                         para.paragraph_format.page_break_before = True
                     else:
                         firsttour = False
-                if element[0] == "heading":
-                    for st in self.doc.styles:
-                        if st.name == "Heading 1":
-                            break
-                    para.style = st
-                elif element[0] == "section":
-                    for st in self.doc.styles:
-                        if st.name == "Heading 2":
-                            break
-                    para.style = st
+                    if si_mode:
+                        first_theme = True
+                if etype == "heading":
+                    self._style_para(para, "Heading 1")
+                elif etype == "section":
+                    self._style_para(para, "Heading 2")
                 para.paragraph_format.keep_with_next = True
                 para.add_run("\n")
 
-            if element[0] == "Question":
-                if self.args.screen_mode == "add_versions_columns":
+            elif si_mode and etype == "battle":
+                para = self.doc.add_paragraph()
+                self._docx_format(element[1], para, False, replace_no_break_spaces=True)
+                if not first_battle:
+                    para.paragraph_format.page_break_before = True
+                else:
+                    first_battle = False
+                self._style_para(para, "Heading 1")
+                para.paragraph_format.keep_with_next = True
+                para.add_run("\n")
+                first_theme = True
+
+            elif si_mode and etype == "round":
+                para = self.doc.add_paragraph()
+                self._docx_format(element[1], para, False, replace_no_break_spaces=True)
+                self._style_para(para, "Heading 2")
+                para.paragraph_format.keep_with_next = True
+
+            elif si_mode and etype == "theme":
+                para = self.doc.add_paragraph()
+                theme_value = element[1]
+                theme_label = (
+                    theme_value["label"]
+                    if isinstance(theme_value, dict)
+                    else theme_value
+                )
+                self._docx_format(theme_label, para, False, replace_no_break_spaces=True)
+                if not first_theme:
+                    para.paragraph_format.space_before = DocxPt(24)
+                else:
+                    first_theme = False
+                if not self._style_para(para, "Heading 3"):
+                    for run in para.runs:
+                        run.bold = True
+                para.paragraph_format.keep_with_next = True
+
+            elif si_mode and etype in ("author", "comment"):
+                # Theme-level stand-alone author / comment — only emitted by SI parsing.
+                para = self._standalone_field(element)
+
+            elif etype == "Question":
+                screen_mode_setting = getattr(self.args, "screen_mode", "off") or "off"
+                if screen_mode_setting == "add_versions_columns":
                     self._add_question_columns(element)
-                elif self.args.screen_mode == "add_versions":
+                elif screen_mode_setting == "add_versions":
                     para = self.doc.add_paragraph()
                     para = self.doc.add_paragraph()
                     para.add_run("Версия для ведущего:").bold = True
@@ -682,10 +758,11 @@ class DocxExporter(BaseExporter):
                     para = self.doc.add_paragraph()
                     para.add_run("Версия для экрана:").bold = True
                     self.add_question(element, skip_qcount=True, screen_mode=True)
-                elif self.args.screen_mode == "replace_all":
+                elif screen_mode_setting == "replace_all":
                     self.add_question(element, screen_mode=True)
                 else:
                     self.add_question(element)
+
             prev_element = element
 
         self.doc.save(outfilename)

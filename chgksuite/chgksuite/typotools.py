@@ -336,6 +336,11 @@ RE_BAD_LAT_DQUOTES = re.compile('"[a-zA-Z0-9,\\.:!\\? ]+?"')
 
 
 def typography(s, wsp="on", quotes="on", dashes="on", accents="on", percent="on"):
+    wsp = wsp or "on"
+    quotes = quotes or "on"
+    dashes = dashes or "on"
+    accents = accents or "on"
+    percent = percent or "on"
     if wsp == "on":
         s = remove_excessive_whitespace(s)
     if quotes in ("on", "smart"):

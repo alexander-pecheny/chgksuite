@@ -210,9 +210,11 @@ def log_wrap(s, pretty_print=True):
     return s.encode(ENC, errors="replace").decode(ENC)
 
 
-def check_question(question, logger=None):
+def check_question(question, logger=None, required_fields=None):
+    if required_fields is None:
+        required_fields = {"question", "answer", "source", "author"}
     warnings = []
-    for el in {"question", "answer", "source", "author"}:
+    for el in required_fields:
         if el not in question:
             warnings.append(el)
     if len(warnings) > 0:
@@ -235,7 +237,7 @@ def tryint(s):
 
 
 def xlsx_to_results(xlsx_file_path):
-    wb = openpyxl.load_workbook(xlsx_file_path)
+    wb = openpyxl.load_workbook(xlsx_file_path, data_only=True)
     sheet = wb.active
     first = True
     res_by_tour = defaultdict(lambda: defaultdict(list))
@@ -257,10 +259,10 @@ def xlsx_to_results(xlsx_file_path):
         team_name = row[1]
         if table_type == "tour":
             tour = row[3]
-            results = [x for x in row[4:] if x is not None]
+            results = [x if x is not None else 0 for x in row[4:]]
         else:
             tour = 1
-            results = [x for x in row[3:] if x is not None]
+            results = [x if x is not None else 0 for x in row[3:]]
         rlen = len(results)
         tour_len[tour] = max(tour_len[tour], rlen)
         res_by_tour[(team_id, team_name)][tour] = results
@@ -313,6 +315,9 @@ def compose_4s(structure, args=None):
         "section": "## ",
         "tour": "## ",
         "tourrev": "## ",
+        "battle": "#B ",
+        "round": "#R ",
+        "theme": "#T ",
         "editor": "#EDITOR ",
         "heading": "### ",
         "ljheading": "###LJ ",

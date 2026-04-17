@@ -259,7 +259,9 @@ class PptxExporter(BaseExporter):
                     self._apply_font_to_text_frame(title.text_frame, heading_font)
                 try:
                     if subtitle is not None and hasattr(subtitle, "text_frame"):
-                        self._apply_font_to_text_frame(subtitle.text_frame, heading_font)
+                        self._apply_font_to_text_frame(
+                            subtitle.text_frame, heading_font
+                        )
                 except NameError:
                     pass
         for block in (editor_block, section_block):

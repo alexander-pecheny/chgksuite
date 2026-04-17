@@ -41,7 +41,7 @@ from chgksuite.common import (
     set_lastdir,
 )
 from chgksuite.composer import gui_compose
-from chgksuite.composer.composer_common import make_filename
+from chgksuite.composer.composer_common import make_filename, game_to_ext
 from chgksuite.parser_db import chgk_parse_db
 from chgksuite.typotools import re_url
 from chgksuite.typotools import remove_excessive_whitespace as rew
@@ -962,7 +962,313 @@ def ensure_line_breaks(tag):
     tag.unwrap()
 
 
-def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
+# --- SI (Своя Игра) parsing --------------------------------------------------
+
+# Language-neutral structural markers for SI.
+# Synthetic heading markers injected by ``docx_to_text`` when parsing SI DOCX.
+_SI_RE_STYLE_HEADING = re.compile(r"^\$\$H(\d)\$\$\s*(.*)")
+# Question numbers in SI are point values, not sequential — same in every language.
+_SI_RE_QUESTION_NUM = re.compile(r"^(\d+)\.\s+")
+_SI_RE_QUESTION_NUM_ONLY = re.compile(r"^(\d+)\.?$")
+_SI_QUESTION_NUMBERS = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100}
+
+# Languages whose SI-specific regex keys are localized in regexes_{lang}.json.
+_SI_REGEX_KEYS = (
+    "si_theme",
+    "si_theme_comment",
+    "si_battle",
+    "si_battle_numbered",
+    "si_your_themes",
+    "si_round_name",
+)
+
+
+def si_parse_text(text, args=None, logger=None):
+    """Parse SI plain text into a 4s structure with battle/theme/question elements."""
+    args = args or DefaultNamespace()
+    logger = logger or init_logger("parser")
+
+    regexes = load_regexes(args.regexes)
+    # Field labels shared with ChGK (answer/zachet/...). For SI we only accept
+    # them at line-start, so we still match via ``m.start() == 0`` below.
+    re_answer = regexes["answer"]
+    re_zachet = regexes["zachet"]
+    re_nezachet = regexes["nezachet"]
+    re_comment = regexes["comment"]
+    re_author = regexes["author"]
+    re_source = regexes["source"]
+    re_editor = regexes["editor"]
+    # SI-specific structural regexes, loaded per language.
+    re_theme = regexes["si_theme"]
+    re_theme_comment = regexes["si_theme_comment"]
+    re_battle = regexes["si_battle"]
+    re_battle_numbered = regexes["si_battle_numbered"]
+    re_your_themes = regexes["si_your_themes"]
+    re_round_name = regexes["si_round_name"]
+
+    lines = text.split("\n")
+    structure = []
+    current_field = None
+    current_content = ""
+    heading_found = False
+    in_theme_list = False  # skip "Ваши темы:" (or its localized equivalent) blocks
+
+    # Typography settings
+    if ("«" in text or "»" in text) and args.typography_quotes == "smart":
+        typography_quotes = "smart_disable"
+    else:
+        typography_quotes = getattr(args, "typography_quotes", "on") or "on"
+    if "\u0301" in text and args.typography_accents == "smart":
+        typography_accents = "smart_disable"
+    else:
+        typography_accents = getattr(args, "typography_accents", "on") or "on"
+
+    def flush():
+        nonlocal current_field, current_content
+        if current_field and current_content.strip():
+            content = rew(current_content)
+            content = typotools.recursive_typography(
+                content,
+                accents=typography_accents,
+                dashes=getattr(args, "typography_dashes", "on"),
+                quotes=typography_quotes,
+                wsp=getattr(args, "typography_whitespace", "on"),
+                percent=getattr(args, "typography_percent", "on"),
+            )
+            structure.append([current_field, content])
+        current_field = None
+        current_content = ""
+
+    def apply_typo(s):
+        return typotools.recursive_typography(
+            s,
+            accents=typography_accents,
+            dashes=getattr(args, "typography_dashes", "on"),
+            quotes=typography_quotes,
+            wsp=getattr(args, "typography_whitespace", "on"),
+            percent=getattr(args, "typography_percent", "on"),
+        )
+
+    after_theme = False  # track if we just saw a theme header
+
+    for line in lines:
+        stripped = rew(line)
+
+        if not stripped:
+            after_theme = False
+            continue
+
+        m_style = _SI_RE_STYLE_HEADING.search(stripped)
+        if m_style:
+            level = int(m_style.group(1))
+            heading_text = rew(m_style.group(2))
+            if not heading_text:
+                continue
+            flush()
+            in_theme_list = False
+            if re_round_name.search(heading_text):
+                structure.append(["round", apply_typo(heading_text)])
+            elif level == 1:
+                structure.append(["battle", apply_typo(heading_text)])
+            elif level == 2:
+                if re.match(r"тем[ыа]\s*:?$", heading_text, re.IGNORECASE):
+                    in_theme_list = True
+                structure.append(["meta", apply_typo(heading_text)])
+            elif level == 3:
+                theme_text = re.sub(r"^\d+\.\s*", "", heading_text)
+                structure.append(["theme", apply_typo(theme_text)])
+                after_theme = True
+            continue
+
+        if re_your_themes.search(stripped):
+            flush()
+            in_theme_list = True
+            structure.append(["meta", apply_typo(stripped)])
+            continue
+
+        m_theme = re_theme.search(stripped)
+        if m_theme:
+            in_theme_list = False
+            flush()
+            theme_name = apply_typo(m_theme.group(2).strip())
+            structure.append(["theme", theme_name])
+            after_theme = True
+            continue
+
+        if in_theme_list:
+            if structure and structure[-1][0] == "meta":
+                structure[-1][1] += SEP + apply_typo(stripped)
+            else:
+                structure.append(["meta", apply_typo(stripped)])
+            continue
+
+        if re_theme_comment.search(stripped):
+            flush()
+            current_field = "comment"
+            current_content = re_theme_comment.sub("", stripped)
+            continue
+
+        m = re_battle.search(stripped)
+        if m:
+            flush()
+            structure.append(["battle", apply_typo(stripped)])
+            continue
+
+        m = re_battle_numbered.search(stripped)
+        if m and not re_theme.search(stripped):
+            flush()
+            structure.append(["battle", apply_typo(stripped)])
+            continue
+
+        m = re_editor.search(stripped)
+        if m and m.start() == 0:
+            flush()
+            content = re_editor.sub("", stripped, 1).strip()
+            structure.append(["editor", apply_typo(content)])
+            continue
+
+        m = re_author.search(stripped)
+        if m and m.start() == 0:
+            flush()
+            content = re_author.sub("", stripped, 1).strip()
+            if after_theme:
+                structure.append(["author", apply_typo(content)])
+            else:
+                current_field = "author"
+                current_content = content
+            continue
+
+        m = re_answer.search(stripped)
+        if m and m.start() == 0:
+            flush()
+            current_field = "answer"
+            current_content = re_answer.sub("", stripped, 1).strip()
+            continue
+
+        m = re_zachet.search(stripped)
+        if m and m.start() == 0:
+            flush()
+            current_field = "zachet"
+            current_content = re_zachet.sub("", stripped, 1).strip()
+            continue
+
+        m = re_nezachet.search(stripped)
+        if m and m.start() == 0:
+            flush()
+            current_field = "nezachet"
+            current_content = re_nezachet.sub("", stripped, 1).strip()
+            continue
+
+        m = re_comment.search(stripped)
+        if m and m.start() == 0:
+            flush()
+            current_field = "comment"
+            current_content = re_comment.sub("", stripped, 1).strip()
+            continue
+
+        m = re_source.search(stripped)
+        if m and m.start() == 0:
+            flush()
+            current_field = "source"
+            current_content = re_source.sub("", stripped, 1).strip()
+            continue
+
+        m = _SI_RE_QUESTION_NUM.search(stripped)
+        if m:
+            num = int(m.group(1))
+            if num in _SI_QUESTION_NUMBERS:
+                flush()
+                structure.append(["number", str(num)])
+                question_text = stripped[m.end():].strip()
+                if question_text:
+                    current_field = "question"
+                    current_content = question_text
+                continue
+
+        m = _SI_RE_QUESTION_NUM_ONLY.search(stripped)
+        if m:
+            num = int(m.group(1))
+            if num in _SI_QUESTION_NUMBERS:
+                flush()
+                structure.append(["number", str(num)])
+                continue
+
+        if current_field:
+            current_content += SEP + stripped
+        elif not heading_found:
+            heading_found = True
+            structure.append(["heading", apply_typo(stripped)])
+        else:
+            structure.append(["meta", apply_typo(stripped)])
+
+    flush()
+
+    # Pack fields into question dicts
+    final_structure = []
+    current_question = {}
+
+    for element in structure:
+        etype = element[0]
+
+        if etype in (
+            "battle",
+            "round",
+            "section",
+            "theme",
+            "heading",
+            "editor",
+            "date",
+            "meta",
+        ):
+            if "question" in current_question:
+                final_structure.append(["Question", current_question])
+                current_question = {}
+            final_structure.append(element)
+        elif etype == "number":
+            if "question" in current_question:
+                final_structure.append(["Question", current_question])
+                current_question = {}
+            current_question["number"] = element[1]
+        elif etype in QUESTION_LABELS:
+            if not current_question and etype not in ("question", "number"):
+                final_structure.append(element)
+            elif etype in current_question:
+                if isinstance(current_question[etype], str) and isinstance(
+                    element[1], str
+                ):
+                    current_question[etype] += SEP + element[1]
+                else:
+                    current_question[etype] = element[1]
+            else:
+                current_question[etype] = element[1]
+        else:
+            if "question" in current_question:
+                final_structure.append(["Question", current_question])
+                current_question = {}
+            final_structure.append(element)
+
+    if "question" in current_question:
+        final_structure.append(["Question", current_question])
+
+    # Split multi-line source into a list
+    re_leading_num = re.compile(r"^\d+\.\s*")
+    for element in final_structure:
+        if element[0] == "Question":
+            q = element[1]
+            if "source" in q and isinstance(q["source"], str):
+                source_lines = [s.strip() for s in q["source"].split(SEP) if s.strip()]
+                if len(source_lines) > 1:
+                    q["source"] = [re_leading_num.sub("", s) for s in source_lines]
+
+    return final_structure
+
+
+def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False):
+    """Convert a DOCX file to plain text preserving images, lists, and optional heading markers.
+
+    When ``inject_heading_markers`` is True, ``h1``/``h2``/``h3`` tags are prefixed with
+    ``$$H1$$``/``$$H2$$``/``$$H3$$`` so downstream parsers can detect headings.
+    """
     logger = logger or DummyLogger()
     args = args or DefaultNamespace()
     for_ol = {}
@@ -975,16 +1281,22 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
         return for_ol[tag]
 
     target_dir = os.path.dirname(os.path.abspath(docxfile))
-    if not args.not_image_prefix:
+    no_image_prefix = getattr(args, "no_image_prefix", False) or getattr(
+        args, "not_image_prefix", False
+    )
+    if not no_image_prefix:
         bn_for_img = (
             os.path.splitext(os.path.basename(docxfile))[0].replace(" ", "_") + "_"
         )
     else:
         bn_for_img = ""
-    if args.parsing_engine == "pypandoc":
+    parsing_engine = getattr(args, "parsing_engine", "mammoth") or "mammoth"
+    temp_dir = None
+    if parsing_engine == "pypandoc":
         txt = pypandoc.convert_file(docxfile, "plain", extra_args=["--wrap=none"])
+        imgpaths = []
     else:
-        if args.parsing_engine == "pypandoc_html":
+        if parsing_engine == "pypandoc_html":
             temp_dir = tempfile.mkdtemp()
             html = pypandoc.convert_file(
                 docxfile, "html", extra_args=[f"--extract-media={temp_dir}"]
@@ -1016,7 +1328,7 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
             br.replace_with("\n")
         imgpaths = []
         for tag in bsoup.find_all("img"):
-            if args.parsing_engine == "pypandoc_html":
+            if parsing_engine == "pypandoc_html":
                 src = tag["src"].replace("$$$UNDERSCORE$$$", "_")
                 _, ext = os.path.splitext(src)
                 imgname = generate_imgname(target_dir, ext[1:], prefix=bn_for_img)
@@ -1040,31 +1352,40 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
         for tag in bsoup.find_all("p"):
             ensure_line_breaks(tag)
 
+        preserve_formatting = getattr(args, "preserve_formatting", False)
         for tag in bsoup.find_all("b"):
-            if args.preserve_formatting:
+            if preserve_formatting:
                 tag.insert(0, "__")
                 tag.append("__")
             tag.unwrap()
         for tag in bsoup.find_all("strong"):
-            if args.preserver_formatting:
+            if preserve_formatting:
                 tag.insert(0, "__")
                 tag.append("__")
             tag.unwrap()
         for tag in bsoup.find_all("i"):
-            if args.preserve_formatting:
+            if preserve_formatting:
                 tag.insert(0, "_")
                 tag.append("_")
             tag.unwrap()
         for tag in bsoup.find_all("em"):
-            if args.preserve_formatting:
+            if preserve_formatting:
                 tag.insert(0, "_")
                 tag.append("_")
             tag.unwrap()
-        if args.fix_spans:
+        if getattr(args, "fix_spans", False):
             for tag in bsoup.find_all("span"):
                 tag.unwrap()
+        heading_markers = (
+            {"h1": "$$H1$$ ", "h2": "$$H2$$ ", "h3": "$$H3$$ "}
+            if inject_heading_markers
+            else {}
+        )
         for h in ["h1", "h2", "h3", "h4"]:
             for tag in bsoup.find_all(h):
+                marker = heading_markers.get(h)
+                if marker:
+                    tag.insert(0, marker)
                 ensure_line_breaks(tag)
         to_append = []
         for tag in bsoup.find_all("li"):
@@ -1083,7 +1404,8 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
             tag.extract()
         for tag in bsoup.find_all("hr"):
             tag.extract()
-        if args.links == "unwrap":
+        links = getattr(args, "links", "unwrap") or "unwrap"
+        if links == "unwrap":
             for tag in bsoup.find_all("a"):
                 if tag.get_text().startswith("http"):
                     tag.unwrap()
@@ -1098,7 +1420,7 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
                 ):
                     tag.string = f"{tag.get_text()} ({tag['href']})"
                     tag.unwrap()
-        elif args.links == "old":
+        elif links == "old":
             for tag in bsoup.find_all("a"):
                 if not tag.string or rew(tag.string) == "":
                     tag.extract()
@@ -1116,12 +1438,12 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
             ) as dbg:
                 dbg.write(bsoup.prettify())
 
-        if args.parsing_engine == "mammoth_hard_unwrap":
+        if parsing_engine == "mammoth_hard_unwrap":
             for tag in bsoup:
                 if isinstance(tag, bs4.element.Tag):
                     tag.unwrap()
             txt = bsoup.prettify()
-        elif args.parsing_engine in ("pypandoc_html", "mammoth"):
+        else:
             found = True
             while found:
                 found = False
@@ -1130,7 +1452,7 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
                         tag.unwrap()
                         found = True
             txt = str(bsoup)
-    if args.parsing_engine == "pypandoc_html":
+    if temp_dir is not None:
         shutil.rmtree(temp_dir)
 
     txt = (
@@ -1150,6 +1472,16 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
     for i, elem in enumerate(imgpaths):
         txt = txt.replace(f"IMGPATH({i})", elem)
 
+    return txt
+
+
+def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
+    logger = logger or DummyLogger()
+    args = args or DefaultNamespace()
+    target_dir = os.path.dirname(os.path.abspath(docxfile))
+
+    txt = docx_to_text(docxfile, args=args, logger=logger, inject_heading_markers=False)
+
     if args.debug:
         with open(
             os.path.join(target_dir, "debug.debug"), "w", encoding="utf-8"
@@ -1160,32 +1492,72 @@ def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
     return final_structure
 
 
-def chgk_parse_wrapper(path, args, logger=None):
+def si_parse_docx(docxfile, args=None, logger=None):
+    """Parse an SI (Своя Игра) DOCX file into a 4s structure."""
+    logger = logger or DummyLogger()
+    args = args or DefaultNamespace()
+    target_dir = os.path.dirname(os.path.abspath(docxfile))
+
+    txt = docx_to_text(docxfile, args=args, logger=logger, inject_heading_markers=True)
+
+    if getattr(args, "debug", False):
+        with open(
+            os.path.join(target_dir, "si_debug.txt"), "w", encoding="utf-8"
+        ) as dbg:
+            dbg.write(txt)
+
+    return si_parse_text(txt, args=args, logger=logger)
+
+
+def parse_wrapper(path, args, logger=None):
     abspath = os.path.abspath(path)
     target_dir = os.path.dirname(abspath)
     logger = logger or init_logger("parser")
-    if args.defaultauthor == "off":
-        defaultauthor = ""
-    elif args.defaultauthor == "file":
-        defaultauthor = os.path.splitext(os.path.basename(abspath))[0]
+    game = getattr(args, "game", None)
+    ext_in = os.path.splitext(abspath)[1]
+
+    if game == "si":
+        # SI questions are numbered by point value (10, 20, ...); always preserve them.
+        if (
+            not getattr(args, "numbers_handling", None)
+            or args.numbers_handling == "default"
+        ):
+            args.numbers_handling = "all"
+        if ext_in == ".docx":
+            final_structure = si_parse_docx(abspath, args=args, logger=logger)
+        elif ext_in == ".txt":
+            from chgksuite.common import read_text_file
+
+            text = read_text_file(abspath)
+            final_structure = si_parse_text(text, args=args, logger=logger)
+        else:
+            sys.stderr.write("Error: unsupported file format." + SEP)
+            sys.exit()
     else:
-        defaultauthor = args.defaultauthor
-    if os.path.splitext(abspath)[1] == ".txt":
-        final_structure = chgk_parse_txt(
-            abspath,
-            defaultauthor=defaultauthor,
-            encoding=args.encoding,
-            args=args,
-            logger=logger,
-        )
-    elif os.path.splitext(abspath)[1] == ".docx":
-        final_structure = chgk_parse_docx(
-            abspath, defaultauthor=defaultauthor, args=args, logger=logger
-        )
-    else:
-        sys.stderr.write("Error: unsupported file format." + SEP)
-        sys.exit()
-    outfilename = os.path.join(target_dir, make_filename(abspath, "4s", args))
+        if args.defaultauthor == "off":
+            defaultauthor = ""
+        elif args.defaultauthor == "file":
+            defaultauthor = os.path.splitext(os.path.basename(abspath))[0]
+        else:
+            defaultauthor = args.defaultauthor
+        if ext_in == ".txt":
+            final_structure = chgk_parse_txt(
+                abspath,
+                defaultauthor=defaultauthor,
+                encoding=args.encoding,
+                args=args,
+                logger=logger,
+            )
+        elif ext_in == ".docx":
+            final_structure = chgk_parse_docx(
+                abspath, defaultauthor=defaultauthor, args=args, logger=logger
+            )
+        else:
+            sys.stderr.write("Error: unsupported file format." + SEP)
+            sys.exit()
+
+    ext = game_to_ext(game)
+    outfilename = os.path.join(target_dir, make_filename(abspath, ext, args))
     logger.info("Output: {}".format(os.path.abspath(outfilename)))
     with open(outfilename, "w", encoding="utf-8") as output_file:
         output_file.write(compose_4s(final_structure, args=args))
@@ -1200,11 +1572,12 @@ def gui_parse(args):
         if os.path.isdir(args.filename):
             ld = args.filename
             set_lastdir(ld)
+            ext = game_to_ext(getattr(args, "game", None))
             for filename in os.listdir(args.filename):
                 if filename.endswith((".docx", ".txt")) and not os.path.isfile(
-                    os.path.join(args.filename, make_filename(filename, "4s", args))
+                    os.path.join(args.filename, make_filename(filename, ext, args))
                 ):
-                    outfilename = chgk_parse_wrapper(
+                    outfilename = parse_wrapper(
                         os.path.join(args.filename, filename),
                         args,
                         logger=logger,
@@ -1224,11 +1597,15 @@ def gui_parse(args):
             print("No file specified.")
             sys.exit(0)
 
-        outfilename = chgk_parse_wrapper(args.filename, args)
+        outfilename = parse_wrapper(args.filename, args, logger=logger)
         if outfilename and not args.console_mode:
             print(
                 "Please review the resulting file {}:".format(
-                    make_filename(args.filename, "4s", args)
+                    make_filename(
+                        args.filename,
+                        game_to_ext(getattr(args, "game", None)),
+                        args,
+                    )
                 )
             )
             texteditor = load_settings().get("editor") or EDITORS[sys.platform]

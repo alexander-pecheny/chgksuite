@@ -13,6 +13,7 @@ from chgksuite.common import DefaultArgs
 from chgksuite.composer.chgksuite_parser import parse_4s, replace_counters
 from chgksuite.composer.composer_common import (
     _parse_4s_elem,
+    game_to_ext,
     parseimg,
     remove_accents_standalone,
 )
@@ -234,6 +235,8 @@ def test_canonical_equality(parsing_engine, filename):
 
         print("Testing {}...".format(to_parse_fn))
         bn, _ = os.path.splitext(to_parse_fn)
+        file_settings = settings.get(to_parse_fn, {})
+        game = file_settings.get("game")
         call_args = [
             "python",
             "-m",
@@ -241,12 +244,17 @@ def test_canonical_equality(parsing_engine, filename):
             "parse",
             "--parsing_engine",
             parsing_engine,
-            os.path.join(temp_dir, to_parse_fn),
         ]
-        if to_parse_fn in settings and settings[to_parse_fn].get("cmdline_args"):
-            call_args.extend(settings[to_parse_fn]["cmdline_args"])
+        if game:
+            call_args.extend(["--game", game])
+        call_args.append(os.path.join(temp_dir, to_parse_fn))
+        if file_settings.get("cmdline_args"):
+            call_args.extend(file_settings["cmdline_args"])
         subprocess.call(call_args, timeout=5)
-        with open(os.path.join(temp_dir, bn + ".4s"), "r", encoding="utf-8") as f:
+        out_ext = game_to_ext(game)
+        with open(
+            os.path.join(temp_dir, bn + "." + out_ext), "r", encoding="utf-8"
+        ) as f:
             parsed = f.read()
         with open(os.path.join(temp_dir, canon_fn), "r", encoding="utf-8") as f:
             canonical = f.read()

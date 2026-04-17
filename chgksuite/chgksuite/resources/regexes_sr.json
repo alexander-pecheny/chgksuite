@@ -13,5 +13,11 @@
     "date": "D[Aa][Tt][Uu][Mm]\\s?[\\.:]",
     "date2": "WILL_FILL_LATER",
     "number": "^[0-9]+[\\.\\)]\\s*",
-    "handout_short": "P[Oo][Dd][Ee][Ll][Jj][Ee][Nn][Oo]"
+    "handout_short": "P[Oo][Dd][Ee][Ll][Jj][Ee][Nn][Oo]",
+    "si_theme": "(?i)^Тема\\s+(\\d+)\\.\\s*(.*)",
+    "si_theme_comment": "(?i)^Комментарий к теме[\\.:]",
+    "si_battle": "(?i)^(?:БОЙ|Бой)\\s+([IVXLCDM\\d]+)",
+    "si_battle_numbered": "^(\\d+)\\.\\s+([А-ЯЁA-Z\\s\\-–—]+)$",
+    "si_your_themes": "(?i)^Ваши\\s+темы\\s*:",
+    "si_round_name": "(?i)(открытый|полуоткрытый|закрытый)\\s+раунд"
 }

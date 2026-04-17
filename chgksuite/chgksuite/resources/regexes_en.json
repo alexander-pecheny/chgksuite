@@ -13,5 +13,11 @@
     "date": "D[Aa][Tt][Ee]\\s?[\\.:]",
     "date2": "(^|\\s)Jan(uary)?|Feb(ruary)?|Mar(ch)?|Apr(il)?|May|June?|July?|Aug(ust)?|Sep(tember)?|Oct(ober)?|Nov(ember)?|Dec(ember)?(\\s|$)",
     "number": "^[0-9]+[\\.\\)]\\s*",
-    "handout_short": "H[Aa][Nn][Dd][Oo][Uu][Tt]"
+    "handout_short": "H[Aa][Nn][Dd][Oo][Uu][Tt]",
+    "si_theme": "(?i)^Theme\\s+(\\d+)\\.\\s*(.*)",
+    "si_theme_comment": "(?i)^Theme comment[\\.:]",
+    "si_battle": "(?i)^(?:ROUND|Round|BOUT|Bout)\\s+([IVXLCDM\\d]+)",
+    "si_battle_numbered": "^(\\d+)\\.\\s+([A-Z\\s\\-–—]+)$",
+    "si_your_themes": "(?i)^Your\\s+themes\\s*:",
+    "si_round_name": "(?i)(open|semi[-–]?open|closed)\\s+round"
 }

@@ -1,3 +1,7 @@
 {
-    "octo2021_khmelkov.docx": {"cmdline_args": ["--preserve_formatting"], "function_args": {"preserve_formatting": true}}
+    "octo2021_khmelkov.docx": {"cmdline_args": ["--preserve_formatting"], "function_args": {"preserve_formatting": true}},
+    "01 SI studchr 2026_Otbor.docx": {"game": "si"},
+    "14 SI studchr 2026_GF.docx": {"game": "si"},
+    "7. ЭК СЧР 2026. Весь пакет.docx": {"game": "si"},
+    "kinsbf_day_1.txt": {"game": "brain"}
 }

@@ -12,5 +12,11 @@
     "date": "[Ss][Aa][Nn][Aa]\\s?[\\.:]",
     "date2": "(^|\\s)[Yy]anvar|[Ff]evral|[Mm]art|[Aa]prel|[Mm]ay|[Ii]yun|[Ii]yul|[Aa]vgust|[Ss]entabr|[Oo]ktabr|[Nn]oyabr|[Dd]ekabr(\\s|$)",
     "number": "^[0-9]+[\\.\\)]\\s*",
-    "handout_short": "T[Aa][Rr][Qq][Aa][Tt]"
+    "handout_short": "T[Aa][Rr][Qq][Aa][Tt]",
+    "si_theme": "(?i)^Тема\\s+(\\d+)\\.\\s*(.*)",
+    "si_theme_comment": "(?i)^Комментарий к теме[\\.:]",
+    "si_battle": "(?i)^(?:БОЙ|Бой)\\s+([IVXLCDM\\d]+)",
+    "si_battle_numbered": "^(\\d+)\\.\\s+([А-ЯЁA-Z\\s\\-–—]+)$",
+    "si_your_themes": "(?i)^Ваши\\s+темы\\s*:",
+    "si_round_name": "(?i)(открытый|полуоткрытый|закрытый)\\s+раунд"
 }

@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import os
-import shutil
 import subprocess
 import tempfile
 import time
@@ -28,7 +27,13 @@ from chgksuite.handouter.tex_internals import (
     TIKZBOX_INNER,
     TIKZBOX_START,
 )
-from chgksuite.handouter.utils import compress_pdf, parse_handouts, read_file, replace_ext, write_file
+from chgksuite.handouter.utils import (
+    compress_pdf,
+    parse_handouts,
+    read_file,
+    replace_ext,
+    write_file,
+)
 
 
 def rotate_image(image_path, direction):
@@ -83,7 +88,14 @@ class HandoutGenerator:
             .replace("<MARGIN_RIGHT>", str(self.args.margin_right))
             .replace("<MARGIN_TOP>", str(self.args.margin_top))
             .replace("<MARGIN_BOTTOM>", str(self.args.margin_bottom))
-            .replace("<TIKZ_MM>", str(self.args.tikz_mm if self.args.tikz_mm is not None else self.DEFAULT_TIKZ_MM))
+            .replace(
+                "<TIKZ_MM>",
+                str(
+                    self.args.tikz_mm
+                    if self.args.tikz_mm is not None
+                    else self.DEFAULT_TIKZ_MM
+                ),
+            )
         )
         if self.args.font:
             header = header.replace("Arial", self.args.font)
@@ -133,9 +145,7 @@ class HandoutGenerator:
         contents = block["contents"]
         if block.get("font_family"):
             contents = "\\fontspec{" + block["font_family"] + "}" + contents
-        inner_sep_str = (
-            f", inner sep={inner_sep}mm" if inner_sep is not None else ""
-        )
+        inner_sep_str = f", inner sep={inner_sep}mm" if inner_sep is not None else ""
         return (
             TIKZBOX_INNER.replace("<CONTENTS>", contents)
             .replace("<ALIGN>", align)
@@ -204,8 +214,15 @@ class HandoutGenerator:
         return valid_layouts[0]
 
     def get_edge_styles(
-        self, row_idx, col_idx, num_rows, columns, team_cols, team_rows,
-        hspace=None, vspace=None,
+        self,
+        row_idx,
+        col_idx,
+        num_rows,
+        columns,
+        team_cols,
+        team_rows,
+        hspace=None,
+        vspace=None,
     ):
         """
         Determine edge styles and extensions for a box at position (row_idx, col_idx).
@@ -403,10 +420,18 @@ class HandoutGenerator:
             row_boxes = []
             for col_idx in range(columns):
                 edges, ext = self.get_edge_styles(
-                    row_idx, col_idx, num_rows, columns, team_cols, team_rows,
-                    hspace=hspace, vspace=vspace_val if vspace_val is not None else 1.0,
+                    row_idx,
+                    col_idx,
+                    num_rows,
+                    columns,
+                    team_cols,
+                    team_rows,
+                    hspace=hspace,
+                    vspace=vspace_val if vspace_val is not None else 1.0,
                 )
-                row_boxes.append(self.make_tikzbox(block, edges, ext, inner_sep=effective_tikz_mm))
+                row_boxes.append(
+                    self.make_tikzbox(block, edges, ext, inner_sep=effective_tikz_mm)
+                )
             row = (
                 TIKZBOX_START.replace("<CENTERING>", block["centering"])
                 + "\n".join(row_boxes)
