@@ -5,17 +5,17 @@
 ## Установка
 
 ### Стэндалон-билд, версия Qt
-- [Windows x64](https://github.com/peczony/chgksuite/releases/download/v0.28.2/chgkq-windows-x64.exe)
-- [macOS с процессором Intel](https://github.com/peczony/chgksuite/releases/download/v0.28.2/chgkq-macos-x64.zip)
-- [macOS с процессором Apple (M1 и новее)](https://github.com/peczony/chgksuite/releases/download/v0.28.2/chgkq-macos-arm64.zip)
-- [Linux AMD64](https://github.com/peczony/chgksuite/releases/download/v0.28.2/chgkq-linux-x64)
+- [Windows x64](https://github.com/peczony/chgksuite/releases/latest/download/chgkq-windows-x64.exe)
+- [macOS с процессором Intel](https://github.com/peczony/chgksuite/releases/latest/download/chgkq-macos-x64.zip)
+- [macOS с процессором Apple (M1 и новее)](https://github.com/peczony/chgksuite/releases/latest/download/chgkq-macos-arm64.zip)
+- [Linux AMD64](https://github.com/peczony/chgksuite/releases/latest/download/chgkq-linux-x64)
 
 ### Стэндалон-билд, версия Tk (попробуйте, если Qt не работает)
-- [Windows x64](https://github.com/peczony/chgksuite/releases/download/v0.28.2/chgkt-windows-x64.exe)
-- [macOS с процессором Intel](https://github.com/peczony/chgksuite/releases/download/v0.28.2/chgkt-macos-x64.zip)
-- [macOS с процессором Apple (M1 и новее)](https://github.com/peczony/chgksuite/releases/download/v0.28.2/chgkt-macos-arm64.zip)
-- [Linux AMD64](https://github.com/peczony/chgksuite/releases/download/v0.28.2/chgkt-linux-x64)
-- [Linux ARM64](https://github.com/peczony/chgksuite/releases/download/v0.28.2/chgkt-linux-arm64)
+- [Windows x64](https://github.com/peczony/chgksuite/releases/latest/download/chgkt-windows-x64.exe)
+- [macOS с процессором Intel](https://github.com/peczony/chgksuite/releases/latest/download/chgkt-macos-x64.zip)
+- [macOS с процессором Apple (M1 и новее)](https://github.com/peczony/chgksuite/releases/latest/download/chgkt-macos-arm64.zip)
+- [Linux AMD64](https://github.com/peczony/chgksuite/releases/latest/download/chgkt-linux-x64)
+- [Linux ARM64](https://github.com/peczony/chgksuite/releases/latest/download/chgkt-linux-arm64)
 
 ### Консольный режим, установка через uv
 
