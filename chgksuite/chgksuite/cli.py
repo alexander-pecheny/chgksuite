@@ -216,6 +216,7 @@ class ArgparseBuilder:
             "(was default behaviour pre-0.8.0.)",
             advanced=True,
             caption="Стратегия обработки номеров вопросов",
+            argtype="radiobutton",
         )
         self.add_argument(
             cmdparse,
