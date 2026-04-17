@@ -457,7 +457,7 @@ class BaseExporter:
         s = s.replace("\\[", "LEFTSQUAREBRACKET")
         s = s.replace("\\]", "RIGHTSQUAREBRACKET")
         # Use placeholder to preserve handout brackets during removal
-        s = re.sub(f"\\[{hs}(.+?)\\]", "{HANDOUT_PLACEHOLDER\\1}", s, flags=re.DOTALL)
+        s = re.sub(f"\\[({hs}.+?)\\]", "{HANDOUT_PLACEHOLDER\\1}", s, flags=re.DOTALL)
         i = 0
         while "[" in s and "]" in s and i < 10:
             s = re.sub(" *\\[.+?\\]", "", s, flags=re.DOTALL)
