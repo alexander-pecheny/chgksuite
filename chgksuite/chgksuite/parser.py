@@ -287,11 +287,22 @@ class ChgkParser:
                 target += 1
             return self.structure[target][0]
 
+    # Structural markers that must not be swallowed by the question/answer
+    # merge — a "Бой N" between a stray numbered regulation item and a real
+    # answer below indicates the numbered item is NOT the question.
+    HARD_BOUNDARIES = frozenset(
+        {"battle", "section", "tour", "tourrev", "heading", "editor", "date"}
+    )
+
     def merge_y_to_x(self, x, y):
         i = 0
         while i < len(self.structure):
             if self.structure[i][0] == x:
-                while i + 1 < len(self.structure) and self.structure[i + 1][0] != y:
+                while (
+                    i + 1 < len(self.structure)
+                    and self.structure[i + 1][0] != y
+                    and self.structure[i + 1][0] not in self.HARD_BOUNDARIES
+                ):
                     self.merge_to_previous(i + 1)
             i += 1
 
@@ -321,13 +332,19 @@ class ChgkParser:
     def apply_regexes(self, st):
         i = 0
         regexes = self.regexes
+        # SI-specific regexes (si_*) belong to SiParser only — including them
+        # here would e.g. match "Бой N" and drop the battle marker since
+        # compose_4s has no mapping for ``si_battle``.
+        excluded = {"number", "date2", "handout_short"} | {
+            k for k in regexes if k.startswith("si_")
+        }
         while i < len(st):
             matching_regexes = {
                 (
                     regex,
                     regexes[regex].search(self.remove_formatting(st[i][1])).start(0),
                 )
-                for regex in set(regexes) - {"number", "date2", "handout_short"}
+                for regex in set(regexes) - excluded
                 if regexes[regex].search(self.remove_formatting(st[i][1]))
             }
 
@@ -478,16 +495,32 @@ class ChgkParser:
                 self.patch_single_number_line(line)
 
     def do_enumerate_hack(self):
+        # Look-ahead window: only promote "N. text" to question if an answer
+        # (or another question/handout) shows up before we leave the local
+        # block. Without this, a regulation block like "1. Бои Double
+        # Elimination… 2. Все бои…" right after the last question's author
+        # would be promoted to a stray question.
+        LOOKAHEAD = 12
+        BLOCK_END = {"editor", "tour", "tourrev", "date", "heading", "battle"}
         prev_nonzero_type = None
-        for el in self.structure:
+        for i, el in enumerate(self.structure):
             if (
                 not el[0]
                 and prev_nonzero_type is not None
                 and prev_nonzero_type == "author"
                 and self.RE_NUM_START.search(el[1])
             ):
-                el[0] = "question"
-                el[1] = self.RE_NUM_START.sub("", el[1]).strip()
+                has_answer_soon = False
+                for j in range(i + 1, min(i + 1 + LOOKAHEAD, len(self.structure))):
+                    nt = self.structure[j][0]
+                    if nt in ("answer", "handout", "question"):
+                        has_answer_soon = True
+                        break
+                    if nt in BLOCK_END:
+                        break
+                if has_answer_soon:
+                    el[0] = "question"
+                    el[1] = self.RE_NUM_START.sub("", el[1]).strip()
             if el[0]:
                 prev_nonzero_type = el[0]
 
@@ -678,6 +711,7 @@ class ChgkParser:
                 "tour",
                 "tourrev",
                 "editor",
+                "battle",
             ]:
                 if element[0] == "question":
                     try:
@@ -971,6 +1005,11 @@ _SI_RE_STYLE_HEADING = re.compile(r"^\$\$H(\d)\$\$\s*(.*)")
 _SI_RE_QUESTION_NUM = re.compile(r"^(\d+)\.\s+")
 _SI_RE_QUESTION_NUM_ONLY = re.compile(r"^(\d+)\.?$")
 _SI_QUESTION_NUMBERS = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100}
+# Inline theme header with author in parens: "2. Ноль (Давид Эджибия)".
+# Theme index is small (not a question point value) and the line ends with
+# "(...)" holding the author. Used when DOCX styling did not mark the header
+# as a real heading.
+_SI_RE_THEME_NUMBERED_AUTHORED = re.compile(r"^(\d+)\.\s+(.+\([^)]+\))\s*$")
 
 # Languages whose SI-specific regex keys are localized in regexes_{lang}.json.
 _SI_REGEX_KEYS = (
@@ -983,284 +1022,363 @@ _SI_REGEX_KEYS = (
 )
 
 
-def si_parse_text(text, args=None, logger=None):
-    """Parse SI plain text into a 4s structure with battle/theme/question elements."""
-    args = args or DefaultNamespace()
-    logger = logger or init_logger("parser")
+class SiParser:
+    """Parse SI (Своя Игра) plain text into a 4s structure."""
 
-    regexes = load_regexes(args.regexes)
-    # Field labels shared with ChGK (answer/zachet/...). For SI we only accept
-    # them at line-start, so we still match via ``m.start() == 0`` below.
-    re_answer = regexes["answer"]
-    re_zachet = regexes["zachet"]
-    re_nezachet = regexes["nezachet"]
-    re_comment = regexes["comment"]
-    re_author = regexes["author"]
-    re_source = regexes["source"]
-    re_editor = regexes["editor"]
-    # SI-specific structural regexes, loaded per language.
-    re_theme = regexes["si_theme"]
-    re_theme_comment = regexes["si_theme_comment"]
-    re_battle = regexes["si_battle"]
-    re_battle_numbered = regexes["si_battle_numbered"]
-    re_your_themes = regexes["si_your_themes"]
-    re_round_name = regexes["si_round_name"]
+    _RE_LEADING_NUM = re.compile(r"^\d+\.\s*")
+    _RE_THEMES_HEADER = re.compile(r"тем[ыа]\s*:?$", re.IGNORECASE)
+    _RE_URL_LIKE = re.compile(
+        r"https?://|www\.|/|\.(?:ru|com|net|org|io|info|edu|su|by|ua|kz)\b"
+    )
+    _STRUCTURAL_TYPES = (
+        "battle",
+        "round",
+        "section",
+        "theme",
+        "heading",
+        "editor",
+        "date",
+        "meta",
+    )
 
-    lines = text.split("\n")
-    structure = []
-    current_field = None
-    current_content = ""
-    heading_found = False
-    in_theme_list = False  # skip "Ваши темы:" (or its localized equivalent) blocks
-
-    # Typography settings
-    if ("«" in text or "»" in text) and args.typography_quotes == "smart":
-        typography_quotes = "smart_disable"
-    else:
-        typography_quotes = getattr(args, "typography_quotes", "on") or "on"
-    if "\u0301" in text and args.typography_accents == "smart":
-        typography_accents = "smart_disable"
-    else:
-        typography_accents = getattr(args, "typography_accents", "on") or "on"
-
-    def flush():
-        nonlocal current_field, current_content
-        if current_field and current_content.strip():
-            content = rew(current_content)
-            content = typotools.recursive_typography(
-                content,
-                accents=typography_accents,
-                dashes=getattr(args, "typography_dashes", "on"),
-                quotes=typography_quotes,
-                wsp=getattr(args, "typography_whitespace", "on"),
-                percent=getattr(args, "typography_percent", "on"),
-            )
-            structure.append([current_field, content])
-        current_field = None
-        current_content = ""
-
-    def apply_typo(s):
-        return typotools.recursive_typography(
-            s,
-            accents=typography_accents,
-            dashes=getattr(args, "typography_dashes", "on"),
-            quotes=typography_quotes,
-            wsp=getattr(args, "typography_whitespace", "on"),
-            percent=getattr(args, "typography_percent", "on"),
+    def __init__(self, args=None, logger=None):
+        self.args = args or DefaultNamespace()
+        self.logger = logger or init_logger("parser")
+        self.regexes = load_regexes(self.args.regexes)
+        # Field labels shared with ChGK; we only accept them at line-start.
+        r = self.regexes
+        self.re_answer = r["answer"]
+        self.re_zachet = r["zachet"]
+        self.re_nezachet = r["nezachet"]
+        self.re_comment = r["comment"]
+        self.re_author = r["author"]
+        self.re_source = r["source"]
+        self.re_editor = r["editor"]
+        self.re_theme = r["si_theme"]
+        self.re_theme_comment = r["si_theme_comment"]
+        self.re_battle = r["si_battle"]
+        self.re_battle_numbered = r["si_battle_numbered"]
+        self.re_your_themes = r["si_your_themes"]
+        self.re_round_name = r["si_round_name"]
+        # Field labels that, when encountered as H3-styled headings, indicate
+        # the preceding theme was actually a question (authored with wrong style).
+        self._field_promote_regexes = (
+            self.re_answer,
+            self.re_zachet,
+            self.re_nezachet,
+            self.re_comment,
+            self.re_source,
         )
 
-    after_theme = False  # track if we just saw a theme header
+    def parse(self, text):
+        self._init_state(text)
+        for line in text.split("\n"):
+            self._handle_line(line)
+        self._flush()
+        return self._build_final_structure()
 
-    for line in lines:
+    # --- State / typography --------------------------------------------------
+
+    def _init_state(self, text):
+        self.structure = []
+        self.current_field = None
+        self.current_content = ""
+        self.heading_found = False
+        self.in_theme_list = False
+        self.after_theme = False
+        # Full H3 heading text of the most recent theme — used to retroactively
+        # promote a theme to a question when a field label (Ответ:/...) follows
+        # it; the docx styled the question with a heading by mistake.
+        self.last_theme_heading = None
+
+        if ("«" in text or "»" in text) and self.args.typography_quotes == "smart":
+            self.typography_quotes = "smart_disable"
+        else:
+            self.typography_quotes = getattr(self.args, "typography_quotes", "on") or "on"
+        if "\u0301" in text and self.args.typography_accents == "smart":
+            self.typography_accents = "smart_disable"
+        else:
+            self.typography_accents = getattr(self.args, "typography_accents", "on") or "on"
+
+    def _apply_typo(self, s):
+        return typotools.recursive_typography(
+            s,
+            accents=self.typography_accents,
+            dashes=getattr(self.args, "typography_dashes", "on"),
+            quotes=self.typography_quotes,
+            wsp=getattr(self.args, "typography_whitespace", "on"),
+            percent=getattr(self.args, "typography_percent", "on"),
+        )
+
+    def _flush(self):
+        if self.current_field and self.current_content.strip():
+            self.structure.append(
+                [self.current_field, self._apply_typo(rew(self.current_content))]
+            )
+        self.current_field = None
+        self.current_content = ""
+
+    def _promote_last_theme_to_question(self):
+        """If the previous element is a tentatively tagged theme whose heading
+        started with an SI point value, rewrite it as [number, question]."""
+        if self.last_theme_heading is None:
+            return
+        if not self.structure or self.structure[-1][0] != "theme":
+            self.last_theme_heading = None
+            return
+        m_qnum = _SI_RE_QUESTION_NUM.search(self.last_theme_heading)
+        if not m_qnum or int(m_qnum.group(1)) not in _SI_QUESTION_NUMBERS:
+            self.last_theme_heading = None
+            return
+        num_str = m_qnum.group(1)
+        q_text = self.last_theme_heading[m_qnum.end():].strip()
+        self.structure[-1:] = [
+            ["number", num_str],
+            ["question", self._apply_typo(q_text)],
+        ]
+        self.last_theme_heading = None
+
+    # --- Per-line dispatch ---------------------------------------------------
+
+    def _handle_line(self, line):
         stripped = rew(line)
-
         if not stripped:
-            after_theme = False
-            continue
+            self.after_theme = False
+            return
 
         m_style = _SI_RE_STYLE_HEADING.search(stripped)
         if m_style:
-            level = int(m_style.group(1))
             heading_text = rew(m_style.group(2))
             if not heading_text:
-                continue
-            flush()
-            in_theme_list = False
-            if re_round_name.search(heading_text):
-                structure.append(["round", apply_typo(heading_text)])
-            elif level == 1:
-                structure.append(["battle", apply_typo(heading_text)])
-            elif level == 2:
-                if re.match(r"тем[ыа]\s*:?$", heading_text, re.IGNORECASE):
-                    in_theme_list = True
-                structure.append(["meta", apply_typo(heading_text)])
-            elif level == 3:
-                theme_text = re.sub(r"^\d+\.\s*", "", heading_text)
-                structure.append(["theme", apply_typo(theme_text)])
-                after_theme = True
-            continue
+                return
+            # "Ответ:" and similar fields are still fields even when heading-
+            # styled by accident. Strip the heading prefix and fall through.
+            if self._is_field_label(heading_text):
+                self._promote_last_theme_to_question()
+                stripped = heading_text
+            else:
+                self._handle_heading(int(m_style.group(1)), heading_text)
+                return
 
-        if re_your_themes.search(stripped):
-            flush()
-            in_theme_list = True
-            structure.append(["meta", apply_typo(stripped)])
-            continue
+        if self.re_your_themes.search(stripped):
+            self._flush()
+            self.in_theme_list = True
+            self.structure.append(["meta", self._apply_typo(stripped)])
+            return
 
-        m_theme = re_theme.search(stripped)
+        m_theme = self.re_theme.search(stripped)
         if m_theme:
-            in_theme_list = False
-            flush()
-            theme_name = apply_typo(m_theme.group(2).strip())
-            structure.append(["theme", theme_name])
-            after_theme = True
-            continue
+            self.in_theme_list = False
+            self._flush()
+            self.structure.append(["theme", self._apply_typo(m_theme.group(2).strip())])
+            self.after_theme = True
+            return
 
-        if in_theme_list:
-            if structure and structure[-1][0] == "meta":
-                structure[-1][1] += SEP + apply_typo(stripped)
+        if self.in_theme_list:
+            if self.structure and self.structure[-1][0] == "meta":
+                self.structure[-1][1] += SEP + self._apply_typo(stripped)
             else:
-                structure.append(["meta", apply_typo(stripped)])
-            continue
+                self.structure.append(["meta", self._apply_typo(stripped)])
+            return
 
-        if re_theme_comment.search(stripped):
-            flush()
-            current_field = "comment"
-            current_content = re_theme_comment.sub("", stripped)
-            continue
+        if self.re_theme_comment.search(stripped):
+            self._flush()
+            self.current_field = "comment"
+            self.current_content = self.re_theme_comment.sub("", stripped)
+            return
 
-        m = re_battle.search(stripped)
-        if m:
-            flush()
-            structure.append(["battle", apply_typo(stripped)])
-            continue
+        if self.re_battle.search(stripped):
+            self._flush()
+            self.structure.append(["battle", self._apply_typo(stripped)])
+            return
 
-        m = re_battle_numbered.search(stripped)
-        if m and not re_theme.search(stripped):
-            flush()
-            structure.append(["battle", apply_typo(stripped)])
-            continue
+        if self.re_battle_numbered.search(stripped) and not self.re_theme.search(stripped):
+            self._flush()
+            self.structure.append(["battle", self._apply_typo(stripped)])
+            return
 
-        m = re_editor.search(stripped)
-        if m and m.start() == 0:
-            flush()
-            content = re_editor.sub("", stripped, 1).strip()
-            structure.append(["editor", apply_typo(content)])
-            continue
-
-        m = re_author.search(stripped)
-        if m and m.start() == 0:
-            flush()
-            content = re_author.sub("", stripped, 1).strip()
-            if after_theme:
-                structure.append(["author", apply_typo(content)])
-            else:
-                current_field = "author"
-                current_content = content
-            continue
-
-        m = re_answer.search(stripped)
-        if m and m.start() == 0:
-            flush()
-            current_field = "answer"
-            current_content = re_answer.sub("", stripped, 1).strip()
-            continue
-
-        m = re_zachet.search(stripped)
-        if m and m.start() == 0:
-            flush()
-            current_field = "zachet"
-            current_content = re_zachet.sub("", stripped, 1).strip()
-            continue
-
-        m = re_nezachet.search(stripped)
-        if m and m.start() == 0:
-            flush()
-            current_field = "nezachet"
-            current_content = re_nezachet.sub("", stripped, 1).strip()
-            continue
-
-        m = re_comment.search(stripped)
-        if m and m.start() == 0:
-            flush()
-            current_field = "comment"
-            current_content = re_comment.sub("", stripped, 1).strip()
-            continue
-
-        m = re_source.search(stripped)
-        if m and m.start() == 0:
-            flush()
-            current_field = "source"
-            current_content = re_source.sub("", stripped, 1).strip()
-            continue
-
-        m = _SI_RE_QUESTION_NUM.search(stripped)
-        if m:
-            num = int(m.group(1))
-            if num in _SI_QUESTION_NUMBERS:
-                flush()
-                structure.append(["number", str(num)])
-                question_text = stripped[m.end():].strip()
-                if question_text:
-                    current_field = "question"
-                    current_content = question_text
-                continue
-
-        m = _SI_RE_QUESTION_NUM_ONLY.search(stripped)
-        if m:
-            num = int(m.group(1))
-            if num in _SI_QUESTION_NUMBERS:
-                flush()
-                structure.append(["number", str(num)])
-                continue
-
-        if current_field:
-            current_content += SEP + stripped
-        elif not heading_found:
-            heading_found = True
-            structure.append(["heading", apply_typo(stripped)])
-        else:
-            structure.append(["meta", apply_typo(stripped)])
-
-    flush()
-
-    # Pack fields into question dicts
-    final_structure = []
-    current_question = {}
-
-    for element in structure:
-        etype = element[0]
-
-        if etype in (
-            "battle",
-            "round",
-            "section",
-            "theme",
-            "heading",
-            "editor",
-            "date",
-            "meta",
+        if self._dispatch_label(stripped, self.re_editor, "editor", append=True):
+            return
+        if self._dispatch_author(stripped):
+            return
+        for regex, field in (
+            (self.re_answer, "answer"),
+            (self.re_zachet, "zachet"),
+            (self.re_nezachet, "nezachet"),
+            (self.re_comment, "comment"),
+            (self.re_source, "source"),
         ):
-            if "question" in current_question:
-                final_structure.append(["Question", current_question])
-                current_question = {}
-            final_structure.append(element)
-        elif etype == "number":
-            if "question" in current_question:
-                final_structure.append(["Question", current_question])
-                current_question = {}
-            current_question["number"] = element[1]
-        elif etype in QUESTION_LABELS:
-            if not current_question and etype not in ("question", "number"):
+            if self._dispatch_label(stripped, regex, field):
+                return
+
+        if self._dispatch_question_num(stripped):
+            return
+        if self._dispatch_question_num_only(stripped):
+            return
+
+        # Default: continuation of current field, first heading, or meta.
+        if self.current_field:
+            self.current_content += SEP + stripped
+        elif not self.heading_found:
+            self.heading_found = True
+            self.structure.append(["heading", self._apply_typo(stripped)])
+        else:
+            self.structure.append(["meta", self._apply_typo(stripped)])
+
+    def _is_field_label(self, heading_text):
+        for r in self._field_promote_regexes:
+            m = r.search(heading_text)
+            if m and m.start() == 0:
+                return True
+        return False
+
+    def _handle_heading(self, level, heading_text):
+        self._flush()
+        self.in_theme_list = False
+        if self.re_round_name.search(heading_text):
+            self.structure.append(["round", self._apply_typo(heading_text)])
+            return
+        if self.re_battle.search(heading_text):
+            self.structure.append(["battle", self._apply_typo(heading_text)])
+            return
+        if level == 1:
+            self.structure.append(["battle", self._apply_typo(heading_text)])
+        elif level == 2:
+            if self._RE_THEMES_HEADER.match(heading_text):
+                self.in_theme_list = True
+            self.structure.append(["meta", self._apply_typo(heading_text)])
+        elif level == 3:
+            theme_text = self._RE_LEADING_NUM.sub("", heading_text)
+            self.structure.append(["theme", self._apply_typo(theme_text)])
+            self.last_theme_heading = heading_text
+            self.after_theme = True
+
+    def _dispatch_label(self, stripped, regex, field, append=False):
+        m = regex.search(stripped)
+        if not m or m.start() != 0:
+            return False
+        self._flush()
+        content = regex.sub("", stripped, 1).strip()
+        if append:
+            self.structure.append([field, self._apply_typo(content)])
+        else:
+            self.current_field = field
+            self.current_content = content
+        return True
+
+    def _dispatch_author(self, stripped):
+        m = self.re_author.search(stripped)
+        if not m or m.start() != 0:
+            return False
+        self._flush()
+        content = self.re_author.sub("", stripped, 1).strip()
+        if self.after_theme:
+            self.structure.append(["author", self._apply_typo(content)])
+        else:
+            self.current_field = "author"
+            self.current_content = content
+        return True
+
+    def _dispatch_question_num(self, stripped):
+        m = _SI_RE_QUESTION_NUM.search(stripped)
+        if not m:
+            return False
+        num = int(m.group(1))
+        if num in _SI_QUESTION_NUMBERS:
+            self._flush()
+            self.structure.append(["number", str(num)])
+            question_text = stripped[m.end():].strip()
+            if question_text:
+                self.current_field = "question"
+                self.current_content = question_text
+            return True
+        # Inline theme header "N. Name (Author)" with small N (not a question
+        # point value). Skip when mid-source-list: an empty "Источник:" header
+        # followed by numbered URLs must not be reclassified as a theme header.
+        if self.current_field == "source" and not self.current_content.strip():
+            return False
+        m_authored = _SI_RE_THEME_NUMBERED_AUTHORED.search(stripped)
+        if (
+            m_authored
+            and num not in _SI_QUESTION_NUMBERS
+            and not self._RE_URL_LIKE.search(stripped)
+        ):
+            self._flush()
+            self.in_theme_list = False
+            self.structure.append(
+                ["theme", self._apply_typo(m_authored.group(2).strip())]
+            )
+            self.after_theme = True
+            return True
+        return False
+
+    def _dispatch_question_num_only(self, stripped):
+        m = _SI_RE_QUESTION_NUM_ONLY.search(stripped)
+        if not m:
+            return False
+        num = int(m.group(1))
+        if num in _SI_QUESTION_NUMBERS:
+            self._flush()
+            self.structure.append(["number", str(num)])
+            return True
+        return False
+
+    # --- Packing -------------------------------------------------------------
+
+    def _build_final_structure(self):
+        final_structure = []
+        current_question = {}
+
+        for element in self.structure:
+            etype = element[0]
+            if etype in self._STRUCTURAL_TYPES:
+                if "question" in current_question:
+                    final_structure.append(["Question", current_question])
+                    current_question = {}
                 final_structure.append(element)
-            elif etype in current_question:
-                if isinstance(current_question[etype], str) and isinstance(
-                    element[1], str
-                ):
-                    current_question[etype] += SEP + element[1]
+            elif etype == "number":
+                if "question" in current_question:
+                    final_structure.append(["Question", current_question])
+                    current_question = {}
+                current_question["number"] = element[1]
+            elif etype in QUESTION_LABELS:
+                if not current_question and etype not in ("question", "number"):
+                    final_structure.append(element)
+                elif etype in current_question:
+                    if isinstance(current_question[etype], str) and isinstance(
+                        element[1], str
+                    ):
+                        current_question[etype] += SEP + element[1]
+                    else:
+                        current_question[etype] = element[1]
                 else:
                     current_question[etype] = element[1]
             else:
-                current_question[etype] = element[1]
-        else:
-            if "question" in current_question:
-                final_structure.append(["Question", current_question])
-                current_question = {}
-            final_structure.append(element)
+                if "question" in current_question:
+                    final_structure.append(["Question", current_question])
+                    current_question = {}
+                final_structure.append(element)
 
-    if "question" in current_question:
-        final_structure.append(["Question", current_question])
+        if "question" in current_question:
+            final_structure.append(["Question", current_question])
 
-    # Split multi-line source into a list
-    re_leading_num = re.compile(r"^\d+\.\s*")
-    for element in final_structure:
-        if element[0] == "Question":
+        # Split multi-line source into a list of individual references.
+        for element in final_structure:
+            if element[0] != "Question":
+                continue
             q = element[1]
             if "source" in q and isinstance(q["source"], str):
                 source_lines = [s.strip() for s in q["source"].split(SEP) if s.strip()]
                 if len(source_lines) > 1:
-                    q["source"] = [re_leading_num.sub("", s) for s in source_lines]
+                    q["source"] = [
+                        self._RE_LEADING_NUM.sub("", s) for s in source_lines
+                    ]
+        return final_structure
 
-    return final_structure
+
+def si_parse_text(text, args=None, logger=None):
+    """Parse SI plain text into a 4s structure with battle/theme/question elements."""
+    return SiParser(args=args, logger=logger).parse(text)
 
 
 def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False):
