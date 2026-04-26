@@ -435,16 +435,16 @@ SCREENSHOTS = [
         ("radio", TRELLO_UPLOAD),
     ]),
 
-    # --- handouts > 4s2hndt (generate) ---
+    # --- handouts > 4s -> hndt (generate) ---
     ("handouts_generate.png", [
         ("radio", "handouts"),
-        ("radio", "4s2hndt"),
+        ("radio", "4s \u2192 hndt"),
     ]),
 
-    # --- handouts > hndt2pdf (render) ---
+    # --- handouts > hndt -> pdf (render) ---
     ("handouts_render.png", [
         ("radio", "handouts"),
-        ("radio", "hndt2pdf"),
+        ("radio", "hndt \u2192 pdf"),
     ]),
 ]
 

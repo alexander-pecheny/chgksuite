@@ -109,6 +109,24 @@ def get_default_channel():
     return "stable"
 
 
+def display_subparser_caption(caption):
+    m = re.match(r"^(.+)2(.+)$", caption)
+    if m:
+        return f"{m[1]} → {m[2]}"
+    return caption
+
+
+def add_row_spacing(frame, force=False):
+    children = frame.winfo_children()
+    if not force and not children:
+        return
+    if children and getattr(children[-1], "_is_row_spacing", False):
+        return
+    spacer = tk.Frame(frame, height=8)
+    spacer._is_row_spacing = True
+    spacer.pack(side="top", fill="x")
+
+
 def check_for_updates(channel="beta"):
     """Check PyPI for updates to chgksuite and chgksuite-tk.
 
@@ -205,6 +223,7 @@ class ParserWrapper(object):
         if self.parent:
             self.parent.children.append(self)
             self.frame = tk.Frame(self.parent.frame)
+            add_row_spacing(self.frame, force=True)
             self.frame.pack()
             self.frame.pack_forget()
             self.advanced_frame = tk.Frame(self.parent.advanced_frame)
@@ -546,6 +565,7 @@ class ParserWrapper(object):
             checkbutton.pack(side="left")
             self.vars.append(VarWrapper(name=args[0], var=var))
         elif argtype == "radiobutton":
+            add_row_spacing(frame)
             var = tk.StringVar()
             var.set(kwargs["default"])
             innerframe = tk.Frame(frame)
@@ -637,6 +657,7 @@ class SubparsersWrapper(object):
     def __init__(self, subparsers, parent):
         self.subparsers = subparsers
         self.parent = parent
+        add_row_spacing(self.parent.frame)
         self.frame = tk.Frame(self.parent.frame)
         self.frame.pack(side="top")
         self.parsers = []
@@ -648,7 +669,7 @@ class SubparsersWrapper(object):
         self.parsers.append(pw)
         radio = tk.Radiobutton(
             self.frame,
-            text=caption,
+            text=display_subparser_caption(caption),
             variable=self.parent.subparsers_var,
             value=args[0],
             command=pw.show_frame,

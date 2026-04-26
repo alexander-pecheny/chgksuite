@@ -105,6 +105,13 @@ def get_default_channel():
     return "stable"
 
 
+def display_subparser_caption(caption):
+    m = re.match(r"^(.+)2(.+)$", caption)
+    if m:
+        return f"{m[1]} → {m[2]}"
+    return caption
+
+
 def check_for_updates(channel="beta"):
     """Check PyPI for updates to chgksuite and chgksuite-qt.
 
@@ -153,6 +160,7 @@ class UpdateChecker(QObject):
 LANGS = ["by", "by_tar", "en", "kz_cyr", "ru", "sr", "ua", "uz", "uz_cyr"] + ["custom"]
 
 debug = False
+ROW_SPACING_OBJECT_NAME = "rowSpacing"
 
 
 class InputRequester(QObject):
@@ -217,6 +225,19 @@ def init_layout(frame, layout, spacing=0):
     layout.setContentsMargins(spacing, spacing, spacing, spacing)
 
 
+def add_row_spacing(layout, force=False):
+    if not force and layout.count() == 0:
+        return
+    if layout.count() > 0:
+        widget = layout.itemAt(layout.count() - 1).widget()
+        if widget and widget.objectName() == ROW_SPACING_OBJECT_NAME:
+            return
+    spacer = QtWidgets.QWidget()
+    spacer.setObjectName(ROW_SPACING_OBJECT_NAME)
+    spacer.setFixedHeight(8)
+    layout.addWidget(spacer)
+
+
 class OpenFileDialog(object):
     def __init__(self, label, var, folder=False, lastdir=None, filetypes=None):
         self.label = label
@@ -255,6 +276,7 @@ class ParserWrapper(object):
             self.frame = QtWidgets.QWidget(self.parent.frame)
             self.layout = QtWidgets.QVBoxLayout(self.frame)
             init_layout(self.frame, self.layout)
+            add_row_spacing(self.layout, force=True)
             self.parent.layout.addWidget(self.frame)
             self.frame.hide()
             self.advanced_frame = QtWidgets.QWidget(self.parent.advanced_frame)
@@ -602,6 +624,7 @@ class ParserWrapper(object):
             self.vars.append(VarWrapper(name=args[0], var=var))
 
         elif argtype == "radiobutton":
+            add_row_spacing(layout)
             var = QString()
             var.set(kwargs["default"])
             innerframe = QtWidgets.QWidget(frame)
@@ -719,6 +742,7 @@ class SubparsersWrapper(object):
     def __init__(self, subparsers, parent):
         self.subparsers = subparsers
         self.parent = parent
+        add_row_spacing(self.parent.layout)
         self.frame = QtWidgets.QWidget(self.parent.frame)
         self.parent.layout.addWidget(self.frame)
         self.parsers = []
@@ -730,7 +754,7 @@ class SubparsersWrapper(object):
         parser = self.subparsers.add_parser(*args, **kwargs)
         pw = ParserWrapper(parser=parser, parent=self.parent)
         self.parsers.append(pw)
-        radio = QtWidgets.QRadioButton(caption, self.frame)
+        radio = QtWidgets.QRadioButton(display_subparser_caption(caption), self.frame)
         self.parent.subparsers_var.append(radio, args[0])
         radio.toggled.connect(
             lambda checked, pw=pw: pw.show_frame() if checked else None
