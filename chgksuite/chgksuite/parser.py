@@ -1022,7 +1022,7 @@ _SI_REGEX_KEYS = (
 )
 
 _TROIKA_RE_THEME = re.compile(
-    r"(?i)^ТЕМА\s+\d+(?:\s*\([^)]+\))?\.\s*.+"
+    r"(?i)^ТЕМА(?:\s+\d+(?:\s*\([^)]+\))?)?[\.:]\s*.+"
 )
 _TROIKA_RE_SECTION = re.compile(r"(?i)^ГРУППОВОЙ\s+ЭТАП\s+\d+\s*$")
 _TROIKA_RE_BATTLE = re.compile(r"(?i)^БОЙ\s+(?:\d+|[IVXLCDM]+)\s*$")
