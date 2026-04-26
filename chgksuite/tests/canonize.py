@@ -7,7 +7,8 @@ import argparse
 import inspect
 import json
 
-ALLOWED_IMAGES = ["long_handout.png", "test.jpg"]
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg")
+SKIP_FILES = {"tests_password.txt"}
 
 currentdir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
 parentdir = os.path.dirname(currentdir)
@@ -28,6 +29,19 @@ from chgksuite.common import read_text_file  # noqa: E402
 
 
 from chgksuite_test import DefaultArgs  # noqa: E402
+
+
+def get_image_files():
+    return {
+        filename
+        for filename in os.listdir(currentdir)
+        if filename.lower().endswith(IMAGE_EXTENSIONS)
+    }
+
+
+def remove_added_images(before_images):
+    for filename in get_image_files() - before_images:
+        os.remove(os.path.join(currentdir, filename))
 
 
 def workaround_chgk_parse(filename, game=None, **kwargs):
@@ -53,7 +67,7 @@ def workaround_chgk_parse(filename, game=None, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--parsing_engine", default="mammoth")
+    parser.add_argument("--parsing_engine", default="pypandoc_html")
     parser.add_argument("file", nargs="?", help="Single file to canonize (optional)")
     args = parser.parse_args()
 
@@ -63,8 +77,9 @@ def main():
         files = os.listdir(currentdir)
 
     for filename in files:
-        if filename.endswith((".docx", ".txt")):
+        if filename.endswith((".docx", ".txt")) and filename not in SKIP_FILES:
             print("Canonizing {}...".format(filename))
+            images_before = get_image_files()
             file_settings = settings.get(filename, {})
             function_args = file_settings.get("function_args") or {}
             game = file_settings.get("game")
@@ -74,13 +89,7 @@ def main():
                 parsing_engine=args.parsing_engine,
                 **function_args,
             )
-            for filename1 in os.listdir(currentdir):
-                if (
-                    filename1.endswith((".jpg", ".jpeg", ".png", ".gif"))
-                    and not filename1.startswith("ALLOWED")
-                    and filename1 not in ALLOWED_IMAGES
-                ):
-                    os.remove(os.path.join(currentdir, filename1))
+            remove_added_images(images_before)
             compose_args = DefaultArgs()
             if game:
                 compose_args.game = game
