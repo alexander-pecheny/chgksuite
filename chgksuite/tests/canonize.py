@@ -67,7 +67,7 @@ def workaround_chgk_parse(filename, game=None, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--parsing_engine", default="mammoth")
+    parser.add_argument("--parsing_engine", default="pypandoc_html")
     parser.add_argument("file", nargs="?", help="Single file to canonize (optional)")
     args = parser.parse_args()
 

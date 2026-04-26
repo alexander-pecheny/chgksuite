@@ -90,7 +90,7 @@ class DefaultArgs:
     language = "ru"
     links = "unwrap"
     numbers_handling = "default"
-    parsing_engine = "mammoth"
+    parsing_engine = "pypandoc_html"
     regexes = os.path.join(get_source_dirs()[1], "regexes_ru.json")
     single_number_line_handling = "smart"
     typography_accents = "on"

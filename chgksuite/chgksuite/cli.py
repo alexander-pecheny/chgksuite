@@ -209,7 +209,7 @@ class ArgparseBuilder:
                 "mammoth_bs_hard_unwrap",
                 "mammoth",
             ],
-            default=default_overrides.get("parsing_engine") or "mammoth",
+            default=default_overrides.get("parsing_engine") or "pypandoc_html",
             help="old html processing behaviour (before v0.5.5). "
             "Sometimes it will yield better results than the new default.",
             advanced=True,
