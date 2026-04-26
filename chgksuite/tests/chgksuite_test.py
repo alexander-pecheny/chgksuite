@@ -189,6 +189,39 @@ def test_remove_accents(input_text, expected):
     assert remove_accents_standalone(input_text, TEST_REGEXES) == expected
 
 
+def test_troika_colon_theme_after_source():
+    parsed = troika_parse_text(
+        """ТРОЙКА
+
+ТЕМА: ВРЕМЯ
+
+Автор: Автор
+
+1. Первый вопрос.
+
+Ответ: Первый ответ.
+
+Источник: https://example.com/one
+
+ТЕМА: ОСКАРЫ
+
+1. Второй вопрос.
+
+Ответ: Второй ответ.
+
+Источник: https://example.com/two""",
+        args=DefaultArgs(game="troika"),
+    )
+
+    themes = [element[1] for element in parsed if element[0] == "theme"]
+    assert themes == ["ТЕМА: ВРЕМЯ", "ТЕМА: ОСКАРЫ"]
+
+    questions = [element[1] for element in parsed if element[0] == "Question"]
+    assert len(questions) == 2
+    assert questions[0]["source"] == "https://example.com/one"
+    assert questions[1]["question"] == "Второй вопрос."
+
+
 @contextlib.contextmanager
 def make_temp_directory(**kwargs):
     temp_dir = tempfile.mkdtemp(**kwargs)
