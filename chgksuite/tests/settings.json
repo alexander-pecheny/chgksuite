@@ -1,10 +1,34 @@
 {
-    "octo2021_khmelkov.docx": {"cmdline_args": ["--preserve_formatting"], "function_args": {"preserve_formatting": true}},
-    "01 SI studchr 2026_Otbor.docx": {"game": "si"},
-    "14 SI studchr 2026_GF.docx": {"game": "si"},
-    "7. ЭК СЧР 2026. Весь пакет.docx": {"game": "si"},
-    "schr16_ek_all.docx": {"game": "si"},
-    "schr18_otbor_ssi_all.docx": {"game": "si"},
-    "kinsbf_day_1.txt": {"game": "brain"},
-    "bkd_2021_all.txt": {"game": "brain"}
+    "octo2021_khmelkov.docx": {
+        "cmdline_args": [
+            "--preserve_formatting"
+        ],
+        "function_args": {
+            "preserve_formatting": true
+        }
+    },
+    "01 SI studchr 2026_Otbor.docx": {
+        "game": "si"
+    },
+    "14 SI studchr 2026_GF.docx": {
+        "game": "si"
+    },
+    "7. ЭК СЧР 2026. Весь пакет.docx": {
+        "game": "si"
+    },
+    "schr16_ek_all.docx": {
+        "game": "si"
+    },
+    "schr18_otbor_ssi_all.docx": {
+        "game": "si"
+    },
+    "kinsbf_day_1.txt": {
+        "game": "brain"
+    },
+    "bkd_2021_all.txt": {
+        "game": "brain"
+    },
+    "nesova2025_troika.docx": {
+        "game": "troika"
+    }
 }

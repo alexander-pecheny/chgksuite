@@ -279,10 +279,9 @@ def format_docx_element(
                     )
                 except Exception as e:
                     if kwargs.get("ignore_missing_images"):
+                        sys.stderr.write(f"Exception: {type(e)} {e}")
                         filename = shlex.split(run[1])[-1]
-                        sys.stderr.write(
-                            f"MISSING IMAGE: {filename}\n"
-                        )
+                        sys.stderr.write(f"MISSING IMAGE: {filename}\n")
                         r = para.add_run(f"\nMISSING IMAGE {filename}\n")
                         r.bold = True
                         continue
@@ -379,7 +378,7 @@ def add_question_to_docx(
     if logger is None:
         logger = DummyLogger()
 
-    si_mode = game == "si"
+    si_mode = game in ("si", "troika")
 
     q = question_data
     if external_para is None:
@@ -660,7 +659,7 @@ class DocxExporter(BaseExporter):
         self.doc = Document(self.args.docx_template)
         self.logger.debug(log_wrap(self.structure))
 
-        si_mode = self.game == "si"
+        si_mode = self.game in ("si", "troika")
         firsttour = True  # chgk: tracks `section` to insert page breaks
         first_battle = True  # si: tracks first battle for page breaks
         first_theme = True  # si: controls spacing between themes within a battle

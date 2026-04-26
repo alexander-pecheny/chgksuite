@@ -1021,6 +1021,17 @@ _SI_REGEX_KEYS = (
     "si_round_name",
 )
 
+_TROIKA_RE_THEME = re.compile(
+    r"(?i)^ТЕМА\s+\d+(?:\s*\([^)]+\))?\.\s*.+"
+)
+_TROIKA_RE_SECTION = re.compile(r"(?i)^ГРУППОВОЙ\s+ЭТАП\s+\d+\s*$")
+_TROIKA_RE_BATTLE = re.compile(r"(?i)^БОЙ\s+(?:\d+|[IVXLCDM]+)\s*$")
+_TROIKA_RE_QUESTION_NUM = re.compile(r"^(\d+)\.?\s+")
+_TROIKA_RE_QUESTION_NUM_ONLY = re.compile(r"^(\d+)\.?$")
+_TROIKA_QUESTION_NUMBERS = {1, 2, 3}
+_TROIKA_RE_SOURCE_ITEM = re.compile(r"^\d+[\.\)]\s+")
+_TROIKA_RE_HOST_NOTE = re.compile(r"(?i)^(?:Ведущему\b|\[Ведущему\b)")
+
 
 class SiParser:
     """Parse SI (Своя Игра) plain text into a 4s structure."""
@@ -1381,6 +1392,153 @@ def si_parse_text(text, args=None, logger=None):
     return SiParser(args=args, logger=logger).parse(text)
 
 
+class TroikaParser(SiParser):
+    """Parse Troika text into an SI-like battle/theme/question structure."""
+
+    def _init_state(self, text):
+        super()._init_state(text)
+        self.last_line_blank = False
+        self.source_list_mode = False
+
+    def _flush(self):
+        super()._flush()
+        self.source_list_mode = False
+
+    def _handle_line(self, line):
+        stripped = rew(line)
+        if not stripped:
+            self.after_theme = False
+            self.last_line_blank = True
+            return
+
+        m_style = _SI_RE_STYLE_HEADING.search(stripped)
+        heading_level = None
+        if m_style:
+            heading_level = int(m_style.group(1))
+            heading_text = rew(m_style.group(2))
+            if not heading_text:
+                self.last_line_blank = False
+                return
+            stripped = heading_text
+
+        for regex, etype in (
+            (_TROIKA_RE_SECTION, "section"),
+            (_TROIKA_RE_BATTLE, "battle"),
+            (_TROIKA_RE_THEME, "theme"),
+        ):
+            if regex.search(stripped):
+                self._flush()
+                self.structure.append([etype, self._apply_typo(stripped)])
+                self.after_theme = etype == "theme"
+                self.last_line_blank = False
+                return
+
+        if heading_level == 1:
+            self._flush()
+            self.structure.append(["theme", self._apply_typo(stripped)])
+            self.after_theme = True
+            self.last_line_blank = False
+            return
+
+        if _TROIKA_RE_HOST_NOTE.search(stripped):
+            self._flush()
+            self.structure.append(["meta", self._apply_typo(stripped)])
+            self.last_line_blank = False
+            return
+
+        super()._handle_line(stripped)
+        self.last_line_blank = False
+
+    def _dispatch_label(self, stripped, regex, field, append=False):
+        m = regex.search(stripped)
+        source_is_list_label = False
+        if field == "source" and m:
+            source_label = m.group(0).lower()
+            source_is_list_label = "источники" in source_label or "(и)" in source_label
+        if (
+            field == "source"
+            and m
+            and m.start() == 0
+            and not self._current_question_has_answer()
+        ):
+            content = regex.sub("", stripped, 1).strip()
+            if content.startswith("["):
+                self._flush()
+                self.current_field = "answer"
+                self.current_content = content
+                self.source_list_mode = False
+                return True
+
+        matched = super()._dispatch_label(stripped, regex, field, append=append)
+        if matched:
+            self.source_list_mode = (
+                field == "source"
+                and self.current_field == "source"
+                and (
+                    source_is_list_label
+                    or _TROIKA_RE_SOURCE_ITEM.search(self.current_content.strip())
+                )
+            )
+        return matched
+
+    def _current_question_has_answer(self):
+        if self.current_field == "answer":
+            return True
+        for etype, _ in reversed(self.structure):
+            if etype in self._STRUCTURAL_TYPES or etype == "number":
+                return False
+            if etype == "answer":
+                return True
+        return False
+
+    def _should_continue_source_list(self, stripped):
+        if self.current_field != "source":
+            return False
+        if not self.current_content.strip():
+            return self.source_list_mode
+        if not self.source_list_mode:
+            return False
+        if not self.last_line_blank:
+            return True
+        source_item = _TROIKA_RE_SOURCE_ITEM.sub("", stripped, count=1).strip()
+        return bool(self._RE_URL_LIKE.search(source_item))
+
+    def _dispatch_question_num(self, stripped):
+        m = _TROIKA_RE_QUESTION_NUM.search(stripped)
+        if not m:
+            return False
+        num = int(m.group(1))
+        if num not in _TROIKA_QUESTION_NUMBERS:
+            return False
+        if self._should_continue_source_list(stripped):
+            return False
+        self._flush()
+        self.structure.append(["number", str(num)])
+        question_text = stripped[m.end():].strip()
+        if question_text:
+            self.current_field = "question"
+            self.current_content = question_text
+        return True
+
+    def _dispatch_question_num_only(self, stripped):
+        m = _TROIKA_RE_QUESTION_NUM_ONLY.search(stripped)
+        if not m:
+            return False
+        num = int(m.group(1))
+        if num not in _TROIKA_QUESTION_NUMBERS:
+            return False
+        if self._should_continue_source_list(stripped):
+            return False
+        self._flush()
+        self.structure.append(["number", str(num)])
+        return True
+
+
+def troika_parse_text(text, args=None, logger=None):
+    """Parse Troika plain text into a battle/theme/question structure."""
+    return TroikaParser(args=args, logger=logger).parse(text)
+
+
 def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False):
     """Convert a DOCX file to plain text preserving images, lists, and optional heading markers.
 
@@ -1627,6 +1785,23 @@ def si_parse_docx(docxfile, args=None, logger=None):
     return si_parse_text(txt, args=args, logger=logger)
 
 
+def troika_parse_docx(docxfile, args=None, logger=None):
+    """Parse a Troika DOCX file into a 4s-family structure."""
+    logger = logger or DummyLogger()
+    args = args or DefaultNamespace()
+    target_dir = os.path.dirname(os.path.abspath(docxfile))
+
+    txt = docx_to_text(docxfile, args=args, logger=logger, inject_heading_markers=True)
+
+    if getattr(args, "debug", False):
+        with open(
+            os.path.join(target_dir, "troika_debug.txt"), "w", encoding="utf-8"
+        ) as dbg:
+            dbg.write(txt)
+
+    return troika_parse_text(txt, args=args, logger=logger)
+
+
 def parse_wrapper(path, args, logger=None):
     abspath = os.path.abspath(path)
     target_dir = os.path.dirname(abspath)
@@ -1634,20 +1809,29 @@ def parse_wrapper(path, args, logger=None):
     game = getattr(args, "game", None)
     ext_in = os.path.splitext(abspath)[1]
 
-    if game == "si":
-        # SI questions are numbered by point value (10, 20, ...); always preserve them.
+    if game in ("si", "troika"):
+        # SI questions are point values, and Troika numbers repeat in each theme;
+        # always preserve explicit numbering for both formats.
         if (
             not getattr(args, "numbers_handling", None)
             or args.numbers_handling == "default"
         ):
             args.numbers_handling = "all"
         if ext_in == ".docx":
-            final_structure = si_parse_docx(abspath, args=args, logger=logger)
+            if game == "si":
+                final_structure = si_parse_docx(abspath, args=args, logger=logger)
+            else:
+                final_structure = troika_parse_docx(
+                    abspath, args=args, logger=logger
+                )
         elif ext_in == ".txt":
             from chgksuite.common import read_text_file
 
             text = read_text_file(abspath)
-            final_structure = si_parse_text(text, args=args, logger=logger)
+            if game == "si":
+                final_structure = si_parse_text(text, args=args, logger=logger)
+            else:
+                final_structure = troika_parse_text(text, args=args, logger=logger)
         else:
             sys.stderr.write("Error: unsupported file format." + SEP)
             sys.exit()

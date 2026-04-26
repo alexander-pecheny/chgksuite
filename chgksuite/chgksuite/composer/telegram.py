@@ -92,7 +92,7 @@ class TelegramExporter(BaseExporter):
         self.auth_uuid = uuid.uuid4().hex[:8]
         self.chat_auth_uuid = uuid.uuid4().hex[:8]
         self.session = requests.Session()
-        self.si_mode = self.game == "si"
+        self.si_mode = self.game in ("si", "troika")
         self.init_telegram()
 
     def check_connectivity(self):

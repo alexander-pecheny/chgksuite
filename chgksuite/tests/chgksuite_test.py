@@ -6,10 +6,11 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 
 import pytest
-from chgksuite.common import DefaultArgs
+from chgksuite.common import DefaultArgs, read_text_file
 from chgksuite.composer.chgksuite_parser import parse_4s, replace_counters
 from chgksuite.composer.composer_common import (
     _parse_4s_elem,
@@ -23,6 +24,10 @@ from chgksuite.parser import (
     chgk_parse_docx,
     chgk_parse_txt,
     compose_4s,
+    si_parse_docx,
+    si_parse_text,
+    troika_parse_docx,
+    troika_parse_text,
 )
 from chgksuite.typotools import get_quotes_right, cyr_lat_check_word
 from PIL import Image
@@ -60,7 +65,23 @@ with open(os.path.join(currentdir, "settings.json")) as f:
 ljlogin, ljpassword = open(os.path.join(currentdir, "ljcredentials")).read().split("\t")
 
 
-def workaround_chgk_parse(filename, **kwargs):
+def workaround_chgk_parse(filename, game=None, **kwargs):
+    if game in ("si", "troika"):
+        args = DefaultArgs(**kwargs)
+        if (
+            not getattr(args, "numbers_handling", None)
+            or args.numbers_handling == "default"
+        ):
+            args.numbers_handling = "all"
+        if filename.endswith(".txt"):
+            text = read_text_file(filename)
+            if game == "si":
+                return si_parse_text(text, args=args)
+            return troika_parse_text(text, args=args)
+        elif filename.endswith(".docx"):
+            if game == "si":
+                return si_parse_docx(filename, args=args)
+            return troika_parse_docx(filename, args=args)
     if filename.endswith(".txt"):
         return chgk_parse_txt(filename, args=DefaultArgs(**kwargs))
     elif filename.endswith(".docx"):
@@ -238,7 +259,7 @@ def test_canonical_equality(parsing_engine, filename):
         file_settings = settings.get(to_parse_fn, {})
         game = file_settings.get("game")
         call_args = [
-            "python",
+            sys.executable,
             "-m",
             "chgksuite",
             "parse",
@@ -250,7 +271,7 @@ def test_canonical_equality(parsing_engine, filename):
         call_args.append(os.path.join(temp_dir, to_parse_fn))
         if file_settings.get("cmdline_args"):
             call_args.extend(file_settings["cmdline_args"])
-        subprocess.call(call_args, timeout=5)
+        subprocess.call(call_args, timeout=5, cwd=parentdir)
         out_ext = game_to_ext(game)
         with open(
             os.path.join(temp_dir, bn + "." + out_ext), "r", encoding="utf-8"
@@ -273,21 +294,22 @@ def test_docx_composition(filename):
     with make_temp_directory(dir=".") as temp_dir:
         shutil.copy(os.path.join(currentdir, filename), temp_dir)
         temp_dir_filename = os.path.join(temp_dir, filename)
-        parsed = workaround_chgk_parse(temp_dir_filename)
-        file4s = os.path.splitext(filename)[0] + ".4s"
+        game = settings.get(filename, {}).get("game")
+        parsed = workaround_chgk_parse(temp_dir_filename, game=game)
+        file4s = os.path.splitext(filename)[0] + "." + game_to_ext(game)
         composed_abspath = os.path.join(temp_dir, file4s)
         print(composed_abspath)
         with open(composed_abspath, "w", encoding="utf-8") as f:
-            f.write(compose_4s(parsed, args=DefaultArgs()))
+            f.write(compose_4s(parsed, args=DefaultArgs(game=game)))
         call_args = [
-            "python",
+            sys.executable,
             "-m",
             "chgksuite",
             "compose",
             "docx",
             composed_abspath,
         ]
-        code = subprocess.call(call_args, timeout=5)
+        code = subprocess.call(call_args, timeout=5, cwd=parentdir)
         assert 0 == code
 
 
@@ -310,13 +332,14 @@ def test_tex_composition():
                     f.write(compose_4s(parsed, args=DefaultArgs()))
                 code = subprocess.call(
                     [
-                        "python",
+                        sys.executable,
                         "-m",
                         "chgksuite",
                         "compose",
                         "tex",
                         composed_abspath,
-                    ]
+                    ],
+                    cwd=parentdir,
                 )
                 assert 0 == code
 

@@ -79,7 +79,7 @@ def unquote(bytestring):
     return urllib.parse.unquote(bytestring.decode("utf8")).encode("utf8")
 
 
-GAME_EXTENSIONS = {"si": "si4s", "brain": "br4s"}
+GAME_EXTENSIONS = {"si": "si4s", "brain": "br4s", "troika": "tr4s"}
 _EXT_TO_GAME = {v: k for k, v in GAME_EXTENSIONS.items()}
 
 
@@ -89,7 +89,7 @@ def game_to_ext(game):
 
 
 def ext_to_game(filename):
-    """Detect game mode from a .si4s / .br4s / .4s file extension."""
+    """Detect game mode from a .si4s / .br4s / .tr4s / .4s file extension."""
     ext = os.path.splitext(filename)[1].lstrip(".")
     return _EXT_TO_GAME.get(ext)
 
