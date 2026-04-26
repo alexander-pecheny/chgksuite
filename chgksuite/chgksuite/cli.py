@@ -182,6 +182,7 @@ class ArgparseBuilder:
             "replace link with its href value.",
             advanced=True,
             caption="Стратегия обработки ссылок",
+            argtype="radiobutton",
         )
         self.add_argument(
             cmdparse,
@@ -213,6 +214,7 @@ class ArgparseBuilder:
             "Sometimes it will yield better results than the new default.",
             advanced=True,
             caption="HTML parsing engine",
+            argtype="radiobutton",
         )
         self.add_argument(
             cmdparse,
@@ -1012,6 +1014,7 @@ class ArgparseBuilder:
             help="compress output PDF",
             caption="Сжать PDF после вёрстки",
             advanced=True,
+            argtype="radiobutton",
         )
         self.add_argument(cmdhandouts_run, "--font", "-f", help="font", caption="Шрифт")
         self.add_argument(
@@ -1109,6 +1112,7 @@ class ArgparseBuilder:
             help="add _{n}teams suffix to output filename",
             caption="Добавить суффикс с количеством команд",
             advanced=True,
+            argtype="radiobutton",
         )
 
         cmdhandouts_create_html = self.add_parser(
@@ -1120,6 +1124,7 @@ class ArgparseBuilder:
             help="fraction of A4 width: 1/6, 1/3, 1/2, or 1",
             caption="Доля ширины A4",
             choices=["1/6", "1/3", "1/2", "1"],
+            argtype="radiobutton",
         )
         self.add_argument(
             cmdhandouts_create_html,
@@ -1193,6 +1198,7 @@ class ArgparseBuilder:
             help="compress output PDF",
             caption="Сжать PDF после сборки",
             advanced=True,
+            argtype="radiobutton",
         )
 
         cmdhandouts_install = self.add_parser(cmdhandouts_subcommands, "install")

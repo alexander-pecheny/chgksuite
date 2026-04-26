@@ -567,7 +567,7 @@ class ParserWrapper(object):
         elif argtype == "radiobutton":
             add_row_spacing(frame)
             var = tk.StringVar()
-            var.set(kwargs["default"])
+            var.set(kwargs.get("default", kwargs["choices"][0]))
             innerframe = tk.Frame(frame)
             innerframe.pack(side="top")
             label = tk.Label(innerframe, text=caption)

@@ -626,7 +626,8 @@ class ParserWrapper(object):
         elif argtype == "radiobutton":
             add_row_spacing(layout)
             var = QString()
-            var.set(kwargs["default"])
+            default = kwargs.get("default", kwargs["choices"][0])
+            var.set(default)
             innerframe = QtWidgets.QWidget(frame)
             innerlayout = QtWidgets.QHBoxLayout(innerframe)
             init_layout(innerframe, innerlayout)
@@ -635,7 +636,7 @@ class ParserWrapper(object):
             button_group = QtWidgets.QButtonGroup(innerframe)
             for ch in kwargs["choices"]:
                 radio = QtWidgets.QRadioButton(ch, innerframe)
-                if ch == kwargs["default"]:
+                if ch == default:
                     radio.setChecked(True)
                 button_group.addButton(radio)
                 radio.toggled.connect(
