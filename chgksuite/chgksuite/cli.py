@@ -105,9 +105,9 @@ class ArgparseBuilder:
         self.add_argument(
             cmdparse,
             "--game",
-            choices=["chgk", "brain", "si"],
+            choices=["chgk", "brain", "si", "troika"],
             default="chgk",
-            help="game format: chgk (default), brain, or si.",
+            help="game format: chgk (default), brain, si, or troika.",
             caption="Формат игры",
             argtype="radiobutton",
         )
@@ -428,7 +428,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
         self.add_argument(
             cmdcompose_docx,
@@ -520,7 +520,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
         self.add_argument(
             cmdcompose_tex,
@@ -537,7 +537,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
         self.add_argument(
             cmdcompose_lj,
@@ -598,7 +598,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
         self.add_argument(
             cmdcompose_base,
@@ -621,7 +621,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
         cmdcompose_markdown = cmdcompose_filetype.add_parser("markdown")
         self.add_argument(
@@ -630,7 +630,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
         cmdcompose_pptx = cmdcompose_filetype.add_parser("pptx")
         self.add_argument(
@@ -639,7 +639,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
         self.add_argument(
             cmdcompose_pptx,
@@ -672,7 +672,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
         self.add_argument(
             cmdcompose_telegram,
@@ -777,7 +777,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
         self.add_argument(
             cmdcompose_add_stats,
@@ -823,7 +823,7 @@ class ArgparseBuilder:
             nargs="*",
             help="file(s) to compose from.",
             caption="Имя 4s-файла",
-            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s"))],
+            filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
 
         cmdtrello = subparsers.add_parser("trello")
@@ -954,7 +954,7 @@ class ArgparseBuilder:
             "filename",
             help="file with questions packet",
             caption="Имя файла с пакетом",
-            filetypes=[("chgksuite files", ("*.4s", "*.si4s", "*.br4s"))],
+            filetypes=[("chgksuite files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
         self.add_argument(
             cmdhandouts_generate,

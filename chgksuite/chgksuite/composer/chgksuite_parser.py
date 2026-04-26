@@ -100,6 +100,8 @@ def parse_4s(
     game=None,
 ):
     logger = logger or init_logger("composer")
+    if required_fields is None and game in ("si", "troika"):
+        required_fields = {"question", "answer"}
     mapping = {
         "#": "meta",
         "##": "section",
@@ -136,12 +138,13 @@ def parse_4s(
     s = replace_counters(s)
 
     for line in s.split("\n"):
-        if rew(line) == "":
+        line_parts = line.split()
+        if rew(line) == "" or not line_parts:
             structure.append(["", ""])
         else:
-            if line.split()[0] in mapping:
+            if line_parts[0] in mapping:
                 structure.append(
-                    [mapping[line.split()[0]], rew(line[len(line.split()[0]) :])]
+                    [mapping[line_parts[0]], rew(line[len(line_parts[0]) :])]
                 )
             else:
                 if len(structure) >= 1:
@@ -224,8 +227,8 @@ def parse_4s(
 
         else:
             if element[0] == "theme":
-                counter = 10
-            elif game == "brain" and element[0] in ("battle", "section"):
+                counter = 1 if game == "troika" else 10
+            elif game in ("brain", "troika") and element[0] in ("battle", "section"):
                 counter = 1
             final_structure.append([element[0], element[1]])
 
@@ -248,7 +251,7 @@ def parse_4s(
                 "be omitted.".format(log_wrap(current_question))
             )
 
-    # Number SI themes inline so every consumer can rely on the same numbering.
+    # Number SI/Troika themes inline so every consumer can rely on the same numbering.
     # The theme counter resets on each battle and section boundary.
     theme_number = 0
     for element in final_structure:
@@ -256,11 +259,20 @@ def parse_4s(
             theme_number = 0
         elif element[0] == "theme" and isinstance(element[1], str):
             theme_number += 1
-            name = element[1]
+            raw_name = element[1]
+            m_theme_label = re.match(
+                r"(?i)^тема\s+\d+(?:\s*\([^)]+\))?\.\s*(.+)", raw_name
+            )
+            if m_theme_label:
+                name = m_theme_label.group(1).strip()
+                label = raw_name
+            else:
+                name = raw_name
+                label = f"Тема {theme_number}. {name}"
             element[1] = {
                 "name": name,
                 "number": theme_number,
-                "label": f"Тема {theme_number}. {name}",
+                "label": label,
             }
 
     if randomize:

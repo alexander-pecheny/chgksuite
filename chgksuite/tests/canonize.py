@@ -21,6 +21,8 @@ from chgksuite.parser import (  # noqa: E402
     compose_4s,
     si_parse_docx,
     si_parse_text,
+    troika_parse_docx,
+    troika_parse_text,
 )
 from chgksuite.common import read_text_file  # noqa: E402
 
@@ -30,13 +32,17 @@ from chgksuite_test import DefaultArgs  # noqa: E402
 
 def workaround_chgk_parse(filename, game=None, **kwargs):
     args = DefaultArgs(**kwargs)
-    if game == "si":
+    if game in ("si", "troika"):
         if not getattr(args, "numbers_handling", None) or args.numbers_handling == "default":
             args.numbers_handling = "all"
         if filename.endswith(".docx"):
-            return si_parse_docx(filename, args=args)
+            if game == "si":
+                return si_parse_docx(filename, args=args)
+            return troika_parse_docx(filename, args=args)
         if filename.endswith(".txt"):
-            return si_parse_text(read_text_file(filename), args=args)
+            if game == "si":
+                return si_parse_text(read_text_file(filename), args=args)
+            return troika_parse_text(read_text_file(filename), args=args)
         return None
     if filename.endswith(".txt"):
         return chgk_parse_txt(filename, args=args)
@@ -78,7 +84,7 @@ def main():
             compose_args = DefaultArgs()
             if game:
                 compose_args.game = game
-            if game == "si":
+            if game in ("si", "troika"):
                 compose_args.numbers_handling = "all"
             with open(
                 os.path.join(currentdir, filename) + ".canon", "w", encoding="utf-8"
