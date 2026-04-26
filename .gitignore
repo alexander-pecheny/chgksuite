@@ -10,3 +10,4 @@ dist
 *.debug
 tmp*
 tests_password.txt
+.tmp
