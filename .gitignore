@@ -1,4 +1,5 @@
 .venv
+.agents/settings.local.json
 build
 build_specs
 docs/public
