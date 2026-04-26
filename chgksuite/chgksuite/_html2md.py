@@ -33,10 +33,7 @@ def html2md(html_string: str) -> str:
     # Extract all rows as lists of cell texts
     data = []
     for row in rows:
-        # Check for header cells first, then data cells
-        cells = row.find_all("th")
-        if not cells:
-            cells = row.find_all("td")
+        cells = row.find_all(["th", "td"], recursive=False)
 
         row_data = []
         for cell in cells:

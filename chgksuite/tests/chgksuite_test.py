@@ -193,7 +193,7 @@ def test_troika_colon_theme_after_source():
     parsed = troika_parse_text(
         """ТРОЙКА
 
-ТЕМА: ВРЕМЯ
+Тема 1. ТЕМА: ВРЕМЯ
 
 Автор: Автор
 
@@ -214,12 +214,38 @@ def test_troika_colon_theme_after_source():
     )
 
     themes = [element[1] for element in parsed if element[0] == "theme"]
-    assert themes == ["ТЕМА: ВРЕМЯ", "ТЕМА: ОСКАРЫ"]
+    assert themes == ["ВРЕМЯ", "ОСКАРЫ"]
 
     questions = [element[1] for element in parsed if element[0] == "Question"]
     assert len(questions) == 2
     assert questions[0]["source"] == "https://example.com/one"
     assert questions[1]["question"] == "Второй вопрос."
+
+
+def test_troika_pypandoc_html_preserves_ordered_list_start_numbers(tmp_path):
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("ТРОЙКА")
+    doc.add_paragraph("ТЕМА: ВРЕМЯ")
+    doc.add_paragraph("Автор: Автор")
+    for num in range(1, 4):
+        doc.add_paragraph(f"Вопрос {num}.", style="List Number")
+        doc.add_paragraph(f"Ответ: Ответ {num}.")
+        doc.add_paragraph(f"Источник: https://example.com/{num}")
+
+    filename = tmp_path / "troika_numbering.docx"
+    doc.save(filename)
+
+    parsed = troika_parse_docx(
+        str(filename),
+        args=DefaultArgs(game="troika", parsing_engine="pypandoc_html"),
+    )
+
+    themes = [element[1] for element in parsed if element[0] == "theme"]
+    questions = [element[1] for element in parsed if element[0] == "Question"]
+    assert themes == ["ВРЕМЯ"]
+    assert [question["number"] for question in questions] == ["1", "2", "3"]
 
 
 @contextlib.contextmanager

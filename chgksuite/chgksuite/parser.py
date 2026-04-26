@@ -996,6 +996,30 @@ def ensure_line_breaks(tag):
     tag.unwrap()
 
 
+def normalize_html_before_flattening(bsoup):
+    for li in bsoup.find_all("li"):
+        if not li.get_text(strip=True) and not li.find("img"):
+            li.extract()
+            continue
+        for p in li.find_all("p", recursive=False):
+            p.unwrap()
+
+
+def normalize_docx_spacing(text):
+    lines = []
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        newline = line[len(body) :]
+        if body.lstrip().startswith("|"):
+            lines.append(line)
+            continue
+        body = body.replace("\t", " ")
+        body = re.sub(r"(?<=\S) {2,}(?=\S)", " ", body)
+        body = re.sub(r" +$", "", body)
+        lines.append(body + newline)
+    return "".join(lines)
+
+
 # --- SI (Своя Игра) parsing --------------------------------------------------
 
 # Language-neutral structural markers for SI.
@@ -1021,16 +1045,28 @@ _SI_REGEX_KEYS = (
     "si_round_name",
 )
 
+_TROIKA_RE_REDUNDANT_THEME_PREFIX = re.compile(r"(?i)^ТЕМА[\.:]\s*")
+_TROIKA_RE_THEME_NUMBER_BEFORE_REDUNDANT_PREFIX = re.compile(
+    r"(?i)^ТЕМА\s+\d+(?:\s*\([^)]+\))?[\.:]\s*(?=ТЕМА[\.:])"
+)
 _TROIKA_RE_THEME = re.compile(
     r"(?i)^ТЕМА(?:\s+\d+(?:\s*\([^)]+\))?)?[\.:]\s*.+"
 )
 _TROIKA_RE_SECTION = re.compile(r"(?i)^ГРУППОВОЙ\s+ЭТАП\s+\d+\s*$")
 _TROIKA_RE_BATTLE = re.compile(r"(?i)^БОЙ\s+(?:\d+|[IVXLCDM]+)\s*$")
+_TROIKA_RE_FINAL = re.compile(r"(?i)^\d+/\d+\s+ФИНАЛА\.?\s*$")
 _TROIKA_RE_QUESTION_NUM = re.compile(r"^(\d+)\.?\s+")
 _TROIKA_RE_QUESTION_NUM_ONLY = re.compile(r"^(\d+)\.?$")
 _TROIKA_QUESTION_NUMBERS = {1, 2, 3}
-_TROIKA_RE_SOURCE_ITEM = re.compile(r"^\d+[\.\)]\s+")
+_TROIKA_RE_SOURCE_ITEM = re.compile(r"^(\d+)[\.\)]\s+")
 _TROIKA_RE_HOST_NOTE = re.compile(r"(?i)^(?:Ведущему\b|\[Ведущему\b)")
+
+
+def _normalize_troika_theme_text(text):
+    text = _TROIKA_RE_THEME_NUMBER_BEFORE_REDUNDANT_PREFIX.sub(
+        "", text, count=1
+    ).strip()
+    return _TROIKA_RE_REDUNDANT_THEME_PREFIX.sub("", text, count=1).strip()
 
 
 class SiParser:
@@ -1181,7 +1217,8 @@ class SiParser:
         if m_theme:
             self.in_theme_list = False
             self._flush()
-            self.structure.append(["theme", self._apply_typo(m_theme.group(2).strip())])
+            theme_text = m_theme.group(2).strip()
+            self.structure.append(["theme", self._apply_typo(theme_text)])
             self.after_theme = True
             return
 
@@ -1196,6 +1233,11 @@ class SiParser:
             self._flush()
             self.current_field = "comment"
             self.current_content = self.re_theme_comment.sub("", stripped)
+            return
+
+        if self.re_round_name.search(stripped):
+            self._flush()
+            self.structure.append(["round", self._apply_typo(stripped)])
             return
 
         if self.re_battle.search(stripped):
@@ -1428,14 +1470,30 @@ class TroikaParser(SiParser):
         ):
             if regex.search(stripped):
                 self._flush()
-                self.structure.append([etype, self._apply_typo(stripped)])
+                value = (
+                    _normalize_troika_theme_text(stripped)
+                    if etype == "theme"
+                    else stripped
+                )
+                self.structure.append([etype, self._apply_typo(value)])
                 self.after_theme = etype == "theme"
                 self.last_line_blank = False
                 return
 
+        if _TROIKA_RE_FINAL.search(stripped):
+            if self.current_field == "source" and self.current_content.strip():
+                self.current_content += SEP + stripped
+            else:
+                self._flush()
+                self.structure.append(["meta", self._apply_typo(stripped)])
+            self.last_line_blank = False
+            return
+
         if heading_level == 1:
             self._flush()
-            self.structure.append(["theme", self._apply_typo(stripped)])
+            self.structure.append(
+                ["theme", self._apply_typo(_normalize_troika_theme_text(stripped))]
+            )
             self.after_theme = True
             self.last_line_blank = False
             return
@@ -1500,8 +1558,23 @@ class TroikaParser(SiParser):
             return False
         if not self.last_line_blank:
             return True
+        current_item = _TROIKA_RE_SOURCE_ITEM.search(stripped)
         source_item = _TROIKA_RE_SOURCE_ITEM.sub("", stripped, count=1).strip()
-        return bool(self._RE_URL_LIKE.search(source_item))
+        if self._RE_URL_LIKE.search(source_item):
+            return True
+        if current_item:
+            prev_items = list(
+                re.finditer(
+                    r"(?m)^\s*(\d+)[\.\)]\s+(.+)$", self.current_content
+                )
+            )
+            if (
+                prev_items
+                and int(current_item.group(1)) == int(prev_items[-1].group(1)) + 1
+                and not self._RE_URL_LIKE.search(prev_items[-1].group(2))
+            ):
+                return True
+        return False
 
     def _dispatch_question_num(self, stripped):
         m = _TROIKA_RE_QUESTION_NUM.search(stripped)
@@ -1548,10 +1621,17 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
     logger = logger or DummyLogger()
     args = args or DefaultNamespace()
     for_ol = {}
+    preserve_ol_start = getattr(args, "game", None) in ("si", "troika")
 
     def get_number(tag):
-        if not for_ol.get(tag):
-            for_ol[tag] = 1
+        if tag not in for_ol:
+            if not preserve_ol_start:
+                for_ol[tag] = 1
+            else:
+                try:
+                    for_ol[tag] = int(tag.get("start", 1))
+                except (TypeError, ValueError):
+                    for_ol[tag] = 1
         else:
             for_ol[tag] += 1
         return for_ol[tag]
@@ -1570,12 +1650,15 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
     temp_dir = None
     if parsing_engine == "pypandoc":
         txt = pypandoc.convert_file(docxfile, "plain", extra_args=["--wrap=none"])
+        txt = re.sub(r"(?<!\\)_", r"\\_", txt)
         imgpaths = []
     else:
         if parsing_engine == "pypandoc_html":
             temp_dir = tempfile.mkdtemp()
             html = pypandoc.convert_file(
-                docxfile, "html", extra_args=[f"--extract-media={temp_dir}"]
+                docxfile,
+                "html",
+                extra_args=["--wrap=none", f"--extract-media={temp_dir}"],
             )
         else:
             with open(docxfile, "rb") as docx_file:
@@ -1598,6 +1681,8 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
             ) as dbg:
                 dbg.write(input_docx)
 
+        normalize_html_before_flattening(bsoup)
+
         for tag in bsoup.find_all("style"):
             tag.extract()
         for br in bsoup.find_all("br"):
@@ -1607,6 +1692,8 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
             if parsing_engine == "pypandoc_html":
                 src = tag["src"].replace("$$$UNDERSCORE$$$", "_")
                 _, ext = os.path.splitext(src)
+                if ext.lower() in (".jpg", ".jpeg"):
+                    ext = ".jpeg"
                 imgname = generate_imgname(target_dir, ext[1:], prefix=bn_for_img)
                 shutil.copy(src, os.path.join(target_dir, imgname))
                 imgpath = os.path.basename(imgname)
@@ -1748,7 +1835,7 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
     for i, elem in enumerate(imgpaths):
         txt = txt.replace(f"IMGPATH({i})", elem)
 
-    return txt
+    return normalize_docx_spacing(txt)
 
 
 def chgk_parse_docx(docxfile, defaultauthor="", args=None, logger=None):
