@@ -116,6 +116,13 @@ def display_subparser_caption(caption):
     return caption
 
 
+def get_radiobutton_default(kwargs):
+    default = kwargs.get("default")
+    if default is None:
+        return kwargs["choices"][0]
+    return default
+
+
 def add_row_spacing(frame, force=False):
     children = frame.winfo_children()
     if not force and not children:
@@ -567,7 +574,7 @@ class ParserWrapper(object):
         elif argtype == "radiobutton":
             add_row_spacing(frame)
             var = tk.StringVar()
-            var.set(kwargs.get("default", kwargs["choices"][0]))
+            var.set(get_radiobutton_default(kwargs))
             innerframe = tk.Frame(frame)
             innerframe.pack(side="top")
             label = tk.Label(innerframe, text=caption)
