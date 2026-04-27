@@ -112,6 +112,13 @@ def display_subparser_caption(caption):
     return caption
 
 
+def get_radiobutton_default(kwargs):
+    default = kwargs.get("default")
+    if default is None:
+        return kwargs["choices"][0]
+    return default
+
+
 def check_for_updates(channel="beta"):
     """Check PyPI for updates to chgksuite and chgksuite-qt.
 
@@ -626,7 +633,7 @@ class ParserWrapper(object):
         elif argtype == "radiobutton":
             add_row_spacing(layout)
             var = QString()
-            default = kwargs.get("default", kwargs["choices"][0])
+            default = get_radiobutton_default(kwargs)
             var.set(default)
             innerframe = QtWidgets.QWidget(frame)
             innerlayout = QtWidgets.QHBoxLayout(innerframe)
