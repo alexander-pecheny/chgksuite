@@ -364,7 +364,16 @@ def test_docx_to_text_python_docx_preserves_needed_docx_attributes(
     formatted.add_run("подчеркнутый").underline = True
 
     linked = doc.add_paragraph("Ссылка: ")
-    add_hyperlink_to_docx(doc, linked, "пример", "https://example.com/path")
+    add_hyperlink_to_docx(
+        doc, linked, "пример", "https://example.com/path_with_under"
+    )
+    linked_url = doc.add_paragraph("Прямая ссылка: ")
+    add_hyperlink_to_docx(
+        doc,
+        linked_url,
+        "https://example.com/path_with_under",
+        "https://example.com/path_with_under",
+    )
 
     for num in range(1, 3):
         doc.add_paragraph(f"Вопрос {num}.", style="List Number")
@@ -389,13 +398,64 @@ def test_docx_to_text_python_docx_preserves_needed_docx_attributes(
 
     assert "$$H1$$ Раунд" in text
     assert "До __жирный__ и _курсив_ и ___подчеркнутый___" in text
-    assert "Ссылка: пример (https://example.com/path)" in text
+    assert "Ссылка: пример (https://example.com/path_with_under)" in text
+    assert "Прямая ссылка: https://example.com/path_with_under" in text
+    assert r"path\_with\_under" not in text
     assert "1. Вопрос 1." in text
     assert "2. Вопрос 2." in text
     assert "| A | B |" in text
     assert "| 1 | 2 |" in text
     assert "(img sample_001.png)" in text
     assert (tmp_path / "sample_001.png").exists()
+
+
+def test_chgk_parse_txt_keeps_url_underscores_unescaped(tmp_path):
+    filename = tmp_path / "sample.txt"
+    filename.write_text(
+        "1. Вопрос\nОтвет: Ответ\n"
+        "Источник: file_name https://example.com/path_with_under\n",
+        encoding="utf-8",
+    )
+
+    parsed = chgk_parse_txt(str(filename), encoding="utf-8", args=DefaultArgs())
+    question = [element[1] for element in parsed if element[0] == "Question"][0]
+
+    assert question["source"] == r"file\_name https://example.com/path_with_under"
+
+
+def test_docx_to_text_pypandoc_keeps_url_underscores_unescaped(
+    monkeypatch, tmp_path
+):
+    def fake_convert_file(*args, **kwargs):
+        return "Text snake_case https://example.com/path_with_under"
+
+    monkeypatch.setattr(parser_module.pypandoc, "convert_file", fake_convert_file)
+
+    text = parser_module.docx_to_text(
+        str(tmp_path / "test.docx"),
+        args=DefaultArgs(parsing_engine="pypandoc"),
+    )
+
+    assert text == r"Text snake\_case https://example.com/path_with_under"
+
+
+def test_docx_to_text_html_keeps_href_url_underscores_unescaped(
+    monkeypatch, tmp_path
+):
+    def fake_convert_file(*args, **kwargs):
+        return (
+            '<p>Text snake_case <a href="https://example.com/path_with_under">'
+            "label</a></p>"
+        )
+
+    monkeypatch.setattr(parser_module.pypandoc, "convert_file", fake_convert_file)
+
+    text = parser_module.docx_to_text(
+        str(tmp_path / "test.docx"),
+        args=DefaultArgs(parsing_engine="pypandoc_html"),
+    )
+
+    assert r"Text snake\_case label (https://example.com/path_with_under)" in text
 
 
 @pytest.mark.parametrize(
@@ -643,6 +703,17 @@ def test_inline_image():
     assert img_parsed["inline"]
     assert os.path.basename(img_parsed["imgfile"]) == "test.jpg"
     assert compose_4s(structure, DefaultArgs()).strip() == TEST_INLINE_IMAGE.strip()
+
+
+def test_parse_4s_elem_does_not_parse_url_underscores_as_italic():
+    url = "https://ru.wikipedia.org/wiki/Пугачёв,_Емельян_Иванович"
+    parsed = _parse_4s_elem(
+        f"before https://example.com/path_with_under {url} after _italic_"
+    )
+
+    assert ["hyperlink", "https://example.com/path_with_under"] in parsed
+    assert ["hyperlink", url] in parsed
+    assert [run for run in parsed if run[0] == "italic"] == [["italic", "italic"]]
 
 
 def test_long_handout():

@@ -73,6 +73,58 @@ re_lowercase = re.compile(r"[а-яё]")
 re_uppercase = re.compile(r"[А-ЯЁ]")
 
 
+def _iter_http_url_spans(s):
+    i = 0
+    while i < len(s):
+        if s.startswith(("http://", "https://"), i):
+            j = i + 1
+            bracket_level = 0
+            while j < len(s) and not (
+                s[j].isspace() or s[j] == ")" and bracket_level == 0
+            ):
+                if s[j] == "(":
+                    bracket_level += 1
+                elif s[j] == ")" and bracket_level > 0:
+                    bracket_level -= 1
+                j += 1
+            end = j - 1 if s[j - 1] in (",", ".", ";") else j
+            yield i, end
+            i = j
+        else:
+            i += 1
+
+
+def iter_url_spans(s):
+    spans = list(_iter_http_url_spans(s))
+    spans.extend(match.span() for match in re_url.finditer(s))
+    spans = sorted(span for span in spans if span[0] < span[1])
+    merged = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
+def escape_underscores_except_urls(s, skip_escaped=False):
+    def escape_segment(segment):
+        if skip_escaped:
+            return re.sub(r"(?<!\\)_", r"\\_", segment)
+        return segment.replace("_", r"\_")
+
+    if "_" not in s:
+        return s
+    parts = []
+    last = 0
+    for start, end in iter_url_spans(s):
+        parts.append(escape_segment(s[last:start]))
+        parts.append(s[start:end])
+        last = end
+    parts.append(escape_segment(s[last:]))
+    return "".join(parts)
+
+
 def strings_iterator(str_):
     result = []
     if isinstance(str_, str):

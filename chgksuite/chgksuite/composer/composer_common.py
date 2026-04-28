@@ -18,7 +18,7 @@ from PIL import Image
 
 import chgksuite.typotools as typotools
 from chgksuite.common import DummyLogger, get_chgksuite_dir, init_logger, log_wrap
-from chgksuite.typotools import re_lowercase, re_percent, re_uppercase, re_url
+from chgksuite.typotools import re_lowercase, re_percent, re_uppercase
 
 
 def md5(s):
@@ -277,12 +277,23 @@ def find_next_unescaped(ss, index, length=1):
 def _parse_4s_elem(s, logger=None):
     logger = logger or DummyLogger()
 
-    s = s.replace("\\_", "$$$$UNDERSCORE$$$$")
-    s = s.replace("\\~", "$$$$TILDE$$$$")
-    for gr in re_url.finditer(s):
-        gr0 = gr.group(0)
-        s = s.replace(gr0, gr0.replace("_", "$$$$UNDERSCORE$$$$"))
-        s = s.replace(gr0, gr0.replace("~", "$$$$TILDE$$$$"))
+    underscore_placeholder = "$$$$UNDERSCORE$$$$"
+    tilde_placeholder = "$$$$TILDE$$$$"
+
+    s = s.replace("\\_", underscore_placeholder)
+    s = s.replace("\\~", tilde_placeholder)
+    parts = []
+    last = 0
+    for start, end in typotools.iter_url_spans(s):
+        parts.append(s[last:start])
+        parts.append(
+            s[start:end]
+            .replace("_", underscore_placeholder)
+            .replace("~", tilde_placeholder)
+        )
+        last = end
+    parts.append(s[last:])
+    s = "".join(parts)
 
     grs = sorted(
         [match.group(0) for match in re_percent.finditer(s)], key=len, reverse=True
@@ -357,8 +368,8 @@ def _parse_4s_elem(s, logger=None):
     def _process(s):
         s = s.replace("\\_", "_")
         s = s.replace("\\.", ".")
-        s = s.replace("$$$$UNDERSCORE$$$$", "_")
-        s = s.replace("$$$$TILDE$$$$", "~")
+        s = s.replace(underscore_placeholder, "_")
+        s = s.replace(tilde_placeholder, "~")
         return s
 
     for part in parts:
