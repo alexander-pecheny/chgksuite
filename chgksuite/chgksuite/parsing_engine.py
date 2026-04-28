@@ -12,7 +12,10 @@ from docx.table import Table
 from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 
-from chgksuite.typotools import remove_excessive_whitespace as rew
+from chgksuite.typotools import (
+    escape_underscores_except_urls,
+    remove_excessive_whitespace as rew,
+)
 
 
 _A_BLIP = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
@@ -124,7 +127,7 @@ def _render_text(text, bold=False, italic=False, underline=False, preserve=False
 
 
 def _escape_underscores(text):
-    return text.replace("_", r"\_")
+    return escape_underscores_except_urls(text)
 
 
 def _run_formatting(run_element, paragraph):
@@ -388,7 +391,7 @@ class _DocxTextConverter:
             and urllib.parse.unquote(plain.strip())
             not in urllib.parse.unquote(href)
         ):
-            return f"{rendered} ({_escape_underscores(href)})"
+            return f"{rendered} ({href})"
         return rendered
 
     def _hyperlink_href(self, hyperlink, paragraph):

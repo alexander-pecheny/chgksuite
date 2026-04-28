@@ -44,7 +44,7 @@ from chgksuite.composer import gui_compose
 from chgksuite.composer.composer_common import make_filename, game_to_ext
 from chgksuite.parsing_engine import python_docx_to_text
 from chgksuite.parser_db import chgk_parse_db
-from chgksuite.typotools import re_url
+from chgksuite.typotools import escape_underscores_except_urls, re_url
 from chgksuite.typotools import remove_excessive_whitespace as rew
 
 
@@ -999,7 +999,11 @@ def chgk_parse_txt(txtfile, encoding=None, defaultauthor="", args=None, logger=N
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     if text[0:10] == "Чемпионат:":
         return chgk_parse_db(text, debug=args.debug, logger=logger)
-    return chgk_parse(text.replace("_", "\\_"), defaultauthor=defaultauthor, args=args)
+    return chgk_parse(
+        escape_underscores_except_urls(text),
+        defaultauthor=defaultauthor,
+        args=args,
+    )
 
 
 def generate_imgname(target_dir, ext, prefix=""):
@@ -1704,7 +1708,7 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
         imgpaths = []
     elif parsing_engine == "pypandoc":
         txt = _pypandoc_convert_file(docxfile, "plain", extra_args=["--wrap=none"])
-        txt = re.sub(r"(?<!\\)_", r"\\_", txt)
+        txt = escape_underscores_except_urls(txt, skip_escaped=True)
         imgpaths = []
     else:
         if parsing_engine == "pypandoc_html":
@@ -1725,7 +1729,6 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
         input_docx = (
             html.replace("</strong><strong>", "")
             .replace("</em><em>", "")
-            .replace("_", "$$$UNDERSCORE$$$")
         )
         bsoup = BeautifulSoup(input_docx, "html.parser")
 
@@ -1744,7 +1747,7 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
         imgpaths = []
         for tag in bsoup.find_all("img"):
             if parsing_engine == "pypandoc_html":
-                src = tag["src"].replace("$$$UNDERSCORE$$$", "_")
+                src = tag["src"]
                 _, ext = os.path.splitext(src)
                 if ext.lower() in (".jpg", ".jpeg"):
                     ext = ".jpeg"
@@ -1766,6 +1769,12 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
             imgpath_formatted = "(img {})".format(imgpath)
             imgpaths.append(imgpath_formatted)
             tag.extract()
+        for node in bsoup.find_all(string=True):
+            if node.parent and node.parent.name in ("script", "style"):
+                continue
+            escaped = escape_underscores_except_urls(str(node))
+            if escaped != node:
+                node.replace_with(escaped)
         for tag in bsoup.find_all("p"):
             ensure_line_breaks(tag)
 
@@ -1883,7 +1892,6 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
         .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&amp;", "&")
-        .replace("$$$UNDERSCORE$$$", "\\_")
     )
     txt = re.sub(r"_ +_", "", txt)  # fix bad italic from Word
     for i, elem in enumerate(imgpaths):
