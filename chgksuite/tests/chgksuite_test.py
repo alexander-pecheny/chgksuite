@@ -19,7 +19,10 @@ from chgksuite.composer.composer_common import (
     parseimg,
     remove_accents_standalone,
 )
-from chgksuite.composer.docx import remove_square_brackets_standalone
+from chgksuite.composer.docx import (
+    add_hyperlink_to_docx,
+    remove_square_brackets_standalone,
+)
 from chgksuite.composer.telegram import TelegramExporter
 from chgksuite.parser import (
     chgk_parse_docx,
@@ -223,6 +226,66 @@ def test_troika_colon_theme_after_source():
     assert questions[1]["question"] == "Второй вопрос."
 
 
+def test_troika_source_list_strips_parenthesized_numbers():
+    parsed = troika_parse_text(
+        """ТРОЙКА
+
+ТЕМА: ВРЕМЯ
+
+Автор: Автор
+
+1. Вопрос.
+
+Ответ: Ответ.
+
+Источник:
+1) https://example.com/one
+2) https://example.com/two""",
+        args=DefaultArgs(game="troika"),
+    )
+
+    questions = [element[1] for element in parsed if element[0] == "Question"]
+    assert questions[0]["source"] == [
+        "https://example.com/one",
+        "https://example.com/two",
+    ]
+
+    rendered = compose_4s(
+        parsed, args=DefaultArgs(game="troika", numbers_handling="all")
+    )
+    assert "- 1) https://example.com/one" not in rendered
+    assert "- https://example.com/one" in rendered
+
+
+def test_troika_author_gratitude_after_author_is_meta():
+    parsed = troika_parse_text(
+        """ТРОЙКА
+
+Автор: Артём Горячев
+Автор благодарит за тестирование хороших людей.
+
+ТЕМА: ВРЕМЯ
+
+Автор: Артём Горячев
+
+1. Вопрос.
+
+Ответ: Ответ.
+
+Источник: https://example.com/one""",
+        args=DefaultArgs(game="troika"),
+    )
+
+    assert parsed[1] == ["author", "Артём Горячев"]
+    assert parsed[2] == ["meta", "Автор благодарит за тестирование хороших людей."]
+
+    rendered = compose_4s(
+        parsed, args=DefaultArgs(game="troika", numbers_handling="all")
+    )
+    assert "@ Артём Горячев\nАвтор благодарит" not in rendered
+    assert "# Автор благодарит за тестирование хороших людей." in rendered
+
+
 def test_troika_pypandoc_html_preserves_ordered_list_start_numbers(tmp_path):
     from docx import Document
 
@@ -247,6 +310,92 @@ def test_troika_pypandoc_html_preserves_ordered_list_start_numbers(tmp_path):
     questions = [element[1] for element in parsed if element[0] == "Question"]
     assert themes == ["ВРЕМЯ"]
     assert [question["number"] for question in questions] == ["1", "2", "3"]
+
+
+def test_troika_python_docx_preserves_ordered_list_start_numbers(tmp_path):
+    from docx import Document
+
+    doc = Document()
+    doc.add_paragraph("ТРОЙКА")
+    doc.add_paragraph("ТЕМА: ВРЕМЯ")
+    doc.add_paragraph("Автор: Автор")
+    for num in range(1, 4):
+        doc.add_paragraph(f"Вопрос {num}.", style="List Number")
+        doc.add_paragraph(f"Ответ: Ответ {num}.")
+        doc.add_paragraph(f"Источник: https://example.com/{num}")
+
+    filename = tmp_path / "troika_numbering.docx"
+    doc.save(filename)
+
+    parsed = troika_parse_docx(
+        str(filename),
+        args=DefaultArgs(game="troika", parsing_engine="python_docx"),
+    )
+
+    themes = [element[1] for element in parsed if element[0] == "theme"]
+    questions = [element[1] for element in parsed if element[0] == "Question"]
+    assert themes == ["ВРЕМЯ"]
+    assert [question["number"] for question in questions] == ["1", "2", "3"]
+
+
+def test_docx_to_text_python_docx_preserves_needed_docx_attributes(
+    monkeypatch, tmp_path
+):
+    from docx import Document
+    from docx.enum.style import WD_STYLE_TYPE
+
+    def fail_convert_file(*args, **kwargs):
+        raise AssertionError("python_docx engine should not call pypandoc")
+
+    monkeypatch.setattr(parser_module.pypandoc, "convert_file", fail_convert_file)
+
+    image_path = tmp_path / "pixel.png"
+    Image.new("RGB", (1, 1), (255, 0, 0)).save(image_path)
+
+    doc = Document()
+    doc.styles.add_style("Hyperlink", WD_STYLE_TYPE.CHARACTER)
+    doc.add_heading("Раунд", level=1)
+    formatted = doc.add_paragraph()
+    formatted.add_run("До ")
+    formatted.add_run("жирный").bold = True
+    formatted.add_run(" и ")
+    formatted.add_run("курсив").italic = True
+    formatted.add_run(" и ")
+    formatted.add_run("подчеркнутый").underline = True
+
+    linked = doc.add_paragraph("Ссылка: ")
+    add_hyperlink_to_docx(doc, linked, "пример", "https://example.com/path")
+
+    for num in range(1, 3):
+        doc.add_paragraph(f"Вопрос {num}.", style="List Number")
+
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "A"
+    table.cell(0, 1).text = "B"
+    table.cell(1, 0).text = "1"
+    table.cell(1, 1).text = "2"
+
+    image_paragraph = doc.add_paragraph("Картинка ")
+    image_paragraph.add_run().add_picture(str(image_path))
+
+    filename = tmp_path / "sample.docx"
+    doc.save(filename)
+
+    text = parser_module.docx_to_text(
+        str(filename),
+        args=DefaultArgs(parsing_engine="python_docx", preserve_formatting=True),
+        inject_heading_markers=True,
+    )
+
+    assert "$$H1$$ Раунд" in text
+    assert "До __жирный__ и _курсив_ и ___подчеркнутый___" in text
+    assert "Ссылка: пример (https://example.com/path)" in text
+    assert "1. Вопрос 1." in text
+    assert "2. Вопрос 2." in text
+    assert "| A | B |" in text
+    assert "| 1 | 2 |" in text
+    assert "(img sample_001.png)" in text
+    assert (tmp_path / "sample_001.png").exists()
 
 
 @pytest.mark.parametrize(

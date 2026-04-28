@@ -204,16 +204,17 @@ class ArgparseBuilder:
             cmdparse,
             "--parsing_engine",
             choices=[
+                "python_docx",
                 "pypandoc",
                 "pypandoc_html",
                 "mammoth_bs_hard_unwrap",
                 "mammoth",
             ],
-            default=default_overrides.get("parsing_engine") or "pypandoc_html",
-            help="old html processing behaviour (before v0.5.5). "
-            "Sometimes it will yield better results than the new default.",
+            default=default_overrides.get("parsing_engine") or "python_docx",
+            help="DOCX parsing engine. python_docx uses the bundled parser and does "
+            "not require pandoc; pypandoc_html keeps the previous pandoc-based path.",
             advanced=True,
-            caption="HTML parsing engine",
+            caption="DOCX parsing engine",
             argtype="radiobutton",
         )
         self.add_argument(

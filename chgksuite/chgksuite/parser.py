@@ -42,6 +42,7 @@ from chgksuite.common import (
 )
 from chgksuite.composer import gui_compose
 from chgksuite.composer.composer_common import make_filename, game_to_ext
+from chgksuite.parsing_engine import python_docx_to_text
 from chgksuite.parser_db import chgk_parse_db
 from chgksuite.typotools import re_url
 from chgksuite.typotools import remove_excessive_whitespace as rew
@@ -1096,7 +1097,8 @@ def _normalize_troika_theme_text(text):
 class SiParser:
     """Parse SI (Своя Игра) plain text into a 4s structure."""
 
-    _RE_LEADING_NUM = re.compile(r"^\d+\.\s*")
+    _RE_LEADING_NUM = re.compile(r"^\d+[\.\)]\s*")
+    _RE_AUTHOR_GRATITUDE_META = re.compile(r"(?i)^Автор(?:ы|ка)?\s+благодар")
     _RE_THEMES_HEADER = re.compile(r"тем[ыа]\s*:?$", re.IGNORECASE)
     _RE_URL_LIKE = re.compile(
         r"https?://|www\.|/|\.(?:ru|com|net|org|io|info|edu|su|by|ua|kz)\b"
@@ -1293,6 +1295,9 @@ class SiParser:
         if self._dispatch_question_num_only(stripped):
             return
 
+        if self._dispatch_author_gratitude_meta(stripped):
+            return
+
         # Default: continuation of current field, first heading, or meta.
         if self.current_field:
             self.current_content += SEP + stripped
@@ -1354,6 +1359,16 @@ class SiParser:
         else:
             self.current_field = "author"
             self.current_content = content
+        return True
+
+    def _dispatch_author_gratitude_meta(self, stripped):
+        if (
+            self.current_field != "author"
+            or not self._RE_AUTHOR_GRATITUDE_META.search(stripped)
+        ):
+            return False
+        self._flush()
+        self.structure.append(["meta", self._apply_typo(stripped)])
         return True
 
     def _dispatch_question_num(self, stripped):
@@ -1558,6 +1573,7 @@ class TroikaParser(SiParser):
                 and self.current_field == "source"
                 and (
                     source_is_list_label
+                    or not self.current_content.strip()
                     or _TROIKA_RE_SOURCE_ITEM.search(self.current_content.strip())
                 )
             )
@@ -1577,7 +1593,10 @@ class TroikaParser(SiParser):
         if self.current_field != "source":
             return False
         if not self.current_content.strip():
-            return self.source_list_mode
+            if not self.source_list_mode:
+                return False
+            source_item = _TROIKA_RE_SOURCE_ITEM.sub("", stripped, count=1).strip()
+            return bool(self._RE_URL_LIKE.search(source_item))
         if not self.source_list_mode:
             return False
         if not self.last_line_blank:
@@ -1670,11 +1689,20 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
         )
     else:
         bn_for_img = ""
-    parsing_engine = (
-        getattr(args, "parsing_engine", "pypandoc_html") or "pypandoc_html"
-    )
+    parsing_engine = getattr(args, "parsing_engine", "python_docx") or "python_docx"
     temp_dir = None
-    if parsing_engine == "pypandoc":
+    if parsing_engine == "python_docx":
+        txt = python_docx_to_text(
+            docxfile,
+            args,
+            target_dir,
+            bn_for_img,
+            inject_heading_markers,
+            preserve_ol_start,
+            logger,
+        )
+        imgpaths = []
+    elif parsing_engine == "pypandoc":
         txt = _pypandoc_convert_file(docxfile, "plain", extra_args=["--wrap=none"])
         txt = re.sub(r"(?<!\\)_", r"\\_", txt)
         imgpaths = []
@@ -1857,7 +1885,7 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
         .replace("&amp;", "&")
         .replace("$$$UNDERSCORE$$$", "\\_")
     )
-    txt = re.sub(r"_ *_", "", txt)  # fix bad italic from Word
+    txt = re.sub(r"_ +_", "", txt)  # fix bad italic from Word
     for i, elem in enumerate(imgpaths):
         txt = txt.replace(f"IMGPATH({i})", elem)
 
