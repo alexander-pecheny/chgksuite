@@ -42,6 +42,7 @@ from chgksuite.common import (
 )
 from chgksuite.composer import gui_compose
 from chgksuite.composer.composer_common import make_filename, game_to_ext
+from chgksuite.parsing_engine import python_docx_to_text
 from chgksuite.parser_db import chgk_parse_db
 from chgksuite.typotools import re_url
 from chgksuite.typotools import remove_excessive_whitespace as rew
@@ -1558,6 +1559,7 @@ class TroikaParser(SiParser):
                 and self.current_field == "source"
                 and (
                     source_is_list_label
+                    or not self.current_content.strip()
                     or _TROIKA_RE_SOURCE_ITEM.search(self.current_content.strip())
                 )
             )
@@ -1577,7 +1579,10 @@ class TroikaParser(SiParser):
         if self.current_field != "source":
             return False
         if not self.current_content.strip():
-            return self.source_list_mode
+            if not self.source_list_mode:
+                return False
+            source_item = _TROIKA_RE_SOURCE_ITEM.sub("", stripped, count=1).strip()
+            return bool(self._RE_URL_LIKE.search(source_item))
         if not self.source_list_mode:
             return False
         if not self.last_line_blank:
@@ -1674,7 +1679,18 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
         getattr(args, "parsing_engine", "pypandoc_html") or "pypandoc_html"
     )
     temp_dir = None
-    if parsing_engine == "pypandoc":
+    if parsing_engine == "python_docx":
+        txt = python_docx_to_text(
+            docxfile,
+            args,
+            target_dir,
+            bn_for_img,
+            inject_heading_markers,
+            preserve_ol_start,
+            logger,
+        )
+        imgpaths = []
+    elif parsing_engine == "pypandoc":
         txt = _pypandoc_convert_file(docxfile, "plain", extra_args=["--wrap=none"])
         txt = re.sub(r"(?<!\\)_", r"\\_", txt)
         imgpaths = []
@@ -1857,7 +1873,7 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
         .replace("&amp;", "&")
         .replace("$$$UNDERSCORE$$$", "\\_")
     )
-    txt = re.sub(r"_ *_", "", txt)  # fix bad italic from Word
+    txt = re.sub(r"_ +_", "", txt)  # fix bad italic from Word
     for i, elem in enumerate(imgpaths):
         txt = txt.replace(f"IMGPATH({i})", elem)
 
