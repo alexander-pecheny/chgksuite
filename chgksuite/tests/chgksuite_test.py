@@ -539,6 +539,31 @@ def normalize(string):
     return string.replace("\r\n", "\n")
 
 
+def source_filename_from_canon(filename):
+    if filename.endswith(".encrypted.canon"):
+        return filename[: -len(".encrypted.canon")]
+    return filename[: -len(".canon")]
+
+
+def read_canon_text(filename):
+    if filename.endswith(".encrypted.canon"):
+        password = get_test_password()
+        if password is None:
+            pytest.skip("No password file found for encrypted test")
+        return decrypt_test_file(os.path.join(currentdir, filename), password).decode(
+            "utf-8"
+        )
+    with open(os.path.join(currentdir, filename), "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def canon_compose_args(game):
+    args = DefaultArgs(game=game)
+    if game in ("si", "troika"):
+        args.numbers_handling = "all"
+    return args
+
+
 # Regular canon files (always run)
 CANON_FILENAMES = [
     fn
@@ -619,6 +644,19 @@ def test_canonical_equality(parsing_engine, filename):
         with open(os.path.join(temp_dir, canon_fn), "r", encoding="utf-8") as f:
             canonical = f.read()
         assert normalize(canonical) == normalize(parsed)
+
+
+@pytest.mark.parametrize("filename", CANON_FILENAMES)
+def test_canon_parse_compose_parse_idempotence(filename):
+    source_filename = source_filename_from_canon(filename)
+    game = settings.get(source_filename, {}).get("game")
+    canonical = read_canon_text(filename)
+
+    canon_structure = parse_4s(canonical, game=game)
+    composed = compose_4s(canon_structure, args=canon_compose_args(game))
+    reparsed_structure = parse_4s(composed, game=game)
+
+    assert reparsed_structure == canon_structure
 
 
 TO_DOCX_FILENAMES = [
