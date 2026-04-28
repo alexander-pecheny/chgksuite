@@ -226,6 +226,66 @@ def test_troika_colon_theme_after_source():
     assert questions[1]["question"] == "Второй вопрос."
 
 
+def test_troika_source_list_strips_parenthesized_numbers():
+    parsed = troika_parse_text(
+        """ТРОЙКА
+
+ТЕМА: ВРЕМЯ
+
+Автор: Автор
+
+1. Вопрос.
+
+Ответ: Ответ.
+
+Источник:
+1) https://example.com/one
+2) https://example.com/two""",
+        args=DefaultArgs(game="troika"),
+    )
+
+    questions = [element[1] for element in parsed if element[0] == "Question"]
+    assert questions[0]["source"] == [
+        "https://example.com/one",
+        "https://example.com/two",
+    ]
+
+    rendered = compose_4s(
+        parsed, args=DefaultArgs(game="troika", numbers_handling="all")
+    )
+    assert "- 1) https://example.com/one" not in rendered
+    assert "- https://example.com/one" in rendered
+
+
+def test_troika_author_gratitude_after_author_is_meta():
+    parsed = troika_parse_text(
+        """ТРОЙКА
+
+Автор: Артём Горячев
+Автор благодарит за тестирование хороших людей.
+
+ТЕМА: ВРЕМЯ
+
+Автор: Артём Горячев
+
+1. Вопрос.
+
+Ответ: Ответ.
+
+Источник: https://example.com/one""",
+        args=DefaultArgs(game="troika"),
+    )
+
+    assert parsed[1] == ["author", "Артём Горячев"]
+    assert parsed[2] == ["meta", "Автор благодарит за тестирование хороших людей."]
+
+    rendered = compose_4s(
+        parsed, args=DefaultArgs(game="troika", numbers_handling="all")
+    )
+    assert "@ Артём Горячев\nАвтор благодарит" not in rendered
+    assert "# Автор благодарит за тестирование хороших людей." in rendered
+
+
 def test_troika_pypandoc_html_preserves_ordered_list_start_numbers(tmp_path):
     from docx import Document
 

@@ -1097,7 +1097,8 @@ def _normalize_troika_theme_text(text):
 class SiParser:
     """Parse SI (Своя Игра) plain text into a 4s structure."""
 
-    _RE_LEADING_NUM = re.compile(r"^\d+\.\s*")
+    _RE_LEADING_NUM = re.compile(r"^\d+[\.\)]\s*")
+    _RE_AUTHOR_GRATITUDE_META = re.compile(r"(?i)^Автор(?:ы|ка)?\s+благодар")
     _RE_THEMES_HEADER = re.compile(r"тем[ыа]\s*:?$", re.IGNORECASE)
     _RE_URL_LIKE = re.compile(
         r"https?://|www\.|/|\.(?:ru|com|net|org|io|info|edu|su|by|ua|kz)\b"
@@ -1294,6 +1295,9 @@ class SiParser:
         if self._dispatch_question_num_only(stripped):
             return
 
+        if self._dispatch_author_gratitude_meta(stripped):
+            return
+
         # Default: continuation of current field, first heading, or meta.
         if self.current_field:
             self.current_content += SEP + stripped
@@ -1355,6 +1359,16 @@ class SiParser:
         else:
             self.current_field = "author"
             self.current_content = content
+        return True
+
+    def _dispatch_author_gratitude_meta(self, stripped):
+        if (
+            self.current_field != "author"
+            or not self._RE_AUTHOR_GRATITUDE_META.search(stripped)
+        ):
+            return False
+        self._flush()
+        self.structure.append(["meta", self._apply_typo(stripped)])
         return True
 
     def _dispatch_question_num(self, stripped):
