@@ -6,7 +6,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--parsing_engine",
         action="store",
-        default="pypandoc_html",
+        default="python_docx",
         help="identical to gui option",
     )
 
@@ -22,4 +22,4 @@ def pytest_runtest_setup(item):
 
 @pytest.fixture
 def parsing_engine(request):
-    return request.config.getoption("--parsing_engine", default="pypandoc_html")
+    return request.config.getoption("--parsing_engine", default="python_docx")

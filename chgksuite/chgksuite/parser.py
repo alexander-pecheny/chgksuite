@@ -1675,9 +1675,7 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
         )
     else:
         bn_for_img = ""
-    parsing_engine = (
-        getattr(args, "parsing_engine", "pypandoc_html") or "pypandoc_html"
-    )
+    parsing_engine = getattr(args, "parsing_engine", "python_docx") or "python_docx"
     temp_dir = None
     if parsing_engine == "python_docx":
         txt = python_docx_to_text(

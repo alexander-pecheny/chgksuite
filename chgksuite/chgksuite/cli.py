@@ -210,9 +210,9 @@ class ArgparseBuilder:
                 "mammoth_bs_hard_unwrap",
                 "mammoth",
             ],
-            default=default_overrides.get("parsing_engine") or "pypandoc_html",
+            default=default_overrides.get("parsing_engine") or "python_docx",
             help="DOCX parsing engine. python_docx uses the bundled parser and does "
-            "not require pandoc; pypandoc_html is the current default.",
+            "not require pandoc; pypandoc_html keeps the previous pandoc-based path.",
             advanced=True,
             caption="DOCX parsing engine",
             argtype="radiobutton",
