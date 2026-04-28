@@ -362,7 +362,10 @@ def compose_4s(structure, args=None):
     first_number = True
     for element in structure:
         if element[0] in types_mapping and types_mapping[element[0]]:
-            result += types_mapping[element[0]] + format_element(element[1]) + SEP + SEP
+            value = element[1]
+            if element[0] == "theme" and isinstance(value, dict):
+                value = value["label"]
+            result += types_mapping[element[0]] + format_element(value) + SEP + SEP
         elif element[0] == "Question":
             tmp = ""
             overrides = element[1].get("overrides") or {}
