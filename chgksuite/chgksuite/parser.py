@@ -48,12 +48,36 @@ from chgksuite.typotools import remove_excessive_whitespace as rew
 
 
 SEP = "\n"
+PANDOC_NOT_FOUND_MESSAGE = "pandoc not found, installing..."
 EDITORS = {
     "win32": "notepad",
     "linux2": "xdg-open",  # python2
     "linux": "xdg-open",  # python3
     "darwin": "open -t",
 }
+
+
+def _is_pandoc_unavailable_error(exc):
+    return isinstance(exc, OSError) and "No pandoc was found" in str(exc)
+
+
+def _install_pandoc():
+    if not hasattr(pypandoc, "install_pandoc"):
+        pypandoc.install_pandoc = pypandoc.download_pandoc
+    pypandoc.install_pandoc()
+    if hasattr(pypandoc, "clean_pandocpath_cache"):
+        pypandoc.clean_pandocpath_cache()
+
+
+def _pypandoc_convert_file(*args, **kwargs):
+    try:
+        return pypandoc.convert_file(*args, **kwargs)
+    except OSError as exc:
+        if not _is_pandoc_unavailable_error(exc):
+            raise
+        print(PANDOC_NOT_FOUND_MESSAGE)
+        _install_pandoc()
+        return pypandoc.convert_file(*args, **kwargs)
 
 
 def partition(alist, indices):
@@ -1651,13 +1675,13 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
     )
     temp_dir = None
     if parsing_engine == "pypandoc":
-        txt = pypandoc.convert_file(docxfile, "plain", extra_args=["--wrap=none"])
+        txt = _pypandoc_convert_file(docxfile, "plain", extra_args=["--wrap=none"])
         txt = re.sub(r"(?<!\\)_", r"\\_", txt)
         imgpaths = []
     else:
         if parsing_engine == "pypandoc_html":
             temp_dir = tempfile.mkdtemp()
-            html = pypandoc.convert_file(
+            html = _pypandoc_convert_file(
                 docxfile,
                 "html",
                 extra_args=["--wrap=none", f"--extract-media={temp_dir}"],

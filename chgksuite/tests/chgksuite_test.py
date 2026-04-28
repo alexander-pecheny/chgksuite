@@ -10,6 +10,7 @@ import sys
 import tempfile
 
 import pytest
+import chgksuite.parser as parser_module
 from chgksuite.common import DefaultArgs, read_text_file
 from chgksuite.composer.chgksuite_parser import parse_4s, replace_counters
 from chgksuite.composer.composer_common import (
@@ -246,6 +247,76 @@ def test_troika_pypandoc_html_preserves_ordered_list_start_numbers(tmp_path):
     questions = [element[1] for element in parsed if element[0] == "Question"]
     assert themes == ["ВРЕМЯ"]
     assert [question["number"] for question in questions] == ["1", "2", "3"]
+
+
+@pytest.mark.parametrize(
+    ("parsing_engine", "pandoc_format", "converted"),
+    [
+        ("pypandoc", "plain", "Первый вопрос.\n\nОтвет: Первый ответ."),
+        (
+            "pypandoc_html",
+            "html",
+            "<p>Первый вопрос.</p><p>Ответ: Первый ответ.</p>",
+        ),
+    ],
+)
+def test_docx_to_text_installs_pandoc_when_missing(
+    monkeypatch, capsys, tmp_path, parsing_engine, pandoc_format, converted
+):
+    attempts = []
+    installed = []
+
+    def fake_convert_file(source_file, to, **kwargs):
+        attempts.append((source_file, to, kwargs))
+        if len(attempts) == 1:
+            raise OSError("No pandoc was found: either install pandoc")
+        return converted
+
+    def fake_install_pandoc():
+        installed.append(True)
+
+    monkeypatch.setattr(parser_module.pypandoc, "convert_file", fake_convert_file)
+    monkeypatch.setattr(
+        parser_module.pypandoc, "install_pandoc", fake_install_pandoc, raising=False
+    )
+
+    text = parser_module.docx_to_text(
+        str(tmp_path / "test.docx"),
+        args=DefaultArgs(parsing_engine=parsing_engine),
+    )
+
+    assert "Первый вопрос." in text
+    assert "Ответ: Первый ответ." in text
+    assert installed == [True]
+    assert len(attempts) == 2
+    assert attempts[0][1] == pandoc_format
+    assert capsys.readouterr().out == "pandoc not found, installing...\n"
+
+
+def test_docx_to_text_does_not_install_pandoc_for_other_pypandoc_errors(
+    monkeypatch, capsys, tmp_path
+):
+    installed = []
+
+    def fake_convert_file(*args, **kwargs):
+        raise OSError("permission denied")
+
+    def fake_install_pandoc():
+        installed.append(True)
+
+    monkeypatch.setattr(parser_module.pypandoc, "convert_file", fake_convert_file)
+    monkeypatch.setattr(
+        parser_module.pypandoc, "install_pandoc", fake_install_pandoc, raising=False
+    )
+
+    with pytest.raises(OSError, match="permission denied"):
+        parser_module.docx_to_text(
+            str(tmp_path / "test.docx"),
+            args=DefaultArgs(parsing_engine="pypandoc"),
+        )
+
+    assert installed == []
+    assert capsys.readouterr().out == ""
 
 
 @contextlib.contextmanager
