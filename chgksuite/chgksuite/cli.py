@@ -5,6 +5,7 @@ from __future__ import unicode_literals
 import argparse
 import json
 import os
+from pathlib import Path
 
 from chgksuite.common import (
     DefaultNamespace,
@@ -1200,6 +1201,243 @@ class ArgparseBuilder:
             caption="Сжать PDF после сборки",
             advanced=True,
             argtype="radiobutton",
+        )
+
+        cmdhandouts_split_fit = self.add_parser(cmdhandouts_subcommands, "split_fit")
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "filename",
+            help="source .hndt file",
+            caption="Файл с раздатками",
+            filetypes=[("handouts files", "*.hndt"), ("text files", "*.txt")],
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--output_dir",
+            "-o",
+            type=Path,
+            help="where to write split handouts; defaults to the source directory",
+            caption="Папка для выходных файлов",
+            argtype="folder",
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--language",
+            "-lang",
+            default="ru",
+            argtype="radiobutton",
+            choices=sorted(HANDOUT_LANGS),
+            help="language",
+            caption="Язык",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--compress_pdf",
+            choices=["on", "off"],
+            default="on",
+            help="compress final output PDFs",
+            caption="Сжать итоговые PDF",
+            advanced=True,
+            argtype="radiobutton",
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--max_rows",
+            type=int,
+            default=256,
+            help="safety cap for row search",
+            caption="Максимум строк для поиска",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--keep_pdfs",
+            choices=["on", "off"],
+            default="on",
+            help="leave final fitted PDFs next to generated .hndt files",
+            caption="Оставить PDF отдельных раздаток",
+            advanced=True,
+            argtype="radiobutton",
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--no_auto_resize_images",
+            action="store_true",
+            help="disable the post-pass that shrinks image handouts to fit more rows",
+            caption="Не подгонять размер картинок",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--image_bottom_space_row_ratio",
+            type=float,
+            default=0.6,
+            help="shrink images only when bottom blank space exceeds this many row heights",
+            caption="Порог пустого места в высотах строки",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--image_shrink_percent",
+            type=float,
+            default=2.0,
+            help="shrink image handouts by this percent per probe",
+            caption="Шаг уменьшения картинки, %",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--min_resize_image",
+            type=float,
+            default=0.6,
+            help="do not shrink resize_image below this value",
+            caption="Минимальный resize_image",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--no_update_source_resize",
+            action="store_true",
+            help="do not write final resize_image values back to the source .hndt",
+            caption="Не обновлять resize_image в исходнике",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--no_all_q_pdf",
+            action="store_true",
+            help="do not create {source}_all_q_1team.pdf from the combined handouts",
+            caption="Не создавать общий PDF",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--jobs",
+            "-j",
+            type=int,
+            default=os.cpu_count() or 1,
+            help="number of handouts to fit in parallel",
+            caption="Параллельных задач",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--verbose",
+            action="store_true",
+            help="print every probed row count and resulting page count",
+            caption="Подробный вывод",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--font",
+            "-f",
+            help="font",
+            caption="Шрифт",
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--font_size",
+            type=int,
+            default=14,
+            help="font size",
+            caption="Размер шрифта",
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--paperwidth",
+            type=float,
+            default=210,
+            help="paper width",
+            caption="Ширина бумаги",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--paperheight",
+            type=float,
+            default=297,
+            help="paper height",
+            caption="Высота бумаги",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--margin_top",
+            type=float,
+            default=5,
+            help="top margin",
+            caption="Верхний отступ",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--margin_bottom",
+            type=float,
+            default=5,
+            help="bottom margin",
+            caption="Нижний отступ",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--margin_left",
+            type=float,
+            default=5,
+            help="left margin",
+            caption="Левый отступ",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--margin_right",
+            type=float,
+            default=5,
+            help="right margin",
+            caption="Правый отступ",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--boxwidth",
+            type=float,
+            help="box width",
+            caption="Ширина блока",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--boxwidthinner",
+            type=float,
+            help="box width inner",
+            caption="Внутренняя ширина блока",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--tikz_mm",
+            type=float,
+            default=None,
+            help="tikz_mm width",
+            caption="Ширина tikz_mm",
+            advanced=True,
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--add_n_teams",
+            choices=["on", "off"],
+            default="off",
+            help="add _{n}teams suffix to output filename",
+            caption="Добавить суффикс с количеством команд",
+            advanced=True,
+            argtype="radiobutton",
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--tectonic_package_regex",
+            advanced=True,
+            caption="Переопределить имя файла с релизом tectonic",
         )
 
         cmdhandouts_install = self.add_parser(cmdhandouts_subcommands, "install")

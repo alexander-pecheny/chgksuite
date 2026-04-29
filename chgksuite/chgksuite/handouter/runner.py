@@ -562,6 +562,12 @@ def gui_handouter(args):
         generate_handouts(args)
     elif args.handoutssubcommand == "pack":
         pack_handouts(args)
+    elif args.handoutssubcommand == "split_fit":
+        from chgksuite.handouter.split_fit import run_split_fit
+
+        exit_code = run_split_fit(args)
+        if exit_code:
+            raise SystemExit(exit_code)
     elif args.handoutssubcommand == "install":
         install_tectonic(args)
     elif args.handoutssubcommand == "create_html":
