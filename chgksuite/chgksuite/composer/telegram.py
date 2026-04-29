@@ -1,10 +1,12 @@
 import json
+import html
 import os
 import random
 import re
 import sqlite3
 import tempfile
 import time
+import urllib.parse
 import uuid
 from typing import Optional, Union
 
@@ -62,6 +64,18 @@ _TG_ENTITY_RE = re.compile(r"<(?:b|strong|i|em|u|s|a |code|pre)")
 def tg_entity_count(html):
     """Estimate the number of Telegram entities in an HTML string."""
     return len(_TG_ENTITY_RE.findall(html))
+
+
+_TG_HREF_SAFE_CHARS = "%/:?#[]@!$&'()*+,;="
+
+
+def _format_html_hyperlink(url, disable_asterisks_processing=False):
+    href = urllib.parse.quote(url, safe=_TG_HREF_SAFE_CHARS)
+    href = html.escape(href, quote=True)
+    text = html.escape(url, quote=False).replace("_", "&#95;")
+    if not disable_asterisks_processing:
+        text = text.replace("*", "&#42;")
+    return f'<a href="{href}">{text}</a>'
 
 
 def get_text(msg_data):
@@ -370,7 +384,9 @@ class TelegramExporter(BaseExporter):
             if run[0] == "":
                 res += tgr(run[1])
             elif run[0] == "hyperlink":
-                res += run[1]
+                res += _format_html_hyperlink(
+                    run[1], self.args.disable_asterisks_processing
+                )
             elif run[0] == "screen":
                 res += tgr(run[1]["for_screen"])
             elif run[0] == "strike":

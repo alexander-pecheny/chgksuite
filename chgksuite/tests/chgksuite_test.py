@@ -4,10 +4,12 @@ import contextlib
 import inspect
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 import pytest
 import chgksuite.parser as parser_module
@@ -284,6 +286,36 @@ def test_troika_author_gratitude_after_author_is_meta():
     )
     assert "@ Артём Горячев\nАвтор благодарит" not in rendered
     assert "# Автор благодарит за тестирование хороших людей." in rendered
+
+
+def test_troika_number_only_question_keeps_leading_host_note():
+    parsed = troika_parse_text(
+        """ТРОЙКА
+
+ТЕМА: МОРЕ
+
+1.
+[Комментарий ведущему: не объявлять, что в вопросе есть кавычки]
+
+В 2007 году «James E. Williams» [джеймс и уильямс] спас «Тэ Хон Дан».
+
+Ответ: Сомали́.""",
+        args=DefaultArgs(game="troika"),
+    )
+
+    questions = [element[1] for element in parsed if element[0] == "Question"]
+    assert len(questions) == 1
+    assert questions[0]["question"] == (
+        "[Комментарий ведущему: не объявлять, что в вопросе есть кавычки]\n"
+        "В 2007 году «James E. Williams» [джеймс и уильямс] спас «Тэ Хон Дан»."
+    )
+    assert questions[0]["answer"] == "Сомали́."
+
+    rendered = compose_4s(
+        parsed, args=DefaultArgs(game="troika", numbers_handling="all")
+    )
+    assert "? [Комментарий ведущему" in rendered
+    assert "В 2007 году «James E. Williams»" in rendered
 
 
 def test_troika_pypandoc_html_preserves_ordered_list_start_numbers(tmp_path):
@@ -752,6 +784,48 @@ def test_parse_4s_elem_does_not_parse_url_underscores_as_italic():
     assert ["hyperlink", "https://example.com/path_with_under"] in parsed
     assert ["hyperlink", url] in parsed
     assert [run for run in parsed if run[0] == "italic"] == [["italic", "italic"]]
+
+
+def test_docx_hyperlink_targets_percent_encode_non_ascii_url(tmp_path):
+    from docx import Document
+    from docx.enum.style import WD_STYLE_TYPE
+
+    url = "https://ru.wikipedia.org/wiki/Абвгде_ёжзийкл_мнопрстуф_«Хцчшщы_—_эюяабв»_гдежзий_клмнопрст_уфхцчшщ"
+
+    doc = Document()
+    doc.styles.add_style("Hyperlink", WD_STYLE_TYPE.CHARACTER)
+    paragraph = doc.add_paragraph()
+    add_hyperlink_to_docx(doc, paragraph, url, url)
+    filename = tmp_path / "link.docx"
+    doc.save(filename)
+
+    with zipfile.ZipFile(filename) as docx_file:
+        rels = docx_file.read("word/_rels/document.xml.rels").decode("utf-8")
+        document = docx_file.read("word/document.xml").decode("utf-8")
+
+    target = re.search(r'Type="[^"]+/hyperlink" Target="([^"]+)"', rels).group(1)
+    assert target.startswith("https://ru.wikipedia.org/wiki/%D0%90")
+    assert "%C2%AB%D0%A5%D1%86%D1%87%D1%88%D1%89%D1%8B" in target
+    assert "%E2%80%94" in target
+    assert not re.search(r"[А-Яа-яЁё«»—]", target)
+    assert url in document
+
+
+def test_telegram_formats_non_ascii_url_as_html_link():
+    url = "https://ru.wikipedia.org/wiki/Абвгде_ёжзийкл_мнопрстуф_«Хцчшщы_—_эюяабв»_гдежзий_клмнопрст_уфхцчшщ?x=1&y=2"
+    exporter = TelegramExporter.__new__(TelegramExporter)
+    exporter.args = DefaultArgs()
+    exporter.parse_4s_elem = _parse_4s_elem
+
+    telegram_text, image = TelegramExporter.tgformat(exporter, url)
+
+    assert telegram_text.startswith('<a href="https://ru.wikipedia.org/wiki/%D0%90')
+    assert "%C2%AB%D0%A5%D1%86%D1%87%D1%88%D1%89%D1%8B" in telegram_text
+    assert "%E2%80%94" in telegram_text
+    assert "x=1&amp;y=2" in telegram_text
+    assert "Абвгде&#95;ёжзийкл" in telegram_text
+    assert telegram_text.endswith("</a>")
+    assert image is None
 
 
 def test_long_handout():
