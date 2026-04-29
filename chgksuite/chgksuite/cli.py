@@ -663,6 +663,14 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdcompose_pptx,
+            "--font",
+            default=default_overrides.get("font") or None,
+            help="font face to use in the presentation.",
+            advanced=True,
+            caption="Шрифт",
+        )
+        self.add_argument(
+            cmdcompose_pptx,
             "--do_dot_remove_accents",
             help="do not remove accents.",
             advanced=True,
