@@ -4,6 +4,7 @@ import shlex
 import shutil
 import sys
 import tempfile
+import urllib.parse
 import zipfile
 
 import docx
@@ -32,6 +33,8 @@ WHITEN = {
     "source": True,
     "author": False,
 }
+
+_HYPERLINK_SAFE_CHARS = "%/:?#[]@!$&'()*+,;="
 
 
 def replace_font_in_docx(template_path, new_font):
@@ -131,7 +134,9 @@ def add_hyperlink_to_docx(doc, paragraph, text, url):
     run.style = doc.styles["Hyperlink"]
     part = paragraph.part
     r_id = part.relate_to(
-        url, docx.opc.constants.RELATIONSHIP_TYPE.HYPERLINK, is_external=True
+        urllib.parse.quote(url, safe=_HYPERLINK_SAFE_CHARS),
+        docx.opc.constants.RELATIONSHIP_TYPE.HYPERLINK,
+        is_external=True,
     )
     hyperlink = docx.oxml.shared.OxmlElement("w:hyperlink")
     hyperlink.set(docx.oxml.shared.qn("r:id"), r_id)

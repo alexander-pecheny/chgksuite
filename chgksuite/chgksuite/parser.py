@@ -1088,7 +1088,9 @@ _TROIKA_RE_QUESTION_NUM = re.compile(r"^(\d+)\.?\s+")
 _TROIKA_RE_QUESTION_NUM_ONLY = re.compile(r"^(\d+)\.?$")
 _TROIKA_QUESTION_NUMBERS = {1, 2, 3}
 _TROIKA_RE_SOURCE_ITEM = re.compile(r"^(\d+)[\.\)]\s+")
-_TROIKA_RE_HOST_NOTE = re.compile(r"(?i)^(?:Ведущему\b|\[Ведущему\b)")
+_TROIKA_RE_HOST_NOTE = re.compile(
+    r"(?i)^\[?(?:Ведущему\b|Комментарий\s+ведущему\b)"
+)
 
 
 def _normalize_troika_theme_text(text):
@@ -1416,6 +1418,8 @@ class SiParser:
         if num in _SI_QUESTION_NUMBERS:
             self._flush()
             self.structure.append(["number", str(num)])
+            self.current_field = "question"
+            self.current_content = ""
             return True
         return False
 
@@ -1542,8 +1546,11 @@ class TroikaParser(SiParser):
             return
 
         if _TROIKA_RE_HOST_NOTE.search(stripped):
-            self._flush()
-            self.structure.append(["meta", self._apply_typo(stripped)])
+            if self.current_field == "question":
+                super()._handle_line(stripped)
+            else:
+                self._flush()
+                self.structure.append(["meta", self._apply_typo(stripped)])
             self.last_line_blank = False
             return
 
@@ -1651,6 +1658,8 @@ class TroikaParser(SiParser):
             return False
         self._flush()
         self.structure.append(["number", str(num)])
+        self.current_field = "question"
+        self.current_content = ""
         return True
 
 
