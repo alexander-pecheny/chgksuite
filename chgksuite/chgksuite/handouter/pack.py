@@ -9,6 +9,20 @@ from pypdf import PdfWriter
 from chgksuite.handouter.utils import compress_pdf, parse_handouts
 
 
+def only_handout_or_skip(filename, parsed):
+    handouts = [handout for handout in parsed if handout]
+    if not handouts:
+        print(f"skipping {filename}: no handouts found")
+        return None
+    if len(handouts) > 1:
+        print(
+            f"skipping {filename}: contains {len(handouts)} handouts; "
+            "pack only uses split-fitted single-handout files"
+        )
+        return None
+    return handouts[0]
+
+
 def run_hndt(fullpath, args):
     spargs = ["chgksuite", "handouts", "hndt2pdf"]
     if args.font:
@@ -48,15 +62,15 @@ def pack_handouts(args):
             contents = f.read()
         try:
             parsed = parse_handouts(contents)
-        except:
+        except Exception:
             print(f"couldn't parse {fn}, skipping")
             continue
-        if len(parsed) > 1:
-            print(f"skipping {fn}: more than one handout per txt is not supported")
+        handout = only_handout_or_skip(fn, parsed)
+        if handout is None:
             continue
-        color = parsed[0].get("color") or 0
-        handouts_per_team = parsed[0].get("handouts_per_team") or 3
-        total_handouts_per_page = parsed[0]["columns"] * parsed[0]["rows"]
+        color = handout.get("color") or 0
+        handouts_per_team = handout.get("handouts_per_team") or 3
+        total_handouts_per_page = handout["columns"] * handout["rows"]
         teams_per_page = total_handouts_per_page / handouts_per_team
         pages = math.ceil((args.n_teams + 1) / teams_per_page)
         print(f"processing {fn}")

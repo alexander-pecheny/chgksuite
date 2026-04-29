@@ -556,20 +556,20 @@ def run_handouter(args):
 def gui_handouter(args):
     if hasattr(args, "filename") and args.filename:
         set_lastdir(os.path.dirname(os.path.abspath(args.filename)))
-    if args.handoutssubcommand in ("hndt2pdf", "run"):
-        run_handouter(args)
-    elif args.handoutssubcommand in ("4s2hndt", "generate"):
+    if args.handoutssubcommand in ("4s2hndt", "generate"):
         generate_handouts(args)
-    elif args.handoutssubcommand == "pack":
-        pack_handouts(args)
+    elif args.handoutssubcommand in ("hndt2pdf", "run"):
+        run_handouter(args)
+    elif args.handoutssubcommand == "install":
+        install_tectonic(args)
     elif args.handoutssubcommand == "split_fit":
         from chgksuite.handouter.split_fit import run_split_fit
 
         exit_code = run_split_fit(args)
         if exit_code:
             raise SystemExit(exit_code)
-    elif args.handoutssubcommand == "install":
-        install_tectonic(args)
+    elif args.handoutssubcommand == "pack":
+        pack_handouts(args)
     elif args.handoutssubcommand == "create_html":
         from chgksuite.handouter.html_handout import create_html
 
