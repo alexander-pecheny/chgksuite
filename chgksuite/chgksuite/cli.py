@@ -1117,90 +1117,12 @@ class ArgparseBuilder:
             argtype="radiobutton",
         )
 
-        cmdhandouts_create_html = self.add_parser(
-            cmdhandouts_subcommands, "create_html"
-        )
+        cmdhandouts_install = self.add_parser(cmdhandouts_subcommands, "install")
         self.add_argument(
-            cmdhandouts_create_html,
-            "fraction",
-            help="fraction of A4 width: 1/6, 1/3, 1/2, or 1",
-            caption="Доля ширины A4",
-            choices=["1/6", "1/3", "1/2", "1"],
-            argtype="radiobutton",
-        )
-        self.add_argument(
-            cmdhandouts_create_html,
-            "--font",
-            "-f",
-            help="font family",
-            caption="Шрифт",
-        )
-        self.add_argument(
-            cmdhandouts_create_html,
-            "--output",
-            "-o",
-            help="output HTML filename",
-            caption="Имя выходного HTML файла",
-        )
-
-        cmdhandouts_html2img = self.add_parser(cmdhandouts_subcommands, "html2img")
-        self.add_argument(
-            cmdhandouts_html2img,
-            "filename",
-            help="HTML file to convert",
-            caption="HTML файл для конвертации",
-            filetypes=[("HTML files", "*.html")],
-        )
-        self.add_argument(
-            cmdhandouts_html2img,
-            "--scale",
-            "-s",
-            type=int,
-            default=4,
-            help="PNG scale factor for high-DPI (default: 4)",
-            caption="Масштаб PNG для высокого разрешения",
-        )
-
-        cmdhandouts_pack = self.add_parser(cmdhandouts_subcommands, "pack")
-        self.add_argument(
-            cmdhandouts_pack,
-            "folder",
-            help="input directory",
-            caption="Папка с раздатками",
-        )
-        self.add_argument(
-            cmdhandouts_pack,
-            "--output_filename_prefix",
-            "-o",
-            default="packed_handouts",
-            help="output filename prefix",
-            caption="Префикс имени выходного файла",
-        )
-        self.add_argument(
-            cmdhandouts_pack,
-            "--n_teams",
-            "-n",
-            type=int,
-            required=True,
-            help="number of teams",
-            caption="Количество команд",
-        )
-        self.add_argument(
-            cmdhandouts_pack,
-            "--font",
-            "-f",
-            help="font",
-            caption="Шрифт",
-        )
-        self.add_argument(
-            cmdhandouts_pack,
-            "--compress_pdf",
-            choices=["on", "off"],
-            default="on",
-            help="compress output PDF",
-            caption="Сжать PDF после сборки",
+            cmdhandouts_install,
+            "--tectonic_package_regex",
             advanced=True,
-            argtype="radiobutton",
+            caption="Переопределить имя файла с релизом tectonic",
         )
 
         cmdhandouts_split_fit = self.add_parser(cmdhandouts_subcommands, "split_fit")
@@ -1440,12 +1362,90 @@ class ArgparseBuilder:
             caption="Переопределить имя файла с релизом tectonic",
         )
 
-        cmdhandouts_install = self.add_parser(cmdhandouts_subcommands, "install")
+        cmdhandouts_pack = self.add_parser(cmdhandouts_subcommands, "pack")
         self.add_argument(
-            cmdhandouts_install,
-            "--tectonic_package_regex",
+            cmdhandouts_pack,
+            "folder",
+            help="input directory",
+            caption="Папка с раздатками",
+        )
+        self.add_argument(
+            cmdhandouts_pack,
+            "--output_filename_prefix",
+            "-o",
+            default="packed_handouts",
+            help="output filename prefix",
+            caption="Префикс имени выходного файла",
+        )
+        self.add_argument(
+            cmdhandouts_pack,
+            "--n_teams",
+            "-n",
+            type=int,
+            required=True,
+            help="number of teams",
+            caption="Количество команд",
+        )
+        self.add_argument(
+            cmdhandouts_pack,
+            "--font",
+            "-f",
+            help="font",
+            caption="Шрифт",
+        )
+        self.add_argument(
+            cmdhandouts_pack,
+            "--compress_pdf",
+            choices=["on", "off"],
+            default="on",
+            help="compress output PDF",
+            caption="Сжать PDF после сборки",
             advanced=True,
-            caption="Переопределить имя файла с релизом tectonic",
+            argtype="radiobutton",
+        )
+
+        cmdhandouts_create_html = self.add_parser(
+            cmdhandouts_subcommands, "create_html"
+        )
+        self.add_argument(
+            cmdhandouts_create_html,
+            "fraction",
+            help="fraction of A4 width: 1/6, 1/3, 1/2, or 1",
+            caption="Доля ширины A4",
+            choices=["1/6", "1/3", "1/2", "1"],
+            argtype="radiobutton",
+        )
+        self.add_argument(
+            cmdhandouts_create_html,
+            "--font",
+            "-f",
+            help="font family",
+            caption="Шрифт",
+        )
+        self.add_argument(
+            cmdhandouts_create_html,
+            "--output",
+            "-o",
+            help="output HTML filename",
+            caption="Имя выходного HTML файла",
+        )
+
+        cmdhandouts_html2img = self.add_parser(cmdhandouts_subcommands, "html2img")
+        self.add_argument(
+            cmdhandouts_html2img,
+            "filename",
+            help="HTML file to convert",
+            caption="HTML файл для конвертации",
+            filetypes=[("HTML files", "*.html")],
+        )
+        self.add_argument(
+            cmdhandouts_html2img,
+            "--scale",
+            "-s",
+            type=int,
+            default=4,
+            help="PNG scale factor for high-DPI (default: 4)",
+            caption="Масштаб PNG для высокого разрешения",
         )
 
 
