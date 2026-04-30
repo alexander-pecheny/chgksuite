@@ -25,6 +25,11 @@ class PptxExporter(BaseExporter):
         self.config_path = os.path.abspath(self.args.pptx_config)
         with open(self.config_path, encoding="utf8") as f:
             self.c = toml.load(f)
+        if getattr(self.args, "font", None):
+            font_cfg = self.c.setdefault("font", {})
+            font_cfg["name"] = self.args.font
+            if "heading_name" in font_cfg:
+                font_cfg["heading_name"] = self.args.font
         self.qcount = 0
         hs = self.labels["question_labels"]["handout"]
         self.re_handout_1 = re.compile(
@@ -39,12 +44,138 @@ class PptxExporter(BaseExporter):
         except Exception:
             return None
 
+    def _get_font_size(self, key, fallback):
+        font_cfg = self.c.get("font", {})
+        if key in font_cfg:
+            return font_cfg[key]
+        if key == "default_size":
+            if self.c.get("force_text_size_question"):
+                return self.c["force_text_size_question"]
+            text_size_grid = self.c.get("text_size_grid", {})
+            if text_size_grid.get("default"):
+                return text_size_grid["default"]
+        return fallback
+
+    def _get_legacy_text_size(self, key):
+        if "default_size" in self.c.get("font", {}):
+            return None
+        return self.c.get(key)
+
+    def _apply_font_size_to_text_frame(self, text_frame, size):
+        size = PptxPt(size)
+        for p in text_frame.paragraphs:
+            p.font.size = size
+            for r in p.runs:
+                r.font.size = size
+
     def _apply_font_to_text_frame(self, text_frame, font_name=None):
         if not font_name:
             return
         for p in text_frame.paragraphs:
             for r in p.runs:
                 r.font.name = font_name
+
+    def _alpha_marker(self, number, upper=False):
+        result = ""
+        while number:
+            number, remainder = divmod(number - 1, 26)
+            result = chr(ord("a") + remainder) + result
+        if upper:
+            return result.upper()
+        return result
+
+    def _roman_marker(self, number, upper=False):
+        result = ""
+        for value, numeral in (
+            (1000, "m"),
+            (900, "cm"),
+            (500, "d"),
+            (400, "cd"),
+            (100, "c"),
+            (90, "xc"),
+            (50, "l"),
+            (40, "xl"),
+            (10, "x"),
+            (9, "ix"),
+            (5, "v"),
+            (4, "iv"),
+            (1, "i"),
+        ):
+            while number >= value:
+                result += numeral
+                number -= value
+        if upper:
+            return result.upper()
+        return result
+
+    def _format_list_marker(self, number):
+        style = self.c.get("list", {}).get("numbering_style", "1.")
+        if "{n}" in style:
+            return style.format(n=number)
+        if not style:
+            style = "1."
+        marker_type, suffix = style[0], style[1:]
+        if marker_type == "1":
+            marker = str(number)
+        elif marker_type == "a":
+            marker = self._alpha_marker(number)
+        elif marker_type == "A":
+            marker = self._alpha_marker(number, upper=True)
+        elif marker_type == "i":
+            marker = self._roman_marker(number)
+        elif marker_type == "I":
+            marker = self._roman_marker(number, upper=True)
+        else:
+            marker = str(number)
+            suffix = style
+        return f"{marker}{suffix}"
+
+    def _include_handout_label(self):
+        return bool(self.c.get("handout", {}).get("include_label", False))
+
+    def _add_handout_on_separate_slide(self):
+        add_handout_on_separate_slide = self.c.get("add_handout_on_separate_slide")
+        return add_handout_on_separate_slide is None or add_handout_on_separate_slide
+
+    def _set_paragraph_alignment(self, paragraph, align):
+        if not align:
+            return
+        paragraph.alignment = getattr(PP_ALIGN, align.upper())
+
+    def _configure_paragraph(self, paragraph, size=None, align=None):
+        paragraph.font.name = self.c["font"]["name"]
+        paragraph.font.size = PptxPt(size or self._get_font_size("default_size", 32))
+        self._set_paragraph_alignment(paragraph, align)
+        return paragraph
+
+    def _get_handout_space_after(self):
+        return self.c.get("handout", {}).get("space_after", 18)
+
+    def _get_handout_image_scale(self):
+        return self.c.get("handout", {}).get("image_scale", 1)
+
+    def _get_image_space_after(self, image):
+        if image.get("handout"):
+            return PptxPt(self._get_handout_space_after())
+        return 0
+
+    def _scale_image_for_pptx(self, image):
+        if not image.get("handout"):
+            return image
+        scale = self._get_handout_image_scale()
+        if not scale or scale == 1:
+            return image
+        image["width"] *= scale
+        image["height"] *= scale
+        return image
+
+    def _prepare_text_frame(self, text_frame):
+        text_frame.word_wrap = True
+        text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+
+    def _remove_shape(self, shape):
+        element = shape._element
+        element.getparent().remove(element)
 
     def get_textbox_qnumber(self, slide):
         kwargs = {}
@@ -66,11 +197,16 @@ class PptxExporter(BaseExporter):
         if height is None:
             height = PptxInches(self.c["textbox"]["height"])
         textbox = slide.shapes.add_textbox(left, top, width, height)
+        self._prepare_text_frame(textbox.text_frame)
         return textbox
 
     def add_run(self, para, text, color=None):
         r = para.add_run()
         r.text = text
+        if para.font.name:
+            r.font.name = para.font.name
+        if para.font.size:
+            r.font.size = para.font.size
         if color is None:
             color = self.c["textbox"].get("color")
         if color:
@@ -88,16 +224,21 @@ class PptxExporter(BaseExporter):
         if isinstance(el, list):
             if len(el) > 1 and isinstance(el[1], list):
                 self.pptx_format(el[0], para, tf, slide)
-                licount = 0
-                for li in el[1]:
-                    licount += 1
-                    self.add_run(para, "\n{}. ".format(licount))
+                blank_line = self.c.get("list", {}).get(
+                    "blank_line_before_items", True
+                )
+                for licount, li in enumerate(el[1], start=1):
+                    if licount == 1 and blank_line:
+                        prefix = "\n\n"
+                    else:
+                        prefix = "\n"
+                    marker = self._format_list_marker(licount)
+                    self.add_run(para, f"{prefix}{marker} ")
                     self.pptx_format(li, para, tf, slide)
             else:
-                licount = 0
-                for li in el:
-                    licount += 1
-                    self.add_run(para, "\n{}. ".format(licount))
+                for licount, li in enumerate(el, start=1):
+                    marker = self._format_list_marker(licount)
+                    self.add_run(para, f"\n{marker} ")
                     self.pptx_format(li, para, tf, slide)
 
         if isinstance(el, str):
@@ -150,7 +291,7 @@ class PptxExporter(BaseExporter):
         if image:
             s = re.sub("\\[" + hs + "(.+?)\\]", "", s, flags=re.DOTALL)
             s = s.strip()
-        elif hs in s:
+        elif re.search(hs, s) and not self._include_handout_label():
             re_hs = re.search("\\[" + hs + ".+?: ?(.+)\\]", s, flags=re.DOTALL)
             if re_hs:
                 s = s.replace(re_hs.group(0), re_hs.group(1))
@@ -163,12 +304,62 @@ class PptxExporter(BaseExporter):
         return s
 
     def apply_vertical_alignment_if_needed(self, text_frame):
+        self._prepare_text_frame(text_frame)
         align = self.c["textbox"].get("vertical_align")
         if align:
-            text_frame.auto_size = MSO_AUTO_SIZE.NONE
             text_frame.margin_top = 0
             text_frame.margin_bottom = 0
             text_frame.vertical_anchor = getattr(MSO_VERTICAL_ANCHOR, align.upper())
+
+    def format_title_slide(self, title, subtitle=None):
+        if title is None or not hasattr(title, "text_frame"):
+            return
+        tf = title.text_frame
+        self._prepare_text_frame(tf)
+        self._apply_font_size_to_text_frame(
+            tf, self._get_font_size("title_size", 60)
+        )
+        if subtitle is None:
+            title_cfg = self.c.get("title_textbox", {})
+            layout_title = None
+            try:
+                title_idx = title.placeholder_format.idx
+                for layout_shape in self.TITLE_SLIDE.shapes:
+                    if layout_shape.placeholder_format.idx == title_idx:
+                        layout_title = layout_shape
+                        break
+            except (AttributeError, ValueError):
+                pass
+            default_left = layout_title.left if layout_title else PptxInches(1.67)
+            default_width = (
+                layout_title.width
+                if layout_title
+                else self.prs.slide_width - 2 * default_left
+            )
+            title.left = (
+                PptxInches(title_cfg["left"])
+                if "left" in title_cfg
+                else default_left
+            )
+            title.width = (
+                PptxInches(title_cfg["width"])
+                if "width" in title_cfg
+                else default_width
+            )
+            title.top = PptxInches(
+                title_cfg.get("top", self.c["textbox"].get("top", 0.8))
+            )
+            title.height = PptxInches(
+                title_cfg.get("height", self.c["textbox"].get("height", 6.1))
+            )
+            tf.margin_top = 0
+            tf.margin_bottom = 0
+            tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
+        elif hasattr(subtitle, "text_frame"):
+            self._prepare_text_frame(subtitle.text_frame)
+            self._apply_font_size_to_text_frame(
+                subtitle.text_frame, self._get_font_size("default_size", 32)
+            )
 
     def _process_block(self, block):
         section = [x for x in block if x[0] == "section"]
@@ -181,14 +372,7 @@ class PptxExporter(BaseExporter):
         tf = textbox.text_frame
         self.apply_vertical_alignment_if_needed(tf)
         tf.word_wrap = True
-        text_for_size = (
-            (self.recursive_join([x[1] for x in section]) or "")
-            + "\n"
-            + (self.recursive_join([x[1] for x in editor]) or "")
-            + "\n"
-            + (self.recursive_join([x[1] for x in meta]) or "")
-        )
-        p = self.init_paragraph(tf, text=text_for_size)
+        p = self.init_paragraph(tf)
         add_line_break = False
         if section:
             if self.c.get("tour_as_question_number"):
@@ -200,7 +384,6 @@ class PptxExporter(BaseExporter):
                 r = self.add_run(
                     p, self._replace_no_break(self.pptx_process_text(section[0][1]))
                 )
-                r.font.size = PptxPt(self.c["text_size_grid"]["section"])
                 heading_font = self._get_heading_font_name()
                 if heading_font:
                     r.font.name = heading_font
@@ -247,23 +430,25 @@ class PptxExporter(BaseExporter):
                 slide = self.prs.slides.add_slide(self.TITLE_SLIDE)
             title = slide.shapes.title
             title.text = title_text[0][1]
+            subtitle = None
             if date_text:
                 try:
                     subtitle = slide.placeholders[1]
                     subtitle.text = date_text[0][1]
                 except KeyError:
                     pass
+            else:
+                try:
+                    self._remove_shape(slide.placeholders[1])
+                except KeyError:
+                    pass
+            self.format_title_slide(title, subtitle=subtitle)
             heading_font = self._get_heading_font_name()
             if heading_font:
                 if title is not None and hasattr(title, "text_frame"):
                     self._apply_font_to_text_frame(title.text_frame, heading_font)
-                try:
-                    if subtitle is not None and hasattr(subtitle, "text_frame"):
-                        self._apply_font_to_text_frame(
-                            subtitle.text_frame, heading_font
-                        )
-                except NameError:
-                    pass
+                if subtitle is not None and hasattr(subtitle, "text_frame"):
+                    self._apply_font_to_text_frame(subtitle.text_frame, heading_font)
         for block in (editor_block, section_block):
             self._process_block(block)
 
@@ -296,13 +481,30 @@ class PptxExporter(BaseExporter):
         elif isinstance(text, str):
             match_ = self.re_handout_1.search(text)
             if match_:
+                if self._include_handout_label():
+                    return match_.group(0)
                 return match_.group("body")
             else:
                 lines = text.split("\n")
                 for line in lines:
                     match_ = self.re_handout_2.search(line)
                     if match_:
+                        if self._include_handout_label():
+                            return match_.group(0)
                         return match_.group("body")
+
+    def _split_handout_from_text(self, text):
+        if not isinstance(text, str):
+            return None, text
+        match_ = self.re_handout_1.search(text)
+        if not match_:
+            return None, text
+        if self._include_handout_label():
+            handout = match_.group(0)
+        else:
+            handout = match_.group("body")
+        question = f"{text[: match_.start()]}{text[match_.end() :]}"
+        return handout.strip(), question.strip()
 
     def _get_image_from_4s(self, text):
         if isinstance(text, list):
@@ -311,6 +513,7 @@ class PptxExporter(BaseExporter):
                 if image:
                     return image
         elif isinstance(text, str):
+            handout_match = self.re_handout_1.search(text)
             for run in self.parse_4s_elem(text):
                 if run[0] == "img":
                     parsed_image = parseimg(
@@ -319,7 +522,10 @@ class PptxExporter(BaseExporter):
                         tmp_dir=self.dir_kwargs.get("tmp_dir"),
                         targetdir=self.dir_kwargs.get("targetdir"),
                     )
-                    return parsed_image
+                    parsed_image["handout"] = bool(
+                        handout_match and run[1] in handout_match.group(0)
+                    )
+                    return self._scale_image_for_pptx(parsed_image)
 
     def make_slide_layout(self, image, slide, allowbigimage=True):
         if image:
@@ -330,6 +536,7 @@ class PptxExporter(BaseExporter):
             base_top = PptxInches(self.c["textbox"]["top"])
             base_width = PptxInches(self.c["textbox"]["width"])
             base_height = PptxInches(self.c["textbox"]["height"])
+            image_space_after = self._get_image_space_after(image)
             if self.c.get("disable_autolayout"):
                 slide.shapes.add_picture(
                     image["imgfile"],
@@ -338,7 +545,19 @@ class PptxExporter(BaseExporter):
                     width=img_base_width,
                     height=img_base_height,
                 )
-                return self.get_textbox(slide), 1
+                if ratio < 1:  # vertical image
+                    left = base_left + img_base_width + image_space_after
+                    top = base_top
+                    width = max(base_width - img_base_width - image_space_after, 0)
+                    height = base_height
+                else:  # horizontal/square image
+                    left = base_left
+                    top = base_top + img_base_height + image_space_after
+                    width = base_width
+                    height = max(base_height - img_base_height - image_space_after, 0)
+                return self.get_textbox(
+                    slide, left=left, top=top, width=width, height=height
+                )
             big_mode = (
                 image["big"] and not self.c.get("text_is_duplicated") and allowbigimage
             )
@@ -346,15 +565,18 @@ class PptxExporter(BaseExporter):
                 max_width = base_width // 3
                 if big_mode:
                     max_width *= 2
+                if image.get("handout"):
+                    max_width = int(max_width * self._get_handout_image_scale())
+                max_width = min(max_width, base_width - image_space_after)
                 if img_base_width > max_width or big_mode:
                     img_width = max_width
                     img_height = int(img_base_height * (max_width / img_base_width))
                 else:
                     img_width = img_base_width
                     img_height = img_base_height
-                left = base_left + img_width
+                left = base_left + img_width + image_space_after
                 top = base_top
-                width = base_width - img_width
+                width = max(base_width - img_width - image_space_after, 0)
                 height = base_height
                 img_left = base_left
                 img_top = int(base_top + 0.5 * (base_height - img_height))
@@ -362,6 +584,9 @@ class PptxExporter(BaseExporter):
                 max_height = base_height // 3
                 if big_mode:
                     max_height *= 2
+                if image.get("handout"):
+                    max_height = int(max_height * self._get_handout_image_scale())
+                max_height = min(max_height, base_height - image_space_after)
                 if img_base_height > max_height or big_mode:
                     img_height = max_height
                     img_width = int(img_base_width * (max_height / img_base_height))
@@ -369,9 +594,9 @@ class PptxExporter(BaseExporter):
                     img_width = img_base_width
                     img_height = img_base_height
                 left = base_left
-                top = base_top + img_height
+                top = base_top + img_height + image_space_after
                 width = base_width
-                height = base_height - img_height
+                height = max(base_height - img_height - image_space_after, 0)
                 img_top = base_top
                 img_left = int(base_left + 0.5 * (base_width - img_width))
             slide.shapes.add_picture(
@@ -382,9 +607,10 @@ class PptxExporter(BaseExporter):
                 height=img_height,
             )
             textbox = slide.shapes.add_textbox(left, top, width, height)
-            return textbox, (width * height) / (base_width * base_height)
+            self._prepare_text_frame(textbox.text_frame)
+            return textbox
         else:
-            return self.get_textbox(slide), 1
+            return self.get_textbox(slide)
 
     def add_slide_with_image(self, image, number=None):
         slide = self.prs.slides.add_slide(self.QUESTION_SLIDE)
@@ -417,18 +643,35 @@ class PptxExporter(BaseExporter):
         )
 
     def put_question_on_slide(self, image, slide, q, allowbigimage=True):
-        textbox, coeff = self.make_slide_layout(
-            image, slide, allowbigimage=allowbigimage
-        )
+        textbox = self.make_slide_layout(image, slide, allowbigimage=allowbigimage)
         tf = textbox.text_frame
         self.apply_vertical_alignment_if_needed(tf)
         tf.word_wrap = True
         self.set_question_number(slide, self.number)
-        question_text = self.pptx_process_text(q["question"], image=image)
-        if self.c.get("force_text_size_question"):
-            p = self.init_paragraph(tf, size=self.c["force_text_size_question"])
+        question = q["question"]
+        handout = None
+        if not image and not self._add_handout_on_separate_slide():
+            handout, question = self._split_handout_from_text(question)
+        question_text = self.pptx_process_text(question, image=image)
+        if handout:
+            handout_cfg = self.c.get("handout", {})
+            handout_p = self.init_paragraph(tf, size=handout_cfg.get("font_size"))
+            self._set_paragraph_alignment(handout_p, handout_cfg.get("align"))
+            self.pptx_format(
+                self.pptx_process_text(handout, do_not_remove_accents=True),
+                handout_p,
+                tf,
+                slide,
+            )
+            handout_p.space_after = PptxPt(self._get_handout_space_after())
+            p = self._configure_paragraph(
+                tf.add_paragraph(),
+                size=self._get_legacy_text_size("force_text_size_question"),
+            )
         else:
-            p = self.init_paragraph(tf, text=question_text, coeff=coeff)
+            p = self.init_paragraph(
+                tf, size=self._get_legacy_text_size("force_text_size_question")
+            )
         self.pptx_format(question_text, p, tf, slide)
 
     def recursive_join(self, s):
@@ -445,7 +688,9 @@ class PptxExporter(BaseExporter):
         tf.word_wrap = True
         if number is not None:
             self.set_question_number(slide, number)
-        p = self.init_paragraph(tf, text=handout)
+        handout_cfg = self.c.get("handout", {})
+        p = self.init_paragraph(tf, size=handout_cfg.get("font_size"))
+        self._set_paragraph_alignment(p, handout_cfg.get("align"))
         self.pptx_format(
             self.pptx_process_text(handout, do_not_remove_accents=True), p, tf, slide
         )
@@ -453,10 +698,7 @@ class PptxExporter(BaseExporter):
     def process_question_text(self, q):
         image = self._get_image_from_4s(q["question"])
         handout = self._get_handout_from_4s(q["question"])
-        add_handout_on_separate_slide = self.c.get("add_handout_on_separate_slide")
-        add_handout_on_separate_slide = (
-            add_handout_on_separate_slide is None or add_handout_on_separate_slide
-        )
+        add_handout_on_separate_slide = self._add_handout_on_separate_slide()
         if image and add_handout_on_separate_slide:
             self.add_slide_with_image(image, number=self.number)
         elif handout and add_handout_on_separate_slide:
@@ -485,11 +727,10 @@ class PptxExporter(BaseExporter):
         if self.c.get("add_source") and "source" in q:
             fields.append("source")
         textbox = None
-        coeff = 1
         for field in fields:
             image = self._get_image_from_4s(q[field])
             if image:
-                textbox, coeff = self.make_slide_layout(image, slide)
+                textbox = self.make_slide_layout(image, slide)
                 break
         if not textbox:
             textbox = self.get_textbox(slide)
@@ -497,33 +738,9 @@ class PptxExporter(BaseExporter):
         self.apply_vertical_alignment_if_needed(tf)
         tf.word_wrap = True
 
-        text_for_size = self.recursive_join(
-            self.pptx_process_text(q["answer"], strip_brackets=False)
+        p = self.init_paragraph(
+            tf, size=self._get_legacy_text_size("force_text_size_answer")
         )
-        if q.get("zachet") and self.c.get("add_zachet"):
-            text_for_size += "\n" + self.recursive_join(
-                self.pptx_process_text(q["zachet"], strip_brackets=False)
-            )
-        if q.get("nezachet") and self.c.get("add_zachet"):
-            text_for_size += "\n" + self.recursive_join(
-                self.pptx_process_text(q["nezachet"], strip_brackets=False)
-            )
-        if q.get("comment") and self.c.get("add_comment"):
-            text_for_size += "\n" + self.recursive_join(
-                self.pptx_process_text(q["comment"])
-            )
-        if q.get("source") and self.c.get("add_source"):
-            text_for_size += "\n" + self.recursive_join(
-                self.pptx_process_text(q["source"])
-            )
-        if q.get("author") and self.c.get("add_author"):
-            text_for_size += "\n" + self.recursive_join(
-                self.pptx_process_text(q["author"])
-            )
-        if self.c.get("force_text_size_answer"):
-            p = self.init_paragraph(tf, size=self.c["force_text_size_answer"])
-        else:
-            p = self.init_paragraph(tf, text=text_for_size, coeff=coeff)
         r = self.add_run(p, f"{self.get_label(q, 'answer')}: ")
         r.font.bold = True
         self.pptx_format(
@@ -575,25 +792,9 @@ class PptxExporter(BaseExporter):
             self.set_question_number(slide, self.number)
         self.add_answer_slide(q)
 
-    def determine_size(self, text, coeff=1):
-        text = self.recursive_join(text)
-        len_for_size = round((len(text) + 50 * text.count("\n")) / coeff)
-        for element in self.c["text_size_grid"]["elements"]:
-            if len_for_size <= element["length"]:
-                return element["size"]
-        return self.c["text_size_grid"]["smallest"]
-
-    def init_paragraph(self, text_frame, text=None, coeff=1, size=None, color=None):
+    def init_paragraph(self, text_frame, size=None):
         p = text_frame.paragraphs[0]
-        p.font.name = self.c["font"]["name"]
-        if size:
-            _size = size
-        else:
-            _size = self.c["text_size_grid"]["default"]
-            if text:
-                _size = self.determine_size(text, coeff=coeff)
-        p.font.size = PptxPt(_size)
-        return p
+        return self._configure_paragraph(p, size=size)
 
     def export(self, outfilename):
         self.outfilename = outfilename
