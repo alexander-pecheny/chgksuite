@@ -62,6 +62,10 @@ def _export_pptx(tmp_path, structure, font=None, config_updates=None):
     return Presentation(str(outfilename))
 
 
+def _soft_breaks_as_newlines(text):
+    return text.replace("\v", "\n")
+
+
 def test_title_slide_uses_full_height_centered_textbox(tmp_path):
     prs = _export_pptx(
         tmp_path,
@@ -78,9 +82,10 @@ def test_title_slide_uses_full_height_centered_textbox(tmp_path):
 
     assert title.text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     assert title.text_frame.vertical_anchor == MSO_VERTICAL_ANCHOR.MIDDLE
+    assert round(title.left / 914400, 2) == 0.8
     assert round(title.top / 914400, 2) == 0.8
     assert round(title.height / 914400, 2) == 6.1
-    assert round(title.width / 914400, 2) > 0
+    assert round(title.width / 914400, 2) == 10.5
     assert [run.font.size.pt for run in title.text_frame.paragraphs[0].runs] == [60.0]
     assert not any(shape.name.startswith("Subtitle") for shape in prs.slides[0].shapes)
 
@@ -122,6 +127,7 @@ def test_pptx_textboxes_shrink_text_and_stamp_run_sizes(tmp_path):
 
     assert textbox.text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     assert "<a:normAutofit" in textbox.element.txBody.xml
+    assert 'lnSpcReduction="0"' in textbox.element.txBody.xml
     assert "<a:spAutoFit" not in textbox.element.txBody.xml
 
     run_sizes = [
@@ -159,6 +165,28 @@ def test_pptx_font_override_replaces_config_font(tmp_path):
     assert {run.font.name for run in question_runs} == {"Times New Roman"}
 
 
+def test_caps_question_number_formats_zero_with_label(tmp_path):
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            (
+                "Question",
+                {"number": 0, "question": "Разминка.", "answer": "Ответ."},
+            ),
+        ],
+        config_updates={"question_number_format": "caps"},
+    )
+
+    number_texts = [
+        shape.text
+        for shape in prs.slides[1].shapes
+        if hasattr(shape, "text_frame")
+    ]
+
+    assert "ВОПРОС 0" in number_texts
+
+
 def test_douplet_list_gets_extra_break_before_numbering(tmp_path):
     prs = _export_pptx(
         tmp_path,
@@ -186,7 +214,10 @@ def test_douplet_list_gets_extra_break_before_numbering(tmp_path):
         if hasattr(shape, "text_frame") and "Дуплет." in shape.text
     )
 
-    assert "каждый.\n\n1. Первый подвопрос." in question_text
+    assert (
+        "каждый.\n\n1. Первый подвопрос."
+        in _soft_breaks_as_newlines(question_text)
+    )
 
 
 def test_douplet_list_numbering_style_is_configurable(tmp_path):
@@ -217,7 +248,42 @@ def test_douplet_list_numbering_style_is_configurable(tmp_path):
         if hasattr(shape, "text_frame") and "Блиц." in shape.text
     )
 
-    assert "Блиц.\n\na) Первый подвопрос.\nb) Второй подвопрос." in question_text
+    assert (
+        "Блиц.\n\na) Первый подвопрос.\n\nb) Второй подвопрос."
+        in _soft_breaks_as_newlines(question_text)
+    )
+
+
+def test_source_lists_stay_compact_on_answer_slide(tmp_path):
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            (
+                "Question",
+                {
+                    "question": "Вопрос.",
+                    "answer": "Ответ.",
+                    "source": [
+                        "Первый источник.",
+                        "Второй источник.",
+                    ],
+                },
+            ),
+        ],
+        config_updates={"add_source": True, "list": {"numbering_style": "1)"}},
+    )
+
+    answer_text = next(
+        shape.text
+        for slide in prs.slides
+        for shape in slide.shapes
+        if hasattr(shape, "text_frame") and "Источники:" in shape.text
+    )
+    answer_text = _soft_breaks_as_newlines(answer_text)
+
+    assert "\n1) Первый источник.\n2) Второй источник." in answer_text
+    assert "\n\n2) Второй источник." not in answer_text
 
 
 def test_handout_slide_uses_handout_config_and_hides_label_by_default(tmp_path):
@@ -318,6 +384,50 @@ def test_inline_handout_uses_handout_config_when_not_separate_slide(tmp_path):
     assert {
         run.font.size.pt for run in question_paragraph.runs if run.text.strip()
     } == {24.0}
+
+
+def test_multiline_inline_handout_uses_soft_breaks_without_extra_paragraphs(tmp_path):
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            (
+                "Question",
+                {
+                    "question": (
+                        "[Раздаточный материал:\n"
+                        "привет\n"
+                        "сегодня\n"
+                        "такая\n"
+                        "раздатка\n"
+                        "]\n"
+                        "Здесь начинается текст вопроса"
+                    ),
+                    "answer": "Ответ.",
+                },
+            ),
+        ],
+        config_updates={
+            "add_handout_on_separate_slide": False,
+            "force_text_size_question": 24,
+            "font": {"default_size": None},
+            "handout": {"include_label": False, "font_size": 32, "align": "center"},
+        },
+    )
+
+    question_shape = next(
+        shape
+        for shape in prs.slides[1].shapes
+        if hasattr(shape, "text_frame") and "привет" in shape.text
+    )
+    handout_paragraph = question_shape.text_frame.paragraphs[0]
+
+    assert len(question_shape.text_frame.paragraphs) == 2
+    assert _soft_breaks_as_newlines(handout_paragraph.text) == (
+        "привет\nсегодня\nтакая\nраздатка"
+    )
+    assert handout_paragraph._p.xml.count("<a:br") == 3
+    assert "<a:t>привет\nсегодня" not in handout_paragraph._p.xml
 
 
 def test_handout_image_scale_and_spacing_apply_to_question_slide(tmp_path):
@@ -424,3 +534,4 @@ def test_legacy_pptx_config_sizes_and_disabled_autolayout_do_not_overlap(tmp_pat
         for run in paragraph.runs
         if run.text.strip()
     } == {20.0}
+    assert 'lnSpcReduction="0"' in answer_shape.element.txBody.xml

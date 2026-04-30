@@ -15,6 +15,7 @@ from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_AUTO_SIZE, MSO_VERTICAL_ANCHOR, PP_ALIGN
 from pptx.enum.lang import MSO_LANGUAGE_ID
+from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Inches as PptxInches
 from pptx.util import Pt as PptxPt
 
@@ -172,6 +173,9 @@ class PptxExporter(BaseExporter):
     def _prepare_text_frame(self, text_frame):
         text_frame.word_wrap = True
         text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        autofit = text_frame._txBody.bodyPr.normAutofit
+        if autofit is not None:
+            autofit.set("lnSpcReduction", "0")
 
     def _remove_shape(self, shape):
         element = shape._element
@@ -200,22 +204,56 @@ class PptxExporter(BaseExporter):
         self._prepare_text_frame(textbox.text_frame)
         return textbox
 
-    def add_run(self, para, text, color=None):
-        r = para.add_run()
-        r.text = text
+    def _apply_run_defaults(self, run, para, color=None):
         if para.font.name:
-            r.font.name = para.font.name
+            run.font.name = para.font.name
         if para.font.size:
-            r.font.size = para.font.size
+            run.font.size = para.font.size
         if color is None:
             color = self.c["textbox"].get("color")
         if color:
-            r.font.color.rgb = RGBColor(*color)
+            run.font.color.rgb = RGBColor(*color)
         if self.args.language == "ru":
-            r.font.language_id = MSO_LANGUAGE_ID.RUSSIAN
-        return r
+            run.font.language_id = MSO_LANGUAGE_ID.RUSSIAN
 
-    def pptx_format(self, el, para, tf, slide, replace_spaces=True):
+    def add_runs(self, para, text, color=None):
+        runs = []
+        for index, part in enumerate(str(text).split("\n")):
+            if index:
+                para._p.append(OxmlElement("a:br"))
+            if not part:
+                continue
+            run = para.add_run()
+            run.text = part
+            self._apply_run_defaults(run, para, color=color)
+            runs.append(run)
+        if not runs:
+            run = para.add_run()
+            run.text = ""
+            self._apply_run_defaults(run, para, color=color)
+            runs.append(run)
+        return runs
+
+    def add_run(self, para, text, color=None):
+        return self.add_runs(para, text, color=color)[-1]
+
+    def _apply_text_style(self, runs, style):
+        for run in runs:
+            if "italic" in style:
+                run.font.italic = True
+            if "bold" in style:
+                run.font.bold = True
+            if "underline" in style:
+                run.font.underline = True
+
+    def _add_styled_runs(self, para, text, style="", color=None):
+        runs = self.add_runs(para, text, color=color)
+        self._apply_text_style(runs, style)
+        return runs
+
+    def pptx_format(
+        self, el, para, tf, slide, replace_spaces=True, blank_lines_between_items=False
+    ):
         def r_sp(text):
             if replace_spaces:
                 return self._replace_no_break(text)
@@ -223,23 +261,48 @@ class PptxExporter(BaseExporter):
 
         if isinstance(el, list):
             if len(el) > 1 and isinstance(el[1], list):
-                self.pptx_format(el[0], para, tf, slide)
+                self.pptx_format(
+                    el[0],
+                    para,
+                    tf,
+                    slide,
+                    blank_lines_between_items=blank_lines_between_items,
+                )
                 blank_line = self.c.get("list", {}).get(
                     "blank_line_before_items", True
                 )
                 for licount, li in enumerate(el[1], start=1):
-                    if licount == 1 and blank_line:
+                    if blank_line and (licount == 1 or blank_lines_between_items):
                         prefix = "\n\n"
                     else:
                         prefix = "\n"
                     marker = self._format_list_marker(licount)
                     self.add_run(para, f"{prefix}{marker} ")
-                    self.pptx_format(li, para, tf, slide)
+                    self.pptx_format(
+                        li,
+                        para,
+                        tf,
+                        slide,
+                        blank_lines_between_items=blank_lines_between_items,
+                    )
             else:
+                blank_line = self.c.get("list", {}).get(
+                    "blank_line_before_items", True
+                )
                 for licount, li in enumerate(el, start=1):
+                    if blank_line and blank_lines_between_items and licount > 1:
+                        prefix = "\n\n"
+                    else:
+                        prefix = "\n"
                     marker = self._format_list_marker(licount)
-                    self.add_run(para, f"\n{marker} ")
-                    self.pptx_format(li, para, tf, slide)
+                    self.add_run(para, f"{prefix}{marker} ")
+                    self.pptx_format(
+                        li,
+                        para,
+                        tf,
+                        slide,
+                        blank_lines_between_items=blank_lines_between_items,
+                    )
 
         if isinstance(el, str):
             self.logger.debug("parsing element {}:".format(log_wrap(el)))
@@ -247,26 +310,21 @@ class PptxExporter(BaseExporter):
 
             for run in self.parse_4s_elem(el):
                 if run[0] == "screen":
-                    self.add_run(para, r_sp(run[1]["for_screen"]))
+                    self.add_runs(para, r_sp(run[1]["for_screen"]))
 
                 elif run[0] == "linebreak":
                     self.add_run(para, "\n")
 
                 elif run[0] == "strike":
-                    r = self.add_run(para, r_sp(run[1]))
-                    r.font.strike = True  # TODO: doesn't work as of 2023-12-24, cf. https://github.com/scanny/python-pptx/issues/339
+                    runs = self.add_runs(para, r_sp(run[1]))
+                    for r in runs:
+                        r.font.strike = True  # TODO: doesn't work as of 2023-12-24, cf. https://github.com/scanny/python-pptx/issues/339
 
                 elif run[0] == "img":
                     pass  # image processing is moved to other places
 
                 else:
-                    r = self.add_run(para, r_sp(run[1]))
-                    if "italic" in run[0]:
-                        r.font.italic = True
-                    if "bold" in run[0]:
-                        r.font.bold = True
-                    if "underline" in run[0]:
-                        r.font.underline = True
+                    self._add_styled_runs(para, r_sp(run[1]), run[0])
 
     def pptx_process_text(
         self,
@@ -311,6 +369,15 @@ class PptxExporter(BaseExporter):
             text_frame.margin_bottom = 0
             text_frame.vertical_anchor = getattr(MSO_VERTICAL_ANCHOR, align.upper())
 
+    def _get_title_textbox_dimension(self, key, fallback):
+        title_cfg = self.c.get("title_textbox", {})
+        if key in title_cfg:
+            return PptxInches(title_cfg[key])
+        textbox_cfg = self.c.get("textbox", {})
+        if key in textbox_cfg:
+            return PptxInches(textbox_cfg[key])
+        return fallback
+
     def format_title_slide(self, title, subtitle=None):
         if title is None or not hasattr(title, "text_frame"):
             return
@@ -320,7 +387,6 @@ class PptxExporter(BaseExporter):
             tf, self._get_font_size("title_size", 60)
         )
         if subtitle is None:
-            title_cfg = self.c.get("title_textbox", {})
             layout_title = None
             try:
                 title_idx = title.placeholder_format.idx
@@ -336,21 +402,13 @@ class PptxExporter(BaseExporter):
                 if layout_title
                 else self.prs.slide_width - 2 * default_left
             )
-            title.left = (
-                PptxInches(title_cfg["left"])
-                if "left" in title_cfg
-                else default_left
+            title.left = self._get_title_textbox_dimension("left", default_left)
+            title.width = self._get_title_textbox_dimension("width", default_width)
+            title.top = self._get_title_textbox_dimension(
+                "top", PptxInches(0.8)
             )
-            title.width = (
-                PptxInches(title_cfg["width"])
-                if "width" in title_cfg
-                else default_width
-            )
-            title.top = PptxInches(
-                title_cfg.get("top", self.c["textbox"].get("top", 0.8))
-            )
-            title.height = PptxInches(
-                title_cfg.get("height", self.c["textbox"].get("height", 6.1))
+            title.height = self._get_title_textbox_dimension(
+                "height", PptxInches(6.1)
             )
             tf.margin_top = 0
             tf.margin_bottom = 0
@@ -462,7 +520,10 @@ class PptxExporter(BaseExporter):
             qtf_p.alignment = getattr(
                 PP_ALIGN, self.c["number_textbox"]["align"].upper()
             )
-        if self.c.get("question_number_format") == "caps" and tryint(number):
+        if (
+            self.c.get("question_number_format") == "caps"
+            and tryint(number) is not None
+        ):
             number = f"ВОПРОС {number}"
         qtf_r = self.add_run(qtf_p, number)
         if self.c["number_textbox"].get("bold"):
@@ -672,7 +733,7 @@ class PptxExporter(BaseExporter):
             p = self.init_paragraph(
                 tf, size=self._get_legacy_text_size("force_text_size_question")
             )
-        self.pptx_format(question_text, p, tf, slide)
+        self.pptx_format(question_text, p, tf, slide, blank_lines_between_items=True)
 
     def recursive_join(self, s):
         if isinstance(s, str):
