@@ -1,5 +1,7 @@
 template_path = "template.pptx"
 template_version = 2
+disable_shrink_fit = false
+overlay_image_and_text = false
 add_plug = true
 add_comment = true
 add_zachet = true
@@ -30,4 +32,7 @@ image_scale = 1.3
 [font]
 name = "Arial"
 default_size = 32
+question_size = 32
+answer_size = 32
+number_size = 32
 title_size = 60
