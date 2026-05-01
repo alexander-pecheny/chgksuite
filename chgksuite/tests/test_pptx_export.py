@@ -66,6 +66,44 @@ def _soft_breaks_as_newlines(text):
     return text.replace("\v", "\n")
 
 
+def _slide_text(slide):
+    return "\n".join(
+        shape.text.strip()
+        for shape in slide.shapes
+        if hasattr(shape, "text") and shape.text.strip()
+    )
+
+
+def _service_slide_template(tmp_path):
+    prs = Presentation()
+
+    def add_text_slide(text):
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        textbox = slide.shapes.add_textbox(
+            PptxInches(1), PptxInches(1), PptxInches(5), PptxInches(1)
+        )
+        textbox.text = text
+        return slide
+
+    add_text_slide("INTRO A")
+    add_text_slide("INTRO B")
+    add_text_slide("BREAK")
+    final_slide = add_text_slide("FINAL")
+    final_slide.shapes.add_picture(
+        str(ROOT / "tests" / "test.jpg"),
+        PptxInches(1),
+        PptxInches(2),
+        width=PptxInches(1),
+    )
+    add_text_slide("UNUSED PROTOTYPE")
+    add_text_slide("TOUR ONE")
+    add_text_slide("TOUR TWO")
+
+    path = tmp_path / "service-template.pptx"
+    prs.save(path)
+    return path
+
+
 def test_title_slide_uses_full_height_centered_textbox(tmp_path):
     prs = _export_pptx(
         tmp_path,
@@ -88,6 +126,80 @@ def test_title_slide_uses_full_height_centered_textbox(tmp_path):
     assert round(title.width / 914400, 2) == 10.5
     assert [run.font.size.pt for run in title.text_frame.paragraphs[0].runs] == [60.0]
     assert not any(shape.name.startswith("Subtitle") for shape in prs.slides[0].shapes)
+
+
+def test_service_slides_are_inserted_from_template(tmp_path):
+    template_path = _service_slide_template(tmp_path)
+
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            ("section", "Тур 1"),
+            ("Question", {"question": "Вопрос 1.", "answer": "Ответ 1."}),
+            ("section", "Тур 2"),
+            ("Question", {"question": "Вопрос 2.", "answer": "Ответ 2."}),
+        ],
+        config_updates={
+            "template_path": str(template_path),
+            "add_plug": False,
+            "service_slides": {
+                "intro": [0, 1],
+                "between_tours": 2,
+                "final": 3,
+                "remove": [0, 1, 2, 3, 4, 5, 6],
+                "skip_generated_title": True,
+            },
+        },
+    )
+
+    slide_texts = [_slide_text(slide) for slide in prs.slides]
+
+    assert slide_texts[0] == "INTRO A"
+    assert slide_texts[1] == "INTRO B"
+    assert "Тестовый пакет" not in "\n".join(slide_texts)
+    assert "UNUSED PROTOTYPE" not in "\n".join(slide_texts)
+    assert slide_texts.count("BREAK") == 1
+    assert slide_texts.index("BREAK") < next(
+        index for index, text in enumerate(slide_texts) if "Тур 2" in text
+    )
+    assert "FINAL" in slide_texts[-1]
+    assert any(shape.shape_type == 13 for shape in prs.slides[-1].shapes)
+
+
+def test_numbered_tour_stubs_are_inserted_before_generated_tour_slides(tmp_path):
+    template_path = _service_slide_template(tmp_path)
+
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            ("editor", "Редактор: Тест."),
+            ("section", "Тур 1"),
+            ("Question", {"question": "Вопрос 1.", "answer": "Ответ 1."}),
+            ("section", "Тур 2"),
+            ("Question", {"question": "Вопрос 2.", "answer": "Ответ 2."}),
+        ],
+        config_updates={
+            "template_path": str(template_path),
+            "add_plug": False,
+            "service_slides": {
+                "numbered_tours_stubs": [5, 6],
+                "remove": [0, 1, 2, 3, 4, 5, 6],
+                "skip_generated_title": True,
+            },
+        },
+    )
+
+    slide_texts = [_slide_text(slide) for slide in prs.slides]
+
+    assert slide_texts.index("Редактор: Тест.") < slide_texts.index("TOUR ONE")
+    assert slide_texts.index("TOUR ONE") < next(
+        index for index, text in enumerate(slide_texts) if "Тур 1" in text
+    )
+    assert slide_texts.index("TOUR TWO") < next(
+        index for index, text in enumerate(slide_texts) if "Тур 2" in text
+    )
 
 
 def test_pptx_textboxes_shrink_text_and_stamp_run_sizes(tmp_path):
@@ -127,7 +239,8 @@ def test_pptx_textboxes_shrink_text_and_stamp_run_sizes(tmp_path):
 
     assert textbox.text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     assert "<a:normAutofit" in textbox.element.txBody.xml
-    assert 'lnSpcReduction="0"' in textbox.element.txBody.xml
+    assert 'lnSpcReduction="0"' not in textbox.element.txBody.xml
+    assert "<a:lnSpc>" not in textbox.element.txBody.xml
     assert "<a:spAutoFit" not in textbox.element.txBody.xml
 
     run_sizes = [
@@ -138,6 +251,226 @@ def test_pptx_textboxes_shrink_text_and_stamp_run_sizes(tmp_path):
     ]
     assert run_sizes
     assert set(run_sizes) == {32.0}
+    assert {paragraph.line_spacing for paragraph in textbox.text_frame.paragraphs} == {
+        None
+    }
+
+
+def test_fixed_line_spacing_keeps_config_spacing_with_shrink_fit(tmp_path):
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            ("Question", {"question": "Вопрос.", "answer": "Ответ."}),
+        ],
+        config_updates={
+            "font": {
+                "question_size": 24,
+                "answer_size": 20,
+                "number_size": 26,
+                "fixed_line_spacing_question": 24,
+                "fixed_line_spacing_answer": 20,
+            },
+        },
+    )
+
+    question_shape = next(
+        shape
+        for shape in prs.slides[1].shapes
+        if hasattr(shape, "text_frame") and "Вопрос." in shape.text
+    )
+    assert question_shape.text_frame.auto_size == MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    assert 'lnSpcReduction="0"' in question_shape.element.txBody.xml
+    assert '<a:spcPts val="2400"/>' in question_shape.element.txBody.xml
+    assert {
+        paragraph.line_spacing.pt for paragraph in question_shape.text_frame.paragraphs
+    } == {24.0}
+
+    number_shape = next(
+        shape
+        for shape in prs.slides[1].shapes
+        if hasattr(shape, "text_frame") and shape.text == "1"
+    )
+    assert number_shape.text_frame.paragraphs[0].line_spacing is None
+
+    answer_shape = next(
+        shape
+        for slide in prs.slides
+        for shape in slide.shapes
+        if hasattr(shape, "text_frame") and "Ответ." in shape.text
+    )
+    assert '<a:spcPts val="2000"/>' in answer_shape.element.txBody.xml
+    assert {
+        paragraph.line_spacing.pt for paragraph in answer_shape.text_frame.paragraphs
+    } == {20.0}
+
+
+def test_line_spacing_multiplier_sets_percent_spacing(tmp_path):
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            ("Question", {"question": "Вопрос.", "answer": "Ответ."}),
+        ],
+        config_updates={
+            "font": {
+                "question_size": 24,
+                "answer_size": 20,
+                "line_spacing_multiplier": 1.2,
+            },
+        },
+    )
+
+    question_shape = next(
+        shape
+        for shape in prs.slides[1].shapes
+        if hasattr(shape, "text_frame") and "Вопрос." in shape.text
+    )
+    assert 'lnSpcReduction="0"' in question_shape.element.txBody.xml
+    assert '<a:spcPct val="120000"/>' in question_shape.element.txBody.xml
+    assert {
+        paragraph.line_spacing for paragraph in question_shape.text_frame.paragraphs
+    } == {1.2}
+
+    answer_shape = next(
+        shape
+        for slide in prs.slides
+        for shape in slide.shapes
+        if hasattr(shape, "text_frame") and "Ответ." in shape.text
+    )
+    assert '<a:spcPct val="120000"/>' in answer_shape.element.txBody.xml
+    assert {
+        paragraph.line_spacing for paragraph in answer_shape.text_frame.paragraphs
+    } == {1.2}
+
+
+def test_disable_shrink_fit_uses_no_autofit_and_config_font_sizes(tmp_path):
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            ("Question", {"question": "Вопрос.", "answer": "Ответ."}),
+        ],
+        config_updates={
+            "disable_shrink_fit": True,
+            "font": {"question_size": 24, "answer_size": 20, "number_size": 26},
+        },
+    )
+
+    question_shape = next(
+        shape
+        for shape in prs.slides[1].shapes
+        if hasattr(shape, "text_frame") and "Вопрос." in shape.text
+    )
+    assert question_shape.text_frame.auto_size == MSO_AUTO_SIZE.NONE
+    assert "<a:noAutofit" in question_shape.element.txBody.xml
+    assert "<a:normAutofit" not in question_shape.element.txBody.xml
+    assert {
+        run.font.size.pt
+        for paragraph in question_shape.text_frame.paragraphs
+        for run in paragraph.runs
+        if run.text.strip()
+    } == {24.0}
+
+    number_shape = next(
+        shape
+        for shape in prs.slides[1].shapes
+        if hasattr(shape, "text_frame") and shape.text == "1"
+    )
+    assert number_shape.text_frame.paragraphs[0].runs[0].font.size.pt == 26.0
+
+    answer_shape = next(
+        shape
+        for slide in prs.slides
+        for shape in slide.shapes
+        if hasattr(shape, "text_frame") and "Ответ." in shape.text
+    )
+    assert {
+        run.font.size.pt
+        for paragraph in answer_shape.text_frame.paragraphs
+        for run in paragraph.runs
+        if run.text.strip()
+    } == {20.0}
+
+
+def test_text_size_grid_sets_question_and_answer_sizes(tmp_path):
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            (
+                "Question",
+                {
+                    "question": "Очень длинный текст вопроса для проверки сетки.",
+                    "answer": "Очень длинный текст ответа для проверки сетки.",
+                    "comment": "Комментарий тоже участвует в размере ответа.",
+                },
+            ),
+        ],
+        config_updates={
+            "disable_shrink_fit": True,
+            "text_size_grid": {
+                "question_elements": [
+                    {"length": 10, "size": 24},
+                    {"length": 1000, "size": 18},
+                ],
+                "answer_elements": [
+                    {"length": 10, "size": 20},
+                    {"length": 1000, "size": 16},
+                ],
+                "smallest": 14,
+            },
+            "font": {"question_size": 24, "answer_size": 20},
+        },
+    )
+
+    question_shape = next(
+        shape
+        for shape in prs.slides[1].shapes
+        if hasattr(shape, "text_frame") and "Очень длинный текст вопроса" in shape.text
+    )
+    assert question_shape.text_frame.auto_size == MSO_AUTO_SIZE.NONE
+    assert {
+        run.font.size.pt
+        for paragraph in question_shape.text_frame.paragraphs
+        for run in paragraph.runs
+        if run.text.strip()
+    } == {18.0}
+
+    answer_shape = next(
+        shape
+        for slide in prs.slides
+        for shape in slide.shapes
+        if hasattr(shape, "text_frame") and "Очень длинный текст ответа" in shape.text
+    )
+    assert {
+        run.font.size.pt
+        for paragraph in answer_shape.text_frame.paragraphs
+        for run in paragraph.runs
+        if run.text.strip()
+    } == {16.0}
+
+
+def test_number_textbox_font_size_overrides_font_number_size(tmp_path):
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            ("Question", {"question": "Вопрос.", "answer": "Ответ."}),
+        ],
+        config_updates={
+            "font": {"number_size": 26},
+            "number_textbox": {"font_size": 28},
+        },
+    )
+
+    number_shape = next(
+        shape
+        for shape in prs.slides[1].shapes
+        if hasattr(shape, "text_frame") and shape.text == "1"
+    )
+
+    assert number_shape.text_frame.paragraphs[0].runs[0].font.size.pt == 28.0
 
 
 def test_pptx_font_override_replaces_config_font(tmp_path):
@@ -361,7 +694,7 @@ def test_inline_handout_uses_handout_config_when_not_separate_slide(tmp_path):
         config_updates={
             "add_handout_on_separate_slide": False,
             "force_text_size_question": 24,
-            "font": {"default_size": None},
+            "font": {"default_size": None, "question_size": None},
             "handout": {"include_label": False, "font_size": 32, "align": "center"},
         },
     )
@@ -410,7 +743,7 @@ def test_multiline_inline_handout_uses_soft_breaks_without_extra_paragraphs(tmp_
         config_updates={
             "add_handout_on_separate_slide": False,
             "force_text_size_question": 24,
-            "font": {"default_size": None},
+            "font": {"default_size": None, "question_size": None},
             "handout": {"include_label": False, "font_size": 32, "align": "center"},
         },
     )
@@ -471,6 +804,51 @@ def test_handout_image_scale_and_spacing_apply_to_question_slide(tmp_path):
     assert question_shape.top == picture.top + picture.height + PptxPt(24)
 
 
+def test_overlay_image_and_text_keeps_textbox_on_base_rect(tmp_path):
+    image_path = ROOT / "tests" / "test.jpg"
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            (
+                "Question",
+                {
+                    "question": (
+                        f"(img w=3in {image_path})\n"
+                        "Перед вами картинка. Назовите ее."
+                    ),
+                    "answer": "Ответ.",
+                },
+            ),
+        ],
+        config_updates={"overlay_image_and_text": True},
+    )
+
+    question_slide = next(
+        slide
+        for slide in prs.slides
+        if any(
+            hasattr(shape, "text_frame")
+            and "Перед вами картинка" in shape.text.replace("\xa0", " ")
+            for shape in slide.shapes
+        )
+    )
+    picture = next(shape for shape in question_slide.shapes if shape.shape_type == 13)
+    question_shape = next(
+        shape
+        for shape in question_slide.shapes
+        if hasattr(shape, "text_frame")
+        and "Перед вами картинка" in shape.text.replace("\xa0", " ")
+    )
+
+    assert picture.left == PptxInches(0.8)
+    assert picture.top == PptxInches(0.8)
+    assert question_shape.left == PptxInches(0.8)
+    assert question_shape.top == PptxInches(0.8)
+    assert question_shape.left < picture.left + picture.width
+    assert question_shape.top < picture.top + picture.height
+
+
 def test_legacy_pptx_config_sizes_and_disabled_autolayout_do_not_overlap(tmp_path):
     image_path = ROOT / "tests" / "test.jpg"
     prs = _export_pptx(
@@ -496,7 +874,7 @@ def test_legacy_pptx_config_sizes_and_disabled_autolayout_do_not_overlap(tmp_pat
             "force_text_size_answer": 20,
             "text_size_grid": {"default": 24},
             "number_textbox": {"font_size": 28},
-            "font": {"default_size": None},
+            "font": {"default_size": None, "question_size": None, "answer_size": None},
         },
     )
 
@@ -534,4 +912,4 @@ def test_legacy_pptx_config_sizes_and_disabled_autolayout_do_not_overlap(tmp_pat
         for run in paragraph.runs
         if run.text.strip()
     } == {20.0}
-    assert 'lnSpcReduction="0"' in answer_shape.element.txBody.xml
+    assert 'lnSpcReduction="0"' not in answer_shape.element.txBody.xml

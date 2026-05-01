@@ -47,25 +47,58 @@ class PptxExporter(BaseExporter):
 
     def _get_font_size(self, key, fallback):
         font_cfg = self.c.get("font", {})
-        if key in font_cfg:
+        if font_cfg.get(key) is not None:
             return font_cfg[key]
+        if key == "question_size":
+            if self.c.get("force_text_size_question") is not None:
+                return self.c["force_text_size_question"]
+            return self._get_font_size("default_size", fallback)
+        if key == "answer_size":
+            if self.c.get("force_text_size_answer") is not None:
+                return self.c["force_text_size_answer"]
+            return self._get_font_size("default_size", fallback)
         if key == "default_size":
-            if self.c.get("force_text_size_question"):
+            if self.c.get("force_text_size_question") is not None:
                 return self.c["force_text_size_question"]
             text_size_grid = self.c.get("text_size_grid", {})
             if text_size_grid.get("default"):
                 return text_size_grid["default"]
         return fallback
 
-    def _get_legacy_text_size(self, key):
-        if "default_size" in self.c.get("font", {}):
-            return None
-        return self.c.get(key)
+    def _get_grid_elements(self, role):
+        text_size_grid = self.c.get("text_size_grid", {})
+        return text_size_grid.get(f"{role}_elements") or text_size_grid.get(
+            "elements", []
+        )
 
-    def _apply_font_size_to_text_frame(self, text_frame, size):
+    def _text_for_grid(self, text):
+        if isinstance(text, list):
+            return "\n".join(self._text_for_grid(element) for element in text)
+        return str(text)
+
+    def _get_grid_font_size(self, role, text, fallback):
+        elements = self._get_grid_elements(role)
+        if not elements:
+            return fallback
+        text_length = len(self._text_for_grid(text))
+        for element in sorted(elements, key=lambda item: item["length"]):
+            if text_length <= element["length"]:
+                return element["size"]
+        text_size_grid = self.c.get("text_size_grid", {})
+        return text_size_grid.get(
+            f"{role}_smallest", text_size_grid.get("smallest", fallback)
+        )
+
+    def _get_font_size_for_text(self, role, text, key, fallback):
+        return self._get_grid_font_size(
+            role, text, self._get_font_size(key, fallback)
+        )
+
+    def _apply_font_size_to_text_frame(self, text_frame, size, line_spacing_key=None):
         size = PptxPt(size)
         for p in text_frame.paragraphs:
             p.font.size = size
+            self._set_line_spacing(p, size, line_spacing_key=line_spacing_key)
             for r in p.runs:
                 r.font.size = size
 
@@ -138,14 +171,186 @@ class PptxExporter(BaseExporter):
         add_handout_on_separate_slide = self.c.get("add_handout_on_separate_slide")
         return add_handout_on_separate_slide is None or add_handout_on_separate_slide
 
+    def _disable_shrink_fit(self):
+        return bool(self.c.get("disable_shrink_fit"))
+
+    def _overlay_image_and_text(self):
+        return bool(self.c.get("overlay_image_and_text"))
+
+    def _service_slides_config(self):
+        return self.c.get("service_slides", {})
+
+    def _skip_generated_title_slide(self):
+        return bool(self._service_slides_config().get("skip_generated_title"))
+
+    def _slide_indices_from_config(self, key):
+        value = self._service_slides_config().get(key)
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [int(index) for index in value]
+        return [int(value)]
+
+    def _configured_service_slide_indices(self):
+        indices = []
+        for key in (
+            "intro",
+            "between_tours",
+            "final",
+            "numbered_tours_stubs",
+            "numbered_tour_stubs",
+            "remove",
+        ):
+            indices.extend(self._slide_indices_from_config(key))
+        return indices
+
+    def _numbered_tour_stub_indices(self):
+        return self._slide_indices_from_config(
+            "numbered_tours_stubs"
+        ) or self._slide_indices_from_config("numbered_tour_stubs")
+
+    def _remap_relationship_ids(self, element, rel_id_map):
+        if not rel_id_map:
+            return
+        for child in element.iter():
+            for attr_name, attr_value in child.attrib.items():
+                if attr_value in rel_id_map:
+                    child.set(attr_name, rel_id_map[attr_value])
+
+    def _copy_slide_background(self, source_slide, slide):
+        source_bg = source_slide.element.cSld.bg
+        if source_bg is None:
+            return
+        destination_bg = slide.element.cSld.bg
+        if destination_bg is not None:
+            slide.element.cSld.remove(destination_bg)
+        slide.element.cSld.insert(0, copy.deepcopy(source_bg))
+
+    def _copy_slide_relationships(self, source_slide, slide):
+        rel_id_map = {}
+        for rel in source_slide.part.rels.values():
+            if rel.reltype.endswith("/slideLayout") or rel.reltype.endswith(
+                "/notesSlide"
+            ):
+                continue
+            target = rel._target if rel.is_external else rel.target_part
+            rel_id_map[rel.rId] = slide.part.rels._add_relationship(
+                rel.reltype, target, rel.is_external
+            )
+        return rel_id_map
+
+    def _clone_slide(self, source_slide):
+        slide = self.prs.slides.add_slide(source_slide.slide_layout)
+        for shape in list(slide.shapes):
+            self._remove_shape(shape)
+
+        self._copy_slide_background(source_slide, slide)
+        rel_id_map = self._copy_slide_relationships(source_slide, slide)
+        for shape in source_slide.shapes:
+            element = copy.deepcopy(shape.element)
+            self._remap_relationship_ids(element, rel_id_map)
+            slide.shapes._spTree.insert_element_before(element, "p:extLst")
+        return slide
+
+    def _remove_slide_at(self, index):
+        slide_id = self.prs.slides._sldIdLst[index]
+        self.prs.slides._sldIdLst.remove(slide_id)
+        self.prs.part.drop_rel(slide_id.rId)
+
+    def _prepare_service_slide_templates(self):
+        self._service_slide_templates = {}
+        self._service_slide_indices_to_remove = []
+        configured_indices = self._configured_service_slide_indices()
+        if not configured_indices:
+            return
+
+        slide_count = len(self.prs.slides)
+        for index in configured_indices:
+            if index < 0 or index >= slide_count:
+                raise ValueError(
+                    f"service slide index {index} is out of range for "
+                    f"{self.c['template_path']}"
+                )
+
+        for key in ("intro", "between_tours", "final"):
+            self._service_slide_templates[key] = [
+                self.prs.slides[index]
+                for index in self._slide_indices_from_config(key)
+            ]
+        self._service_slide_templates["numbered_tours_stubs"] = [
+            self.prs.slides[index] for index in self._numbered_tour_stub_indices()
+        ]
+        self._service_slide_indices_to_remove = sorted(
+            set(configured_indices), reverse=True
+        )
+
+    def _remove_service_slide_templates(self):
+        for index in self._service_slide_indices_to_remove:
+            self._remove_slide_at(index)
+
+    def _add_service_slides(self, key):
+        for slide in getattr(self, "_service_slide_templates", {}).get(key, []):
+            self._clone_slide(slide)
+
+    def _add_numbered_tour_stub(self):
+        slides = getattr(self, "_service_slide_templates", {}).get(
+            "numbered_tours_stubs", []
+        )
+        tour_index = getattr(self, "_processed_tour_count", 0)
+        if tour_index < len(slides):
+            self._clone_slide(slides[tour_index])
+
+    def _should_add_between_tours_slide(self, buffer):
+        if not getattr(self, "_processed_question_count", 0):
+            return False
+        return any(element[0] == "section" for element in buffer)
+
+    def _line_spacing_configured(self):
+        font_cfg = self.c.get("font", {})
+        if font_cfg.get("fixed_line_spacing"):
+            return True
+        if font_cfg.get("line_spacing_multiplier") is not None:
+            return True
+        return any(
+            key.startswith("fixed_line_spacing_") and value is not None
+            for key, value in font_cfg.items()
+        )
+
+    def _get_fixed_line_spacing(self, line_spacing_key):
+        if not line_spacing_key:
+            return None
+        value = self.c.get("font", {}).get(f"fixed_line_spacing_{line_spacing_key}")
+        if value is None:
+            return None
+        return PptxPt(value)
+
+    def _set_line_spacing(self, paragraph, font_size, line_spacing_key=None):
+        fixed_line_spacing = self._get_fixed_line_spacing(line_spacing_key)
+        if fixed_line_spacing is not None:
+            paragraph.line_spacing = fixed_line_spacing
+            return
+        font_cfg = self.c.get("font", {})
+        multiplier = font_cfg.get("line_spacing_multiplier")
+        if multiplier is not None:
+            paragraph.line_spacing = float(multiplier)
+            return
+        if font_cfg.get("fixed_line_spacing"):
+            paragraph.line_spacing = font_size
+
     def _set_paragraph_alignment(self, paragraph, align):
         if not align:
             return
         paragraph.alignment = getattr(PP_ALIGN, align.upper())
 
-    def _configure_paragraph(self, paragraph, size=None, align=None):
+    def _configure_paragraph(
+        self, paragraph, size=None, align=None, line_spacing_key=None
+    ):
         paragraph.font.name = self.c["font"]["name"]
-        paragraph.font.size = PptxPt(size or self._get_font_size("default_size", 32))
+        font_size = PptxPt(size or self._get_font_size("default_size", 32))
+        paragraph.font.size = font_size
+        self._set_line_spacing(
+            paragraph, font_size, line_spacing_key=line_spacing_key
+        )
         self._set_paragraph_alignment(paragraph, align)
         return paragraph
 
@@ -172,9 +377,12 @@ class PptxExporter(BaseExporter):
 
     def _prepare_text_frame(self, text_frame):
         text_frame.word_wrap = True
+        if self._disable_shrink_fit():
+            text_frame.auto_size = MSO_AUTO_SIZE.NONE
+            return
         text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
         autofit = text_frame._txBody.bodyPr.normAutofit
-        if autofit is not None:
+        if autofit is not None and self._line_spacing_configured():
             autofit.set("lnSpcReduction", "0")
 
     def _remove_shape(self, shape):
@@ -384,7 +592,7 @@ class PptxExporter(BaseExporter):
         tf = title.text_frame
         self._prepare_text_frame(tf)
         self._apply_font_size_to_text_frame(
-            tf, self._get_font_size("title_size", 60)
+            tf, self._get_font_size("title_size", 60), line_spacing_key="title"
         )
         if subtitle is None:
             layout_title = None
@@ -416,7 +624,9 @@ class PptxExporter(BaseExporter):
         elif hasattr(subtitle, "text_frame"):
             self._prepare_text_frame(subtitle.text_frame)
             self._apply_font_size_to_text_frame(
-                subtitle.text_frame, self._get_font_size("default_size", 32)
+                subtitle.text_frame,
+                self._get_font_size("default_size", 32),
+                line_spacing_key="default",
             )
 
     def _process_block(self, block):
@@ -481,8 +691,10 @@ class PptxExporter(BaseExporter):
         ljheading = [x for x in heading_block if x[0] == "ljheading"]
         title_text = ljheading or heading
         date_text = [x for x in heading_block if x[0] == "date"]
-        if title_text:
-            if len(self.prs.slides) == 1:
+        if title_text and not self._skip_generated_title_slide():
+            if len(self.prs.slides) == 1 and not getattr(
+                self, "_service_slide_templates", {}
+            ):
                 slide = self.prs.slides[0]
             else:
                 slide = self.prs.slides.add_slide(self.TITLE_SLIDE)
@@ -507,8 +719,11 @@ class PptxExporter(BaseExporter):
                     self._apply_font_to_text_frame(title.text_frame, heading_font)
                 if subtitle is not None and hasattr(subtitle, "text_frame"):
                     self._apply_font_to_text_frame(subtitle.text_frame, heading_font)
-        for block in (editor_block, section_block):
-            self._process_block(block)
+        self._process_block(editor_block)
+        if section_block:
+            self._add_numbered_tour_stub()
+            self._process_block(section_block)
+            self._processed_tour_count += 1
 
     def set_question_number(self, slide, number):
         if self.args.disable_numbers:
@@ -530,8 +745,15 @@ class PptxExporter(BaseExporter):
             qtf_r.font.bold = True
         if self.c["number_textbox"].get("color"):
             qtf_r.font.color.rgb = RGBColor(*self.c["number_textbox"]["color"])
-        if self.c["number_textbox"].get("font_size"):
-            qtf_r.font.size = PptxPt(self.c["number_textbox"]["font_size"])
+        number_font_size = self.c["number_textbox"].get("font_size")
+        if number_font_size is None:
+            number_font_size = self._get_font_size("number_size", None)
+        if number_font_size is not None:
+            number_font_size = PptxPt(number_font_size)
+            qtf_r.font.size = number_font_size
+            self._set_line_spacing(
+                qtf_p, number_font_size, line_spacing_key="number"
+            )
 
     def _get_handout_from_4s(self, text):
         if isinstance(text, list):
@@ -598,6 +820,15 @@ class PptxExporter(BaseExporter):
             base_width = PptxInches(self.c["textbox"]["width"])
             base_height = PptxInches(self.c["textbox"]["height"])
             image_space_after = self._get_image_space_after(image)
+            if self._overlay_image_and_text():
+                slide.shapes.add_picture(
+                    image["imgfile"],
+                    left=base_left,
+                    top=base_top,
+                    width=img_base_width,
+                    height=img_base_height,
+                )
+                return self.get_textbox(slide)
             if self.c.get("disable_autolayout"):
                 slide.shapes.add_picture(
                     image["imgfile"],
@@ -714,9 +945,14 @@ class PptxExporter(BaseExporter):
         if not image and not self._add_handout_on_separate_slide():
             handout, question = self._split_handout_from_text(question)
         question_text = self.pptx_process_text(question, image=image)
+        question_size = self._get_font_size_for_text(
+            "question", question_text, "question_size", 32
+        )
         if handout:
             handout_cfg = self.c.get("handout", {})
-            handout_p = self.init_paragraph(tf, size=handout_cfg.get("font_size"))
+            handout_p = self.init_paragraph(
+                tf, size=handout_cfg.get("font_size"), line_spacing_key="handout"
+            )
             self._set_paragraph_alignment(handout_p, handout_cfg.get("align"))
             self.pptx_format(
                 self.pptx_process_text(handout, do_not_remove_accents=True),
@@ -727,11 +963,14 @@ class PptxExporter(BaseExporter):
             handout_p.space_after = PptxPt(self._get_handout_space_after())
             p = self._configure_paragraph(
                 tf.add_paragraph(),
-                size=self._get_legacy_text_size("force_text_size_question"),
+                size=question_size,
+                line_spacing_key="question",
             )
         else:
             p = self.init_paragraph(
-                tf, size=self._get_legacy_text_size("force_text_size_question")
+                tf,
+                size=question_size,
+                line_spacing_key="question",
             )
         self.pptx_format(question_text, p, tf, slide, blank_lines_between_items=True)
 
@@ -750,7 +989,9 @@ class PptxExporter(BaseExporter):
         if number is not None:
             self.set_question_number(slide, number)
         handout_cfg = self.c.get("handout", {})
-        p = self.init_paragraph(tf, size=handout_cfg.get("font_size"))
+        p = self.init_paragraph(
+            tf, size=handout_cfg.get("font_size"), line_spacing_key="handout"
+        )
         self._set_paragraph_alignment(p, handout_cfg.get("align"))
         self.pptx_format(
             self.pptx_process_text(handout, do_not_remove_accents=True), p, tf, slide
@@ -772,6 +1013,16 @@ class PptxExporter(BaseExporter):
         if image and image["big"] and text_is_duplicated:
             self.add_slide_with_image(image, number=self.number)
 
+    def _get_answer_grid_text(self, q, fields):
+        result = []
+        for field in fields:
+            strip_brackets = field not in ("answer", "zachet", "nezachet")
+            value = self.pptx_process_text(
+                copy.deepcopy(q[field]), strip_brackets=strip_brackets
+            )
+            result.append(f"{self.get_label(q, field)}: {self._text_for_grid(value)}")
+        return "\n".join(result)
+
     def add_answer_slide(self, q):
         slide = self.prs.slides.add_slide(self.ANSWER_SLIDE)
         if self.c.get("override_answer_caption"):
@@ -787,6 +1038,11 @@ class PptxExporter(BaseExporter):
             fields.append("comment")
         if self.c.get("add_source") and "source" in q:
             fields.append("source")
+        if self.c.get("add_author") and "author" in q:
+            fields.append("author")
+        answer_size = self._get_font_size_for_text(
+            "answer", self._get_answer_grid_text(q, fields), "answer_size", 32
+        )
         textbox = None
         for field in fields:
             image = self._get_image_from_4s(q[field])
@@ -800,7 +1056,9 @@ class PptxExporter(BaseExporter):
         tf.word_wrap = True
 
         p = self.init_paragraph(
-            tf, size=self._get_legacy_text_size("force_text_size_answer")
+            tf,
+            size=answer_size,
+            line_spacing_key="answer",
         )
         r = self.add_run(p, f"{self.get_label(q, 'answer')}: ")
         r.font.bold = True
@@ -853,9 +1111,11 @@ class PptxExporter(BaseExporter):
             self.set_question_number(slide, self.number)
         self.add_answer_slide(q)
 
-    def init_paragraph(self, text_frame, size=None):
+    def init_paragraph(self, text_frame, size=None, line_spacing_key=None):
         p = text_frame.paragraphs[0]
-        return self._configure_paragraph(p, size=size)
+        return self._configure_paragraph(
+            p, size=size, line_spacing_key=line_spacing_key
+        )
 
     def export(self, outfilename):
         self.outfilename = outfilename
@@ -876,6 +1136,10 @@ class PptxExporter(BaseExporter):
             self.QUESTION_SLIDE = self.BLANK_SLIDE
             self.ANSWER_SLIDE = self.BLANK_SLIDE
             self.PLUG_SLIDE = self.BLANK_SLIDE
+        self._prepare_service_slide_templates()
+        self._add_service_slides("intro")
+        self._processed_question_count = 0
+        self._processed_tour_count = 0
         buffer = []
         for element in self.structure:
             if element[0] != "Question":
@@ -883,8 +1147,13 @@ class PptxExporter(BaseExporter):
                 continue
             if element[0] == "Question":
                 if buffer:
+                    if self._should_add_between_tours_slide(buffer):
+                        self._add_service_slides("between_tours")
                     self.process_buffer(buffer)
                     buffer = []
                 self.process_question(element[1])
+                self._processed_question_count += 1
+        self._add_service_slides("final")
+        self._remove_service_slide_templates()
         self.prs.save(outfilename)
         self.logger.info("Output: {}".format(outfilename))
