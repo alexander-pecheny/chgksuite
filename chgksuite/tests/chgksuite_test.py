@@ -9,11 +9,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 import zipfile
+from io import BytesIO
+import xml.etree.ElementTree as ET
 
 import pytest
 import chgksuite.parser as parser_module
-from chgksuite.common import DefaultArgs, read_text_file
+from chgksuite.common import DefaultArgs, image_data_to_jpeg_bytes, read_text_file
 from chgksuite.composer.chgksuite_parser import parse_4s, replace_counters
 from chgksuite.composer.composer_common import (
     _parse_4s_elem,
@@ -22,7 +25,10 @@ from chgksuite.composer.composer_common import (
     remove_accents_standalone,
 )
 from chgksuite.composer.docx import (
+    DocxExporter,
     add_hyperlink_to_docx,
+    embed_fonts_in_docx,
+    optimize_docx_images,
     remove_square_brackets_standalone,
 )
 from chgksuite.composer.telegram import TelegramExporter
@@ -809,6 +815,245 @@ def test_docx_hyperlink_targets_percent_encode_non_ascii_url(tmp_path):
     assert "%E2%80%94" in target
     assert not re.search(r"[А-Яа-яЁё«»—]", target)
     assert url in document
+
+
+def _write_test_ttf(
+    path,
+    family="Test Embed",
+    subfamily="Regular",
+    characters="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .?!:",
+):
+    from fontTools.fontBuilder import FontBuilder
+    from fontTools.pens.ttGlyphPen import TTGlyphPen
+
+    full_name = f"{family} {subfamily}".strip()
+    cmap = {}
+    glyph_order = [".notdef"]
+    for char in sorted(set(characters)):
+        glyph_name = f"uni{ord(char):04X}"
+        cmap[ord(char)] = glyph_name
+        glyph_order.append(glyph_name)
+
+    glyphs = {}
+    metrics = {}
+    for glyph_name in glyph_order:
+        pen = TTGlyphPen(None)
+        if glyph_name != ".notdef" and glyph_name != "uni0020":
+            pen.moveTo((80, 0))
+            pen.lineTo((440, 0))
+            pen.lineTo((440, 700))
+            pen.lineTo((80, 700))
+            pen.closePath()
+        glyphs[glyph_name] = pen.glyph()
+        metrics[glyph_name] = (520, 0)
+
+    builder = FontBuilder(1000, isTTF=True)
+    builder.setupGlyphOrder(glyph_order)
+    builder.setupCharacterMap(cmap)
+    builder.setupGlyf(glyphs)
+    builder.setupHorizontalMetrics(metrics)
+    builder.setupHorizontalHeader(ascent=800, descent=-200)
+    builder.setupOS2()
+    builder.setupNameTable(
+        {
+            "familyName": family,
+            "styleName": subfamily,
+            "uniqueFontIdentifier": full_name,
+            "fullName": full_name,
+            "psName": re.sub(r"[^A-Za-z0-9]", "", full_name),
+        }
+    )
+    builder.setupPost()
+    builder.setupMaxp()
+    builder.save(path)
+
+
+def test_embed_fonts_in_docx_embeds_obfuscated_regular_font(tmp_path):
+    from docx import Document
+
+    font_path = tmp_path / "TestEmbed-Regular.ttf"
+    _write_test_ttf(font_path)
+    docx_path = tmp_path / "test.docx"
+    Document().save(docx_path)
+
+    embed_fonts_in_docx(docx_path, str(font_path), font_name="Test Embed")
+
+    with zipfile.ZipFile(docx_path) as docx_file:
+        content_types = docx_file.read("[Content_Types].xml").decode("utf-8")
+        font_rels = docx_file.read("word/_rels/fontTable.xml.rels").decode("utf-8")
+        font_table = ET.fromstring(docx_file.read("word/fontTable.xml"))
+        rels = ET.fromstring(font_rels)
+
+        w_name = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name"
+        font_el = next(
+            element
+            for element in font_table
+            if element.tag.endswith("font") and element.get(w_name) == "Test Embed"
+        )
+        embed_regular = font_el.find(
+            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}embedRegular"
+        )
+        rel_id = embed_regular.get(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+        )
+        font_key = embed_regular.get(
+            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fontKey"
+        )
+        rel = next(element for element in rels if element.get("Id") == rel_id)
+        embedded_font = docx_file.read("word/" + rel.get("Target"))
+
+    assert "application/vnd.openxmlformats-officedocument.obfuscatedFont" in content_types
+    assert "<ns0:" not in content_types
+    assert "<ns0:" not in font_rels
+    assert rel.get("Type").endswith("/font")
+
+    deobfuscated = bytearray(embedded_font)
+    key = uuid.UUID(font_key.strip("{}")).bytes[::-1]
+    for index in range(32):
+        deobfuscated[index] ^= key[index % len(key)]
+    assert bytes(deobfuscated[:32]) == font_path.read_bytes()[:32]
+
+
+def test_embed_fonts_in_docx_subsets_to_used_characters(tmp_path):
+    from docx import Document
+    from fontTools.ttLib import TTFont
+
+    font_path = tmp_path / "TestEmbed-Regular.ttf"
+    _write_test_ttf(font_path, characters="ABC")
+    docx_path = tmp_path / "test.docx"
+    Document().save(docx_path)
+
+    embed_fonts_in_docx(
+        docx_path,
+        str(font_path),
+        font_name="Test Embed",
+        subset_characters=set("AB"),
+    )
+
+    with zipfile.ZipFile(docx_path) as docx_file:
+        font_table = ET.fromstring(docx_file.read("word/fontTable.xml"))
+        rels = ET.fromstring(docx_file.read("word/_rels/fontTable.xml.rels"))
+        embed_regular = next(
+            element
+            for element in font_table.iter()
+            if element.tag.endswith("embedRegular")
+        )
+        rel_id = embed_regular.get(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+        )
+        font_key = embed_regular.get(
+            "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fontKey"
+        )
+        rel = next(element for element in rels if element.get("Id") == rel_id)
+        embedded_font = bytearray(docx_file.read("word/" + rel.get("Target")))
+
+    key = uuid.UUID(font_key.strip("{}")).bytes[::-1]
+    for index in range(32):
+        embedded_font[index] ^= key[index % len(key)]
+
+    subset_font = TTFont(BytesIO(bytes(embedded_font)))
+    cmap = subset_font.getBestCmap()
+    subset_font.close()
+    assert 65 in cmap
+    assert 66 in cmap
+    assert 67 not in cmap
+
+
+def test_optimize_docx_images_recompresses_png_as_jpeg(tmp_path):
+    from docx import Document
+
+    image_path = tmp_path / "source.png"
+    Image.new("RGBA", (50, 50), (255, 0, 0, 128)).save(image_path)
+    docx_path = tmp_path / "image.docx"
+    doc = Document()
+    doc.add_picture(str(image_path))
+    doc.save(docx_path)
+
+    renamed_parts = optimize_docx_images(docx_path, quality=80)
+
+    with zipfile.ZipFile(docx_path) as docx_file:
+        names = docx_file.namelist()
+        content_types = docx_file.read("[Content_Types].xml").decode("utf-8")
+        rels = docx_file.read("word/_rels/document.xml.rels").decode("utf-8")
+        image_names = [name for name in names if name.startswith("word/media/")]
+        image_data = docx_file.read(image_names[0])
+
+    assert renamed_parts == {"word/media/image1.png": "word/media/image1.jpg"}
+    assert image_names == ["word/media/image1.jpg"]
+    assert image_data.startswith(b"\xff\xd8")
+    assert 'Extension="jpg" ContentType="image/jpeg"' in content_types
+    assert 'Target="media/image1.jpg"' in rels
+
+
+def test_image_data_to_jpeg_bytes_flattens_alpha_to_white():
+    source = BytesIO()
+    Image.new("RGBA", (1, 1), (255, 0, 0, 128)).save(source, format="PNG")
+
+    jpeg_data = image_data_to_jpeg_bytes(source.getvalue(), quality=90)
+
+    assert jpeg_data is not None
+    assert jpeg_data.startswith(b"\xff\xd8")
+    with Image.open(BytesIO(jpeg_data)) as image:
+        assert image.mode == "RGB"
+
+
+def test_docx_exporter_embeds_font_from_font_argument(tmp_path):
+    font_path = tmp_path / "TestEmbed-Regular.ttf"
+    _write_test_ttf(font_path)
+    output_path = tmp_path / "exported.docx"
+    args = DefaultArgs(
+        docx_template=os.path.join(parentdir, "chgksuite", "resources", "template.docx"),
+        embed_fonts="on",
+        font=str(font_path),
+        game="chgk",
+        regexes_file=os.path.join(parentdir, "chgksuite", "resources", "regexes_ru.json"),
+        spoilers="off",
+        screen_mode="off",
+    )
+
+    exporter = DocxExporter(
+        parse_4s("# Test\n\n? Question\n! Answer"),
+        args,
+        {"tmp_dir": str(tmp_path), "targetdir": str(tmp_path)},
+    )
+    exporter.export(output_path)
+
+    with zipfile.ZipFile(output_path) as docx_file:
+        assert any(name.startswith("word/fonts/") for name in docx_file.namelist())
+        font_table = docx_file.read("word/fontTable.xml").decode("utf-8")
+
+    assert "Test Embed" in font_table
+    assert "embedRegular" in font_table
+
+
+def test_docx_cli_accepts_font_and_embed_fonts():
+    import argparse
+
+    from chgksuite.cli import ArgparseBuilder
+
+    parser = argparse.ArgumentParser(prog="chgksuite")
+    ArgparseBuilder(parser, False).build()
+
+    args = parser.parse_args(
+        ["compose", "docx", "--font", "Test Embed", "--embed_fonts", "on", "test.4s"]
+    )
+    legacy_args = parser.parse_args(
+        [
+            "compose",
+            "docx",
+            "--font_face",
+            "Legacy Font",
+            "--optimize_size",
+            "off",
+            "test.4s",
+        ]
+    )
+
+    assert args.font == "Test Embed"
+    assert args.embed_fonts == "on"
+    assert args.optimize_size == "on"
+    assert legacy_args.font == "Legacy Font"
+    assert legacy_args.optimize_size == "off"
 
 
 def test_telegram_formats_non_ascii_url_as_html_link():

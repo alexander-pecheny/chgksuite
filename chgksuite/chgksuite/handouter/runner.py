@@ -29,6 +29,7 @@ from chgksuite.handouter.tex_internals import (
 )
 from chgksuite.handouter.utils import (
     compress_pdf,
+    optimize_raster_image_for_tex,
     parse_handouts,
     read_file,
     replace_ext,
@@ -73,6 +74,13 @@ class HandoutGenerator:
     def __init__(self, args):
         self.args = args
         self._temp_files = []
+        self.optimize_images = getattr(args, "optimize_images", "on") == "on"
+        filename = getattr(args, "filename", None)
+        if not isinstance(filename, (str, bytes, os.PathLike)):
+            filename = None
+        self.input_dir = (
+            os.path.dirname(os.path.abspath(filename)) if filename else os.getcwd()
+        )
         _, resourcedir = get_source_dirs()
         self.labels = toml.loads(
             read_file(os.path.join(resourcedir, f"labels_{args.language}.toml"))
@@ -168,6 +176,21 @@ class HandoutGenerator:
 
     def get_page_width(self):
         return self.args.paperwidth - self.args.margin_left - self.args.margin_right - 2
+
+    def resolve_image_path(self, image_path):
+        if os.path.isabs(image_path):
+            return image_path
+        return os.path.join(self.input_dir, image_path)
+
+    def prepare_image(self, image_path):
+        if not self.optimize_images:
+            return image_path
+        source_path = self.resolve_image_path(image_path)
+        optimized_path = optimize_raster_image_for_tex(source_path, quality=80)
+        if optimized_path != source_path:
+            self._temp_files.append(optimized_path)
+            return optimized_path
+        return image_path
 
     def get_cut_direction(
         self, columns, num_rows, handouts_per_team, grouping="horizontal"
@@ -400,8 +423,11 @@ class HandoutGenerator:
         if block.get("image"):
             image_path = block["image"]
             if block.get("rotate"):
-                image_path = rotate_image(image_path, block["rotate"])
+                image_path = rotate_image(
+                    self.resolve_image_path(image_path), block["rotate"]
+                )
                 self._temp_files.append(image_path)
+            image_path = self.prepare_image(image_path)
             img_qwidth = block.get("resize_image") or 1.0
             imgwidth = IMGWIDTH.replace("<QWIDTH>", str(img_qwidth))
             contents.append(

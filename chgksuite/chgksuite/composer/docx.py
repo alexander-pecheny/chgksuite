@@ -1,11 +1,16 @@
 import os
+import posixpath
 import re
 import shlex
 import shutil
+import struct
 import sys
 import tempfile
 import urllib.parse
+import uuid
 import zipfile
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 
 import docx
 from docx import Document
@@ -16,7 +21,12 @@ from docx.shared import Inches
 from docx.shared import Pt as DocxPt
 
 import chgksuite.typotools as typotools
-from chgksuite.common import DummyLogger, log_wrap, replace_escaped
+from chgksuite.common import (
+    DummyLogger,
+    image_data_to_jpeg_bytes,
+    log_wrap,
+    replace_escaped,
+)
 from chgksuite.composer.composer_common import (
     BaseExporter,
     _parse_4s_elem,
@@ -35,6 +45,754 @@ WHITEN = {
 }
 
 _HYPERLINK_SAFE_CHARS = "%/:?#[]@!$&'()*+,;="
+_FONT_REL_TYPE = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/font"
+)
+_OBFUSCATED_FONT_CONTENT_TYPE = (
+    "application/vnd.openxmlformats-officedocument.obfuscatedFont"
+)
+_WML_FONT_TABLE_CONTENT_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"
+)
+_CONTENT_TYPES_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
+_PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_IMAGE_REL_TYPE = (
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+)
+_FONT_EMBED_TAGS = {
+    "regular": "embedRegular",
+    "bold": "embedBold",
+    "italic": "embedItalic",
+    "bold_italic": "embedBoldItalic",
+}
+_EMBEDDABLE_FONT_EXTENSIONS = {".ttf", ".otf"}
+_WORD_TEXT_TAGS = {
+    f"{{{_W_NS}}}t",
+    f"{{{_W_NS}}}delText",
+    f"{{{_W_NS}}}instrText",
+}
+
+ET.register_namespace("w", _W_NS)
+ET.register_namespace("r", _R_NS)
+
+
+@dataclass(frozen=True)
+class FontFace:
+    path: str
+    family: str
+    subfamily: str
+    full_name: str
+    postscript_name: str
+    role: str
+    embedding_restricted: bool = False
+
+
+def _normalize_font_name(name):
+    return re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).strip()
+
+
+def _font_table_records(font_data, font_offset=0):
+    if font_offset + 12 > len(font_data):
+        return {}
+
+    try:
+        num_tables = struct.unpack_from(">H", font_data, font_offset + 4)[0]
+    except struct.error:
+        return {}
+
+    table_records = {}
+    record_offset = font_offset + 12
+    for index in range(num_tables):
+        pos = record_offset + index * 16
+        if pos + 16 > len(font_data):
+            break
+        tag = font_data[pos : pos + 4].decode("ascii", errors="ignore")
+        try:
+            table_offset, table_length = struct.unpack_from(">II", font_data, pos + 8)
+        except struct.error:
+            continue
+        if table_offset + table_length <= len(font_data):
+            table_records[tag] = (table_offset, table_length)
+    return table_records
+
+
+def _decode_font_name(raw, platform_id):
+    if platform_id in (0, 3):
+        encodings = ("utf-16-be", "utf-8", "latin-1")
+    elif platform_id == 1:
+        encodings = ("mac_roman", "latin-1")
+    else:
+        encodings = ("utf-16-be", "utf-8", "latin-1")
+
+    for encoding in encodings:
+        try:
+            value = raw.decode(encoding).strip("\x00").strip()
+        except UnicodeDecodeError:
+            continue
+        if value:
+            return value
+    return ""
+
+
+def _name_record_priority(platform_id, language_id):
+    if platform_id == 3 and language_id in (0x0409, 0x0809, 0x0C09):
+        return 0
+    if platform_id == 3:
+        return 1
+    if platform_id == 0:
+        return 2
+    if platform_id == 1:
+        return 3
+    return 4
+
+
+def _parse_name_table(font_data, font_offset=0):
+    table_records = _font_table_records(font_data, font_offset)
+    name_record = table_records.get("name")
+    if not name_record:
+        return {}
+
+    table_offset, table_length = name_record
+    if table_offset + 6 > len(font_data):
+        return {}
+    try:
+        _, count, string_offset = struct.unpack_from(">HHH", font_data, table_offset)
+    except struct.error:
+        return {}
+
+    record_base = table_offset + 6
+    string_base = table_offset + string_offset
+    table_end = table_offset + table_length
+    names = {}
+
+    for index in range(count):
+        pos = record_base + index * 12
+        if pos + 12 > table_end:
+            break
+        try:
+            (
+                platform_id,
+                _encoding_id,
+                language_id,
+                name_id,
+                length,
+                offset,
+            ) = struct.unpack_from(">HHHHHH", font_data, pos)
+        except struct.error:
+            continue
+        value_start = string_base + offset
+        value_end = value_start + length
+        if value_start < string_base or value_end > len(font_data):
+            continue
+        value = _decode_font_name(font_data[value_start:value_end], platform_id)
+        if not value:
+            continue
+        priority = _name_record_priority(platform_id, language_id)
+        current = names.get(name_id)
+        if current is None or priority < current[0]:
+            names[name_id] = (priority, value)
+
+    return {name_id: value for name_id, (_priority, value) in names.items()}
+
+
+def _font_embedding_restricted(font_data, font_offset=0):
+    table_records = _font_table_records(font_data, font_offset)
+    os2_record = table_records.get("OS/2")
+    if not os2_record:
+        return False
+
+    table_offset, _table_length = os2_record
+    fs_type_offset = table_offset + 8
+    if fs_type_offset + 2 > len(font_data):
+        return False
+    fs_type = struct.unpack_from(">H", font_data, fs_type_offset)[0]
+    return bool(fs_type & 0x0002)
+
+
+def _font_face_role(subfamily, full_name, path):
+    style_source = subfamily or full_name or os.path.splitext(os.path.basename(path))[0]
+    style = _normalize_font_name(style_source)
+    compact_style = style.replace(" ", "")
+    tokens = set(style.split())
+
+    bold_tokens = {"bold", "black", "heavy", "semibold", "demibold", "extrabold"}
+    bold = bool(tokens & bold_tokens) or "bolditalic" in compact_style
+    italic = bool(tokens & {"italic", "oblique"}) or "bolditalic" in compact_style
+
+    if bold and italic:
+        return "bold_italic"
+    if bold:
+        return "bold"
+    if italic:
+        return "italic"
+    return "regular"
+
+
+def _font_faces_from_file(font_path):
+    font_path = os.path.abspath(os.path.expanduser(font_path))
+    ext = os.path.splitext(font_path)[1].lower()
+    if ext not in _EMBEDDABLE_FONT_EXTENSIONS:
+        raise ValueError(
+            f"Font collections cannot be embedded directly: {font_path}. "
+            "Use a standalone .ttf or .otf font file."
+        )
+
+    with open(font_path, "rb") as font_file:
+        font_data = font_file.read()
+
+    font_offsets = [0]
+    if font_data[:4] == b"ttcf":
+        raise ValueError(
+            f"Font collections cannot be embedded directly: {font_path}. "
+            "Use a standalone .ttf or .otf font file."
+        )
+
+    faces = []
+    fallback_name = os.path.splitext(os.path.basename(font_path))[0]
+    for font_offset in font_offsets:
+        names = _parse_name_table(font_data, font_offset)
+        family = names.get(16) or names.get(1) or fallback_name
+        subfamily = names.get(17) or names.get(2) or ""
+        full_name = names.get(4) or family
+        postscript_name = names.get(6) or ""
+        faces.append(
+            FontFace(
+                path=font_path,
+                family=family,
+                subfamily=subfamily,
+                full_name=full_name,
+                postscript_name=postscript_name,
+                role=_font_face_role(subfamily, full_name, font_path),
+                embedding_restricted=_font_embedding_restricted(
+                    font_data, font_offset
+                ),
+            )
+        )
+
+    return faces
+
+
+def _default_font_search_dirs():
+    search_dirs = [
+        os.path.expanduser("~/Library/Fonts"),
+        "/Library/Fonts",
+        "/System/Library/Fonts",
+        os.path.expanduser("~/.local/share/fonts"),
+        os.path.expanduser("~/.fonts"),
+        "/usr/local/share/fonts",
+        "/usr/share/fonts",
+    ]
+    windir = os.environ.get("WINDIR")
+    if windir:
+        search_dirs.append(os.path.join(windir, "Fonts"))
+    return search_dirs
+
+
+def _iter_font_files(search_dirs=None):
+    search_dirs = search_dirs or _default_font_search_dirs()
+    seen = set()
+    for search_dir in search_dirs:
+        search_dir = os.path.abspath(os.path.expanduser(search_dir))
+        if os.path.isfile(search_dir):
+            candidates = [search_dir]
+        elif os.path.isdir(search_dir):
+            candidates = []
+            for root, dirs, files in os.walk(search_dir):
+                dirs[:] = [dirname for dirname in dirs if not dirname.startswith(".")]
+                candidates.extend(os.path.join(root, file_name) for file_name in files)
+        else:
+            continue
+
+        for candidate in candidates:
+            candidate = os.path.abspath(candidate)
+            if candidate in seen:
+                continue
+            seen.add(candidate)
+            if os.path.splitext(candidate)[1].lower() in _EMBEDDABLE_FONT_EXTENSIONS:
+                yield candidate
+
+
+def _font_face_matches(face, font_name):
+    query = _normalize_font_name(font_name)
+    return query in {
+        _normalize_font_name(face.family),
+        _normalize_font_name(face.full_name),
+        _normalize_font_name(face.postscript_name),
+        _normalize_font_name(os.path.splitext(os.path.basename(face.path))[0]),
+    }
+
+
+def _find_font_faces(font_spec, search_dirs=None):
+    expanded_font_spec = os.path.abspath(os.path.expanduser(font_spec))
+    if os.path.isfile(expanded_font_spec):
+        return _font_faces_from_file(expanded_font_spec)
+
+    faces = []
+    for font_path in _iter_font_files(search_dirs):
+        try:
+            file_faces = _font_faces_from_file(font_path)
+        except (OSError, ValueError, struct.error):
+            continue
+        faces.extend(face for face in file_faces if _font_face_matches(face, font_spec))
+    return faces
+
+
+def _font_role_priority(face, role):
+    style = _normalize_font_name(face.subfamily)
+    if role == "regular":
+        if style in {"regular", "book", "roman", "normal"}:
+            return 0
+        if not style:
+            return 1
+    return 2
+
+
+def _select_font_faces(font_spec, search_dirs=None):
+    faces = _find_font_faces(font_spec, search_dirs=search_dirs)
+    if not faces:
+        raise FileNotFoundError(
+            f"Could not find font '{font_spec}'. Use an installed font family name "
+            "or a standalone .ttf/.otf file path."
+        )
+
+    restricted = [face.path for face in faces if face.embedding_restricted]
+    if restricted:
+        raise PermissionError(
+            "Font license forbids embedding: {}".format(", ".join(sorted(restricted)))
+        )
+
+    selected = {}
+    for role in ("regular", "bold", "italic", "bold_italic"):
+        role_faces = [face for face in faces if face.role == role]
+        if role_faces:
+            selected[role] = sorted(
+                role_faces, key=lambda face: (_font_role_priority(face, role), face.path)
+            )[0]
+
+    if "regular" not in selected:
+        selected["regular"] = faces[0]
+    return selected
+
+
+def _docx_font_spec(args):
+    return getattr(args, "font", None) or getattr(args, "font_face", None)
+
+
+def _docx_font_name(font_spec, font_faces=None):
+    if not font_spec:
+        return None
+    expanded_font_spec = os.path.abspath(os.path.expanduser(font_spec))
+    if os.path.isfile(expanded_font_spec):
+        faces = list((font_faces or {}).values()) or _font_faces_from_file(
+            expanded_font_spec
+        )
+        return faces[0].family
+    if font_faces:
+        return font_faces.get("regular", next(iter(font_faces.values()))).family
+    return font_spec
+
+
+def _embed_fonts_enabled(args):
+    return getattr(args, "embed_fonts", "off") == "on"
+
+
+def _xml_bytes(root, default_namespace=None):
+    if default_namespace:
+        ET.register_namespace("", default_namespace)
+    return ET.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
+def _load_xml_part(docx_zip, name, default_root):
+    if name in docx_zip.namelist():
+        return ET.fromstring(docx_zip.read(name))
+    return default_root
+
+
+def _ensure_content_type_override(content_types_root, part_name, content_type):
+    for override in content_types_root.findall(f"{{{_CONTENT_TYPES_NS}}}Override"):
+        if override.get("PartName") == part_name:
+            override.set("ContentType", content_type)
+            return
+    ET.SubElement(
+        content_types_root,
+        f"{{{_CONTENT_TYPES_NS}}}Override",
+        {"PartName": part_name, "ContentType": content_type},
+    )
+
+
+def _next_relationship_id(rels_root):
+    used_ids = {
+        rel.get("Id")
+        for rel in rels_root.findall(f"{{{_PACKAGE_REL_NS}}}Relationship")
+    }
+    index = 1
+    while f"rId{index}" in used_ids:
+        index += 1
+    return f"rId{index}"
+
+
+def _next_font_part_name(existing_names, extension=".odttf"):
+    index = 1
+    while f"word/fonts/font{index}{extension}" in existing_names:
+        index += 1
+    return f"word/fonts/font{index}{extension}"
+
+
+def _obfuscate_font(font_path, font_guid):
+    with open(font_path, "rb") as font_file:
+        font_data = bytearray(font_file.read())
+
+    key = font_guid.bytes[::-1]
+    for index in range(min(32, len(font_data))):
+        font_data[index] ^= key[index % len(key)]
+    return bytes(font_data)
+
+
+def _rewrite_docx_package(docx_path, replacements, removals=()):
+    output_dir = os.path.dirname(os.path.abspath(docx_path)) or "."
+    fd, temp_path = tempfile.mkstemp(suffix=".docx", dir=output_dir)
+    os.close(fd)
+    try:
+        with zipfile.ZipFile(docx_path, "r") as source_zip, zipfile.ZipFile(
+            temp_path, "w", zipfile.ZIP_DEFLATED
+        ) as target_zip:
+            replaced_names = set(replacements)
+            removed_names = set(removals)
+            for item in source_zip.infolist():
+                if item.filename in replaced_names or item.filename in removed_names:
+                    continue
+                target_zip.writestr(item, source_zip.read(item.filename))
+            for name, data in replacements.items():
+                target_zip.writestr(name, data)
+        os.replace(temp_path, docx_path)
+    except Exception:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+        raise
+
+
+def _font_elements(font_table_root, font_name):
+    name_attr = f"{{{_W_NS}}}name"
+    elements = [
+        font_el
+        for font_el in font_table_root.findall(f"{{{_W_NS}}}font")
+        if font_el.get(name_attr) == font_name
+    ]
+    if elements:
+        return elements
+
+    font_el = ET.SubElement(
+        font_table_root, f"{{{_W_NS}}}font", {name_attr: font_name}
+    )
+    ET.SubElement(font_el, f"{{{_W_NS}}}charset", {f"{{{_W_NS}}}val": "00"})
+    ET.SubElement(font_el, f"{{{_W_NS}}}family", {f"{{{_W_NS}}}val": "auto"})
+    ET.SubElement(font_el, f"{{{_W_NS}}}pitch", {f"{{{_W_NS}}}val": "variable"})
+    return [font_el]
+
+
+def _optimize_size_enabled(args):
+    return getattr(args, "optimize_size", "on") == "on"
+
+
+def _ensure_content_type_default(content_types_root, extension, content_type):
+    for default in content_types_root.findall(f"{{{_CONTENT_TYPES_NS}}}Default"):
+        if default.get("Extension") == extension:
+            default.set("ContentType", content_type)
+            return
+    default = ET.Element(
+        f"{{{_CONTENT_TYPES_NS}}}Default",
+        {"Extension": extension, "ContentType": content_type},
+    )
+    insert_at = 0
+    for index, child in enumerate(list(content_types_root)):
+        if child.tag == f"{{{_CONTENT_TYPES_NS}}}Override":
+            insert_at = index
+            break
+        insert_at = index + 1
+    content_types_root.insert(insert_at, default)
+
+
+def _remove_content_type_override(content_types_root, part_name):
+    for override in list(content_types_root.findall(f"{{{_CONTENT_TYPES_NS}}}Override")):
+        if override.get("PartName") == part_name:
+            content_types_root.remove(override)
+
+
+def _rels_source_part(rels_part_name):
+    rels_dir = posixpath.dirname(rels_part_name)
+    if posixpath.basename(rels_dir) != "_rels":
+        return None
+    source_dir = posixpath.dirname(rels_dir)
+    source_name = posixpath.basename(rels_part_name)[: -len(".rels")]
+    return posixpath.join(source_dir, source_name)
+
+
+def _relationship_target_part(rels_part_name, target):
+    source_part = _rels_source_part(rels_part_name)
+    if source_part is None:
+        return None
+    return posixpath.normpath(posixpath.join(posixpath.dirname(source_part), target))
+
+
+def _relationship_target_for_part(rels_part_name, part_name):
+    source_part = _rels_source_part(rels_part_name)
+    if source_part is None:
+        return part_name
+    return posixpath.relpath(part_name, posixpath.dirname(source_part))
+
+
+def _next_media_part_name(existing_names, original_part_name):
+    dirname = posixpath.dirname(original_part_name)
+    stem = posixpath.splitext(posixpath.basename(original_part_name))[0]
+    candidate = posixpath.join(dirname, f"{stem}.jpg")
+    if candidate not in existing_names:
+        return candidate
+
+    index = 1
+    while True:
+        candidate = posixpath.join(dirname, f"{stem}_{index}.jpg")
+        if candidate not in existing_names:
+            return candidate
+        index += 1
+
+
+def optimize_docx_images(docx_path, quality=80):
+    with zipfile.ZipFile(docx_path, "r") as docx_zip:
+        existing_names = set(docx_zip.namelist())
+        media_names = [
+            name
+            for name in existing_names
+            if name.startswith("word/media/") and not name.endswith("/")
+        ]
+        content_types_root = _load_xml_part(
+            docx_zip,
+            "[Content_Types].xml",
+            ET.Element(f"{{{_CONTENT_TYPES_NS}}}Types"),
+        )
+        rels_parts = {
+            name: ET.fromstring(docx_zip.read(name))
+            for name in existing_names
+            if name.startswith("word/_rels/") and name.endswith(".rels")
+        }
+        media_data = {name: docx_zip.read(name) for name in media_names}
+
+    replacements = {}
+    removals = set()
+    renamed_parts = {}
+    reserved_names = set(existing_names)
+
+    for media_name, image_data in media_data.items():
+        jpeg_data = image_data_to_jpeg_bytes(image_data, quality=quality)
+        if not jpeg_data:
+            continue
+        new_name = _next_media_part_name(reserved_names, media_name)
+        reserved_names.add(new_name)
+        replacements[new_name] = jpeg_data
+        removals.add(media_name)
+        renamed_parts[media_name] = new_name
+
+    if not renamed_parts:
+        return {}
+
+    for rels_name, rels_root in rels_parts.items():
+        changed = False
+        for rel in rels_root.findall(f"{{{_PACKAGE_REL_NS}}}Relationship"):
+            if rel.get("Type") != _IMAGE_REL_TYPE or rel.get("TargetMode") == "External":
+                continue
+            old_part_name = _relationship_target_part(rels_name, rel.get("Target", ""))
+            if old_part_name not in renamed_parts:
+                continue
+            rel.set(
+                "Target",
+                _relationship_target_for_part(rels_name, renamed_parts[old_part_name]),
+            )
+            changed = True
+        if changed:
+            replacements[rels_name] = _xml_bytes(
+                rels_root, default_namespace=_PACKAGE_REL_NS
+            )
+
+    _ensure_content_type_default(content_types_root, "jpg", "image/jpeg")
+    _ensure_content_type_default(content_types_root, "jpeg", "image/jpeg")
+    for old_part_name in renamed_parts:
+        _remove_content_type_override(content_types_root, f"/{old_part_name}")
+    replacements["[Content_Types].xml"] = _xml_bytes(
+        content_types_root, default_namespace=_CONTENT_TYPES_NS
+    )
+
+    _rewrite_docx_package(docx_path, replacements, removals=removals)
+    return renamed_parts
+
+
+def collect_docx_used_characters(docx_path):
+    characters = set()
+    visible_xml_prefixes = (
+        "word/document.xml",
+        "word/header",
+        "word/footer",
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/comments.xml",
+    )
+
+    with zipfile.ZipFile(docx_path, "r") as docx_zip:
+        for name in docx_zip.namelist():
+            if not name.startswith(visible_xml_prefixes):
+                continue
+            try:
+                root = ET.fromstring(docx_zip.read(name))
+            except ET.ParseError:
+                continue
+            for element in root.iter():
+                if element.tag in _WORD_TEXT_TAGS and element.text:
+                    characters.update(element.text)
+    return characters
+
+
+def _subset_font_file(font_path, characters, output_dir, suffix):
+    from fontTools import subset
+
+    base_name, extension = os.path.splitext(os.path.basename(font_path))
+    subset_path = os.path.join(
+        output_dir,
+        f"{base_name}-{suffix}-subset{extension}",
+    )
+    options = subset.Options()
+    options.ignore_missing_unicodes = True
+    options.recalc_bounds = True
+    options.recalc_timestamp = False
+    options.retain_gids = True
+
+    font = subset.load_font(font_path, options)
+    subsetter = subset.Subsetter(options=options)
+    subsetter.populate(unicodes=[ord(char) for char in characters])
+    subsetter.subset(font)
+    subset.save_font(font, subset_path, options)
+    font.close()
+    return subset_path
+
+
+def _subset_font_faces(font_faces, characters, output_dir):
+    if not characters:
+        return font_faces
+
+    subset_faces = {}
+    for role, face in font_faces.items():
+        subset_path = _subset_font_file(face.path, characters, output_dir, role)
+        subset_faces[role] = FontFace(
+            path=subset_path,
+            family=face.family,
+            subfamily=face.subfamily,
+            full_name=face.full_name,
+            postscript_name=face.postscript_name,
+            role=face.role,
+            embedding_restricted=face.embedding_restricted,
+        )
+    return subset_faces
+
+
+def embed_fonts_in_docx(
+    docx_path,
+    font_spec,
+    font_name=None,
+    font_faces=None,
+    search_dirs=None,
+    subset_characters=None,
+):
+    if not font_spec:
+        raise ValueError("--embed_fonts=on requires --font.")
+
+    font_faces = font_faces or _select_font_faces(font_spec, search_dirs=search_dirs)
+    font_name = font_name or _docx_font_name(font_spec, font_faces)
+    subset_tmp_dir = None
+    if subset_characters is not None:
+        subset_tmp_dir = tempfile.TemporaryDirectory()
+        font_faces = _subset_font_faces(
+            font_faces, subset_characters, subset_tmp_dir.name
+        )
+
+    try:
+        with zipfile.ZipFile(docx_path, "r") as docx_zip:
+            existing_names = set(docx_zip.namelist())
+            content_types_root = _load_xml_part(
+                docx_zip,
+                "[Content_Types].xml",
+                ET.Element(f"{{{_CONTENT_TYPES_NS}}}Types"),
+            )
+            font_table_root = _load_xml_part(
+                docx_zip,
+                "word/fontTable.xml",
+                ET.Element(f"{{{_W_NS}}}fonts"),
+            )
+            rels_root = _load_xml_part(
+                docx_zip,
+                "word/_rels/fontTable.xml.rels",
+                ET.Element(f"{{{_PACKAGE_REL_NS}}}Relationships"),
+            )
+
+        _ensure_content_type_override(
+            content_types_root,
+            "/word/fontTable.xml",
+            _WML_FONT_TABLE_CONTENT_TYPE,
+        )
+
+        embed_relationships = {}
+        replacements = {}
+        for role, face in font_faces.items():
+            part_name = _next_font_part_name(set(existing_names) | set(replacements))
+            existing_names.add(part_name)
+            font_guid = uuid.uuid4()
+            rel_id = _next_relationship_id(rels_root)
+            ET.SubElement(
+                rels_root,
+                f"{{{_PACKAGE_REL_NS}}}Relationship",
+                {
+                    "Id": rel_id,
+                    "Type": _FONT_REL_TYPE,
+                    "Target": f"fonts/{os.path.basename(part_name)}",
+                },
+            )
+            _ensure_content_type_override(
+                content_types_root,
+                f"/{part_name}",
+                _OBFUSCATED_FONT_CONTENT_TYPE,
+            )
+            replacements[part_name] = _obfuscate_font(face.path, font_guid)
+            embed_relationships[role] = (rel_id, "{" + str(font_guid).upper() + "}")
+
+        embed_tag_names = {f"{{{_W_NS}}}{tag}" for tag in _FONT_EMBED_TAGS.values()}
+        for font_el in _font_elements(font_table_root, font_name):
+            for child in list(font_el):
+                if child.tag in embed_tag_names:
+                    font_el.remove(child)
+            for role in ("regular", "bold", "italic", "bold_italic"):
+                if role not in embed_relationships:
+                    continue
+                rel_id, font_key = embed_relationships[role]
+                ET.SubElement(
+                    font_el,
+                    f"{{{_W_NS}}}{_FONT_EMBED_TAGS[role]}",
+                    {f"{{{_R_NS}}}id": rel_id, f"{{{_W_NS}}}fontKey": font_key},
+                )
+
+        replacements.update(
+            {
+                "[Content_Types].xml": _xml_bytes(
+                    content_types_root, default_namespace=_CONTENT_TYPES_NS
+                ),
+                "word/fontTable.xml": _xml_bytes(font_table_root),
+                "word/_rels/fontTable.xml.rels": _xml_bytes(
+                    rels_root, default_namespace=_PACKAGE_REL_NS
+                ),
+            }
+        )
+        _rewrite_docx_package(docx_path, replacements)
+        return font_faces
+    finally:
+        if subset_tmp_dir is not None:
+            subset_tmp_dir.cleanup()
 
 
 def replace_font_in_docx(template_path, new_font):
@@ -539,10 +1297,18 @@ class DocxExporter(BaseExporter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.qcount = 0
+        self.font_spec = _docx_font_spec(self.args)
+        self.font_faces = None
+        self.optimize_size = _optimize_size_enabled(self.args)
+        if _embed_fonts_enabled(self.args):
+            if not self.font_spec:
+                raise ValueError("--embed_fonts=on requires --font.")
+            self.font_faces = _select_font_faces(self.font_spec)
+        self.font_name = _docx_font_name(self.font_spec, self.font_faces)
 
-        if getattr(self.args, "font_face", None):
+        if self.font_name:
             self.args.docx_template = replace_font_in_docx(
-                self.args.docx_template, self.args.font_face
+                self.args.docx_template, self.font_name
             )
 
     def __del__(self):
@@ -770,6 +1536,19 @@ class DocxExporter(BaseExporter):
             prev_element = element
 
         self.doc.save(outfilename)
+        subset_characters = None
+        if self.optimize_size:
+            if _embed_fonts_enabled(self.args):
+                subset_characters = collect_docx_used_characters(outfilename)
+            optimize_docx_images(outfilename, quality=80)
+        if _embed_fonts_enabled(self.args):
+            embed_fonts_in_docx(
+                outfilename,
+                self.font_spec,
+                font_name=self.font_name,
+                font_faces=self.font_faces,
+                subset_characters=subset_characters,
+            )
         self.logger.info("Output: {}".format(outfilename))
 
 

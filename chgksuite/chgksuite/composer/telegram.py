@@ -14,7 +14,13 @@ import requests
 import toml
 from PIL import Image, ImageOps
 
-from chgksuite.common import get_chgksuite_dir, init_logger, load_settings, tryint
+from chgksuite.common import (
+    get_chgksuite_dir,
+    init_logger,
+    load_settings,
+    save_pil_image_as_jpeg,
+    tryint,
+)
 from chgksuite.composer.composer_common import BaseExporter, parseimg
 from chgksuite.composer.telegram_bot import run_bot_in_thread
 
@@ -482,7 +488,7 @@ class TelegramExporter(BaseExporter):
             # Convert to JPG and save with reduced quality if necessary
             quality = 95
             while quality >= 70:
-                img.convert("RGB").save(new_imgfile, "JPEG", quality=quality)
+                save_pil_image_as_jpeg(img, new_imgfile, quality=quality)
                 new_size = os.path.getsize(new_imgfile)
                 if new_size <= 10 * 1024 * 1024:
                     break
@@ -499,8 +505,8 @@ class TelegramExporter(BaseExporter):
                     width = int(width * scale_factor)
                     height = int(height * scale_factor)
                     resized_img = img.resize((width, height), Image.LANCZOS)
-                    resized_img.convert("RGB").save(
-                        new_imgfile, "JPEG", quality=quality
+                    save_pil_image_as_jpeg(
+                        resized_img, new_imgfile, quality=quality
                     )
 
             return new_imgfile
