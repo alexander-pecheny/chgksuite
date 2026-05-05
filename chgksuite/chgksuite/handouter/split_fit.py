@@ -699,7 +699,7 @@ def output_path_for_block(
     if question is None:
         suffix = f"{block.ordinal:02d}"
     else:
-        suffix = f"q{int(question):02d}"
+        suffix = f"q{int(question.split()[0]):02d}"
     candidate = f"{source_stem}_{suffix}.hndt"
     if candidate not in used:
         used.add(candidate)
