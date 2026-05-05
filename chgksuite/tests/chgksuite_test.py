@@ -17,7 +17,12 @@ import xml.etree.ElementTree as ET
 
 import pytest
 import chgksuite.parser as parser_module
-from chgksuite.common import DefaultArgs, image_data_to_jpeg_bytes, read_text_file
+from chgksuite.common import (
+    DefaultArgs,
+    image_data_to_jpeg_bytes,
+    optimize_raster_image_data,
+    read_text_file,
+)
 from chgksuite.composer.chgksuite_parser import parse_4s, replace_counters
 from chgksuite.composer.composer_common import (
     _parse_4s_elem,
@@ -960,6 +965,62 @@ def test_embed_fonts_in_docx_subsets_to_used_characters(tmp_path):
     assert 67 not in cmap
 
 
+def test_embed_fonts_in_pptx_embeds_subset_font_data(tmp_path):
+    import struct
+
+    from fontTools.ttLib import TTFont
+    from pptx import Presentation
+
+    from chgksuite.composer.pptx import embed_fonts_in_pptx
+
+    font_path = tmp_path / "TestEmbed-Regular.ttf"
+    _write_test_ttf(font_path, characters="ABC")
+    pptx_path = tmp_path / "test.pptx"
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    slide.shapes.add_textbox(0, 0, 1000, 1000).text = "AB"
+    prs.save(pptx_path)
+
+    embed_fonts_in_pptx(
+        pptx_path,
+        str(font_path),
+        font_name="Test Embed",
+        subset_characters=set("AB"),
+    )
+
+    with zipfile.ZipFile(pptx_path) as pptx_file:
+        content_types = pptx_file.read("[Content_Types].xml").decode("utf-8")
+        presentation = ET.fromstring(pptx_file.read("ppt/presentation.xml"))
+        rels = ET.fromstring(pptx_file.read("ppt/_rels/presentation.xml.rels"))
+        embedded_font = next(
+            element for element in presentation.iter() if element.tag.endswith("embeddedFont")
+        )
+        font_el = next(element for element in embedded_font if element.tag.endswith("font"))
+        regular_el = next(
+            element for element in embedded_font if element.tag.endswith("regular")
+        )
+        rel_id = regular_el.get(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+        )
+        rel = next(element for element in rels if element.get("Id") == rel_id)
+        eot_data = pptx_file.read("ppt/" + rel.get("Target"))
+
+    eot_size, font_size, version, flags = struct.unpack_from("<IIII", eot_data)
+    assert font_el.get("typeface") == "Test Embed"
+    assert rel.get("Type").endswith("/font")
+    assert "application/x-fontdata" in content_types
+    assert eot_size == len(eot_data)
+    assert version == 0x00020001
+    assert flags == 1
+
+    subset_font = TTFont(BytesIO(eot_data[-font_size:]))
+    cmap = subset_font.getBestCmap()
+    subset_font.close()
+    assert 65 in cmap
+    assert 66 in cmap
+    assert 67 not in cmap
+
+
 def test_optimize_docx_images_recompresses_png_as_jpeg(tmp_path):
     from docx import Document
 
@@ -994,6 +1055,34 @@ def test_optimize_docx_images_recompresses_png_as_jpeg(tmp_path):
     assert 'Target="media/image1.jpg"' in rels
 
 
+def test_optimize_docx_images_preserves_transparent_png(tmp_path):
+    from docx import Document
+
+    image_path = tmp_path / "transparent.png"
+    Image.new("RGBA", (120, 120), (255, 0, 0, 128)).save(
+        image_path, format="PNG", compress_level=0
+    )
+    docx_path = tmp_path / "transparent.docx"
+    doc = Document()
+    doc.add_picture(str(image_path))
+    doc.save(docx_path)
+
+    optimized_parts = optimize_docx_images(docx_path, quality=80)
+
+    with zipfile.ZipFile(docx_path) as docx_file:
+        names = docx_file.namelist()
+        rels = docx_file.read("word/_rels/document.xml.rels").decode("utf-8")
+        image_names = [name for name in names if name.startswith("word/media/")]
+        image_data = docx_file.read(image_names[0])
+
+    assert optimized_parts == {"word/media/image1.png": "word/media/image1.png"}
+    assert image_names == ["word/media/image1.png"]
+    assert not image_data.startswith(b"\xff\xd8")
+    assert 'Target="media/image1.png"' in rels
+    with Image.open(BytesIO(image_data)) as image:
+        assert image.convert("RGBA").getchannel("A").getextrema()[0] < 255
+
+
 def test_image_data_to_jpeg_bytes_flattens_alpha_to_white():
     source = BytesIO()
     Image.new("RGBA", (1, 1), (255, 0, 0, 128)).save(source, format="PNG")
@@ -1004,6 +1093,23 @@ def test_image_data_to_jpeg_bytes_flattens_alpha_to_white():
     assert jpeg_data.startswith(b"\xff\xd8")
     with Image.open(BytesIO(jpeg_data)) as image:
         assert image.mode == "RGB"
+
+
+def test_optimize_raster_image_data_preserves_transparent_png():
+    source = BytesIO()
+    image = Image.new("RGBA", (64, 64), (255, 0, 0, 128))
+    image.save(source, format="PNG", compress_level=0)
+
+    optimized = optimize_raster_image_data(
+        source.getvalue(), original_extension="png", quality=80
+    )
+
+    assert optimized is not None
+    extension, content_type, optimized_data = optimized
+    assert extension == "png"
+    assert content_type == "image/png"
+    with Image.open(BytesIO(optimized_data)) as optimized_image:
+        assert optimized_image.convert("RGBA").getchannel("A").getextrema()[0] < 255
 
 
 def test_docx_exporter_embeds_font_from_font_argument(tmp_path):
@@ -1065,12 +1171,13 @@ def test_docx_cli_accepts_font_and_embed_fonts():
     assert legacy_args.optimize_size == "off"
 
     pptx_args = parser.parse_args(
-        ["compose", "pptx", "--font", "Test PPT", "test.4s"]
+        ["compose", "pptx", "--font", "Test PPT", "--embed_fonts", "on", "test.4s"]
     )
     pptx_no_optimize_args = parser.parse_args(
         ["compose", "pptx", "--optimize_size", "off", "test.4s"]
     )
     assert pptx_args.font == "Test PPT"
+    assert pptx_args.embed_fonts == "on"
     assert pptx_args.optimize_size == "on"
     assert pptx_no_optimize_args.optimize_size == "off"
 
