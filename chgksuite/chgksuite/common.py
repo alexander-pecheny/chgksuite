@@ -10,6 +10,7 @@ import re
 import sys
 import time
 from collections import defaultdict
+from io import BytesIO
 from pathlib import Path
 
 import openpyxl
@@ -163,6 +164,58 @@ def read_text_file(filepath, encoding="utf-8"):
     # Normalize any remaining line endings
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text
+
+
+def pil_image_to_jpeg_bytes(image, quality=80, exif_transpose=False):
+    from PIL import Image, ImageOps
+
+    if exif_transpose:
+        image = ImageOps.exif_transpose(image)
+    if image.mode in ("RGBA", "LA") or (
+        image.mode == "P" and "transparency" in image.info
+    ):
+        image = image.convert("RGBA")
+        background = Image.new("RGBA", image.size, (255, 255, 255, 255))
+        background.alpha_composite(image)
+        image = background.convert("RGB")
+    elif image.mode not in ("RGB", "L"):
+        image = image.convert("RGB")
+
+    output = BytesIO()
+    image.save(output, format="JPEG", quality=quality, optimize=True)
+    return output.getvalue()
+
+
+def image_data_to_jpeg_bytes(image_data, quality=80, exif_transpose=False):
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        with Image.open(BytesIO(image_data)) as image:
+            return pil_image_to_jpeg_bytes(
+                image, quality=quality, exif_transpose=exif_transpose
+            )
+    except (OSError, UnidentifiedImageError):
+        return None
+
+
+def image_file_to_jpeg_bytes(path, quality=80, exif_transpose=True):
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        with Image.open(path) as image:
+            return pil_image_to_jpeg_bytes(
+                image, quality=quality, exif_transpose=exif_transpose
+            )
+    except (OSError, UnidentifiedImageError):
+        return None
+
+
+def save_pil_image_as_jpeg(image, path, quality=80, exif_transpose=False):
+    jpeg_data = pil_image_to_jpeg_bytes(
+        image, quality=quality, exif_transpose=exif_transpose
+    )
+    with open(path, "wb") as output:
+        output.write(jpeg_data)
 
 
 class DummyLogger(object):

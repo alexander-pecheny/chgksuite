@@ -2,12 +2,30 @@
 # -*- coding: utf-8 -*-
 """Tests for handouter layout detection algorithm."""
 
-import pytest
+import os
+import random
 from unittest.mock import Mock
 
+import pytest
+from PIL import Image
+from pypdf import PdfReader, PdfWriter
+from pypdf.generic import (
+    ArrayObject,
+    DecodedStreamObject,
+    DictionaryObject,
+    NameObject,
+    NumberObject,
+)
+
+from chgksuite.handouter import utils as handouter_utils
 from chgksuite.handouter.runner import HandoutGenerator
+from chgksuite.handouter.split_fit import pdf_bottom_space_mm
 from chgksuite.handouter.tex_internals import EDGE_SOLID, EDGE_NONE
-from chgksuite.handouter.utils import parse_handouts, wrap_val
+from chgksuite.handouter.utils import (
+    optimize_raster_image_for_tex,
+    parse_handouts,
+    wrap_val,
+)
 
 
 @pytest.fixture
@@ -27,7 +45,20 @@ def generator():
     args.boxwidth = None
     args.boxwidthinner = None
     args.debug = False
+    args.optimize_images = "on"
     return HandoutGenerator(args)
+
+
+def write_noisy_png(path, size=(96, 96)):
+    rng = random.Random(1)
+    image = Image.new("RGB", size)
+    image.putdata(
+        [
+            (rng.randrange(256), rng.randrange(256), rng.randrange(256))
+            for _ in range(size[0] * size[1])
+        ]
+    )
+    image.save(path, format="PNG")
 
 
 class TestGetCutDirection:
@@ -308,3 +339,187 @@ test"""
         """Invalid grouping value should raise ValueError."""
         with pytest.raises(ValueError, match="Invalid grouping value"):
             wrap_val("grouping", "diagonal")
+
+
+def test_optimize_raster_image_for_tex_recompresses_png(tmp_path):
+    image_path = tmp_path / "handout.png"
+    write_noisy_png(image_path)
+
+    optimized_path = optimize_raster_image_for_tex(str(image_path), quality=80)
+
+    try:
+        assert optimized_path != str(image_path)
+        assert optimized_path.endswith(".jpg")
+        assert (tmp_path / "handout.png").stat().st_size > 0
+        with open(optimized_path, "rb") as optimized:
+            assert optimized.read(2) == b"\xff\xd8"
+        assert os.stat(optimized_path).st_size < image_path.stat().st_size
+    finally:
+        if optimized_path != str(image_path):
+            os.remove(optimized_path)
+
+
+def test_optimize_raster_image_for_tex_skips_vectors(tmp_path):
+    image_path = tmp_path / "handout.svg"
+    image_path.write_text("<svg></svg>", encoding="utf8")
+
+    assert optimize_raster_image_for_tex(str(image_path), quality=80) == str(image_path)
+
+
+def test_optimize_raster_image_for_tex_keeps_smaller_original(tmp_path):
+    image_path = tmp_path / "tiny.png"
+    Image.new("RGB", (1, 1), (255, 255, 255)).save(image_path, format="PNG")
+
+    assert optimize_raster_image_for_tex(str(image_path), quality=80) == str(image_path)
+
+
+def test_recompress_pdf_image_converts_raw_rgb_to_smaller_jpeg():
+    image = Image.new("RGB", (96, 96))
+    rng = random.Random(2)
+    image.putdata(
+        [
+            (rng.randrange(256), rng.randrange(256), rng.randrange(256))
+            for _ in range(96 * 96)
+        ]
+    )
+    raw_data = image.tobytes()
+
+    stream = DecodedStreamObject()
+    stream.set_data(raw_data)
+    stream[NameObject("/Subtype")] = NameObject("/Image")
+    stream[NameObject("/Width")] = NumberObject(96)
+    stream[NameObject("/Height")] = NumberObject(96)
+    stream[NameObject("/BitsPerComponent")] = NumberObject(8)
+    stream[NameObject("/ColorSpace")] = NameObject("/DeviceRGB")
+
+    assert handouter_utils._recompress_pdf_image(stream, quality=80)
+    assert stream["/Filter"] == "/DCTDecode"
+    assert stream["/ColorSpace"] == "/DeviceRGB"
+    assert len(stream._data) < len(raw_data)
+
+
+def test_write_pypdf_compressed_deduplicates_repeated_form_xobjects(tmp_path):
+    source_pdf = tmp_path / "source.pdf"
+    compressed_pdf = tmp_path / "compressed.pdf"
+    writer = PdfWriter()
+
+    for _ in range(2):
+        page = writer.add_blank_page(width=200, height=200)
+        form = DecodedStreamObject()
+        form.set_data(b"0 0 20 20 re f\n")
+        form[NameObject("/Type")] = NameObject("/XObject")
+        form[NameObject("/Subtype")] = NameObject("/Form")
+        form[NameObject("/BBox")] = ArrayObject(
+            [NumberObject(0), NumberObject(0), NumberObject(20), NumberObject(20)]
+        )
+        form_ref = writer._add_object(form)
+        resources_ref = writer._add_object(
+            DictionaryObject(
+                {
+                    NameObject("/XObject"): DictionaryObject(
+                        {NameObject("/Fm0"): form_ref}
+                    )
+                }
+            )
+        )
+        page[NameObject("/Resources")] = resources_ref
+        stream = DecodedStreamObject()
+        stream.set_data(b"q 1 0 0 1 10 10 cm /Fm0 Do Q\n")
+        page[NameObject("/Contents")] = writer._add_object(stream)
+
+    with open(source_pdf, "wb") as output:
+        writer.write(output)
+
+    handouter_utils._write_pypdf_compressed(str(source_pdf), str(compressed_pdf))
+
+    form_refs = []
+    resource_refs = []
+    reader = PdfReader(str(compressed_pdf))
+    for page in reader.pages:
+        resource_refs.append(page.raw_get("/Resources").idnum)
+        xobjects = page["/Resources"].raw_get("/XObject").get_object()
+        form_refs.append(xobjects.raw_get("/Fm0").idnum)
+
+    assert len(set(form_refs)) == 1
+    assert len(set(resource_refs)) == 1
+
+
+def test_handout_generator_uses_optimized_image_path(generator, tmp_path):
+    image_path = tmp_path / "handout.png"
+    write_noisy_png(image_path)
+    generator.input_dir = str(tmp_path)
+
+    tex = generator.generate_regular_block({"image": "handout.png", "columns": 1})
+
+    try:
+        assert "handout.png" not in tex
+        assert any(path.endswith(".jpg") for path in generator._temp_files)
+    finally:
+        for path in generator._temp_files:
+            os.remove(path)
+
+
+def test_handout_generator_can_disable_image_optimization(generator, tmp_path):
+    image_path = tmp_path / "handout.png"
+    write_noisy_png(image_path)
+    generator.optimize_images = False
+
+    tex = generator.generate_regular_block({"image": str(image_path), "columns": 1})
+
+    assert str(image_path) in tex
+    assert not generator._temp_files
+
+
+def test_compress_pdf_keeps_original_when_compressed_file_is_larger(
+    tmp_path, monkeypatch, capsys
+):
+    pdf_path = tmp_path / "handout.pdf"
+    original = b"small pdf"
+    pdf_path.write_bytes(original)
+
+    def fake_write_compressed(input_path, output_path, image_quality=80):
+        assert input_path == str(pdf_path)
+        assert image_quality == 80
+        with open(output_path, "wb") as output:
+            output.write(b"larger compressed pdf")
+
+    monkeypatch.setattr(
+        handouter_utils, "_write_pypdf_compressed", fake_write_compressed
+    )
+    handouter_utils.compress_pdf(str(pdf_path))
+
+    assert pdf_path.read_bytes() == original
+    assert not os.path.exists(str(pdf_path) + ".tmp")
+    assert "skipped" in capsys.readouterr().out
+
+
+def test_compress_pdf_replaces_original_when_compressed_file_is_smaller(
+    tmp_path, monkeypatch
+):
+    pdf_path = tmp_path / "handout.pdf"
+    pdf_path.write_bytes(b"x" * 100)
+
+    def fake_write_compressed(input_path, output_path, image_quality=80):
+        with open(output_path, "wb") as output:
+            output.write(b"small")
+
+    monkeypatch.setattr(
+        handouter_utils, "_write_pypdf_compressed", fake_write_compressed
+    )
+    handouter_utils.compress_pdf(str(pdf_path))
+
+    assert pdf_path.read_bytes() == b"small"
+
+
+def test_pdf_bottom_space_mm_uses_pypdf_content_bbox(tmp_path):
+    pdf_path = tmp_path / "bottom.pdf"
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=200, height=300)
+    stream = DecodedStreamObject()
+    stream.set_data(b"10 20 m 190 20 l S\n")
+    page[NameObject("/Contents")] = writer._add_object(stream)
+
+    with open(pdf_path, "wb") as output:
+        writer.write(output)
+
+    assert pdf_bottom_space_mm(pdf_path) == pytest.approx(20 * 25.4 / 72)

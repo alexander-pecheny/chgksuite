@@ -420,11 +420,35 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdcompose_docx,
+            "--font",
             "--font_face",
-            default=default_overrides.get("font_face") or None,
+            dest="font",
+            default=default_overrides.get("font")
+            or default_overrides.get("font_face")
+            or None,
             help="font face to use in the document.",
             advanced=True,
             caption="Шрифт",
+        )
+        self.add_argument(
+            cmdcompose_docx,
+            "--embed_fonts",
+            choices=["on", "off"],
+            default=default_overrides.get("embed_fonts") or "off",
+            help="embed the selected --font in the DOCX file.",
+            advanced=True,
+            caption="Встроить шрифт",
+            argtype="radiobutton",
+        )
+        self.add_argument(
+            cmdcompose_docx,
+            "--optimize_size",
+            choices=["on", "off"],
+            default=default_overrides.get("optimize_size") or "on",
+            help="recompress images and subset embedded fonts to reduce DOCX size.",
+            advanced=True,
+            caption="Оптимизировать размер",
+            argtype="radiobutton",
         )
         self.add_argument(
             cmdcompose_docx,
@@ -1026,6 +1050,16 @@ class ArgparseBuilder:
             advanced=True,
             argtype="radiobutton",
         )
+        self.add_argument(
+            cmdhandouts_run,
+            "--optimize_images",
+            choices=["on", "off"],
+            default="on",
+            help="recompress raster images before TeX rendering",
+            caption="Сжать растровые картинки перед вёрсткой",
+            advanced=True,
+            argtype="radiobutton",
+        )
         self.add_argument(cmdhandouts_run, "--font", "-f", help="font", caption="Шрифт")
         self.add_argument(
             cmdhandouts_run,
@@ -1168,6 +1202,16 @@ class ArgparseBuilder:
             default="on",
             help="compress final output PDFs",
             caption="Сжать итоговые PDF",
+            advanced=True,
+            argtype="radiobutton",
+        )
+        self.add_argument(
+            cmdhandouts_split_fit,
+            "--optimize_images",
+            choices=["on", "off"],
+            default="on",
+            help="recompress raster images before TeX rendering",
+            caption="Сжать растровые картинки перед вёрсткой",
             advanced=True,
             argtype="radiobutton",
         )

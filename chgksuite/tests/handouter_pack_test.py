@@ -85,3 +85,22 @@ def test_handouts_subcommands_are_in_workflow_order():
         "create_html",
         "html2img",
     ]
+
+
+def test_handouts_optimize_images_cli_defaults_and_override():
+    parser = argparse.ArgumentParser()
+    ArgparseBuilder(parser, False).build()
+
+    hndt_args = parser.parse_args(["handouts", "hndt2pdf", "source.hndt"])
+    split_args = parser.parse_args(["handouts", "split_fit", "source.hndt"])
+    hndt_off_args = parser.parse_args(
+        ["handouts", "hndt2pdf", "--optimize_images", "off", "source.hndt"]
+    )
+    split_off_args = parser.parse_args(
+        ["handouts", "split_fit", "--optimize_images", "off", "source.hndt"]
+    )
+
+    assert hndt_args.optimize_images == "on"
+    assert split_args.optimize_images == "on"
+    assert hndt_off_args.optimize_images == "off"
+    assert split_off_args.optimize_images == "off"
