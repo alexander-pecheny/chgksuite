@@ -30,10 +30,12 @@ from chgksuite.composer.docx import (
     _docx_font_spec,
     _embed_fonts_enabled,
     _ensure_content_type_override,
+    _log_embedding_font_faces,
     _load_xml_part,
     _next_relationship_id,
     _select_font_faces,
     _subset_font_faces,
+    _validate_embedding_font_faces,
     _xml_bytes,
 )
 from pptx import Presentation
@@ -275,12 +277,15 @@ def embed_fonts_in_pptx(
     font_faces=None,
     search_dirs=None,
     subset_characters=None,
+    logger=None,
 ):
     if not font_spec:
         raise ValueError("--embed_fonts=on requires --font.")
 
     font_faces = font_faces or _select_font_faces(font_spec, search_dirs=search_dirs)
     font_name = font_name or _docx_font_name(font_spec, font_faces)
+    _validate_embedding_font_faces(font_faces, font_name)
+    _log_embedding_font_faces(logger, font_name, font_faces)
     subset_tmp_dir = None
     subset = subset_characters is not None
     if subset:
@@ -344,6 +349,7 @@ def embed_fonts_in_pptx(
                 {f"{{{_R_NS}}}id": font_relationships[role]},
             )
 
+        presentation_root.set("embedTrueTypeFonts", "1")
         presentation_root.set("saveSubsetFonts", "1" if subset else "0")
         replacements.update(
             {
@@ -377,6 +383,8 @@ class PptxExporter(BaseExporter):
                 raise ValueError("--embed_fonts=on requires --font.")
             self.font_faces = _select_font_faces(self.font_spec)
         self.font_name = _docx_font_name(self.font_spec, self.font_faces)
+        if _embed_fonts_enabled(self.args):
+            _validate_embedding_font_faces(self.font_faces, self.font_name)
         self._measurement_font_faces = None
         if self.font_name:
             font_cfg = self.c.setdefault("font", {})
@@ -1908,5 +1916,6 @@ class PptxExporter(BaseExporter):
                 font_name=self.font_name,
                 font_faces=self.font_faces,
                 subset_characters=subset_characters,
+                logger=self.logger,
             )
         self.logger.info("Output: {}".format(outfilename))

@@ -32,6 +32,7 @@ from chgksuite.composer.composer_common import (
 )
 from chgksuite.composer.docx import (
     DocxExporter,
+    _select_font_faces,
     add_hyperlink_to_docx,
     add_text_run_to_docx,
     embed_fonts_in_docx,
@@ -901,15 +902,43 @@ def _write_test_ttf(
     builder.save(path)
 
 
+def _write_test_ttf_family(
+    directory,
+    family="Test Embed",
+    characters="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .?!:",
+):
+    styles = {
+        "regular": "Regular",
+        "bold": "Bold",
+        "italic": "Italic",
+        "bold_italic": "Bold Italic",
+    }
+    paths = {}
+    for role, subfamily in styles.items():
+        path = directory / f"{family.replace(' ', '')}-{subfamily.replace(' ', '')}.ttf"
+        _write_test_ttf(path, family=family, subfamily=subfamily, characters=characters)
+        paths[role] = path
+    return paths
+
+
 def test_embed_fonts_in_docx_embeds_obfuscated_regular_font(tmp_path):
     from docx import Document
 
-    font_path = tmp_path / "TestEmbed-Regular.ttf"
-    _write_test_ttf(font_path)
+    font_paths = _write_test_ttf_family(tmp_path)
     docx_path = tmp_path / "test.docx"
+    log_messages = []
     Document().save(docx_path)
 
-    embed_fonts_in_docx(docx_path, str(font_path), font_name="Test Embed")
+    class Logger:
+        def info(self, message):
+            log_messages.append(message)
+
+    embed_fonts_in_docx(
+        docx_path,
+        str(font_paths["regular"]),
+        font_name="Test Embed",
+        logger=Logger(),
+    )
 
     with zipfile.ZipFile(docx_path) as docx_file:
         content_types = docx_file.read("[Content_Types].xml").decode("utf-8")
@@ -946,21 +975,22 @@ def test_embed_fonts_in_docx_embeds_obfuscated_regular_font(tmp_path):
     key = uuid.UUID(font_key.strip("{}")).bytes[::-1]
     for index in range(32):
         deobfuscated[index] ^= key[index % len(key)]
-    assert bytes(deobfuscated[:32]) == font_path.read_bytes()[:32]
+    assert bytes(deobfuscated[:32]) == font_paths["regular"].read_bytes()[:32]
+    assert str(font_paths["regular"]) in log_messages[0]
+    assert str(font_paths["bold"]) in log_messages[0]
 
 
 def test_embed_fonts_in_docx_subsets_to_used_characters(tmp_path):
     from docx import Document
     from fontTools.ttLib import TTFont
 
-    font_path = tmp_path / "TestEmbed-Regular.ttf"
-    _write_test_ttf(font_path, characters="ABC")
+    font_paths = _write_test_ttf_family(tmp_path, characters="ABC")
     docx_path = tmp_path / "test.docx"
     Document().save(docx_path)
 
     embed_fonts_in_docx(
         docx_path,
-        str(font_path),
+        str(font_paths["regular"]),
         font_name="Test Embed",
         subset_characters=set("AB"),
     )
@@ -1004,8 +1034,7 @@ def test_embed_fonts_in_pptx_embeds_subset_font_data(tmp_path):
 
     from chgksuite.composer.pptx import embed_fonts_in_pptx
 
-    font_path = tmp_path / "TestEmbed-Regular.ttf"
-    _write_test_ttf(font_path, characters="ABC")
+    font_paths = _write_test_ttf_family(tmp_path, characters="ABC")
     pptx_path = tmp_path / "test.pptx"
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1014,7 +1043,7 @@ def test_embed_fonts_in_pptx_embeds_subset_font_data(tmp_path):
 
     embed_fonts_in_pptx(
         pptx_path,
-        str(font_path),
+        str(font_paths["regular"]),
         font_name="Test Embed",
         subset_characters=set("AB"),
     )
@@ -1037,6 +1066,8 @@ def test_embed_fonts_in_pptx_embeds_subset_font_data(tmp_path):
         eot_data = pptx_file.read("ppt/" + rel.get("Target"))
 
     eot_size, font_size, version, flags = struct.unpack_from("<IIII", eot_data)
+    assert presentation.get("embedTrueTypeFonts") == "1"
+    assert presentation.get("saveSubsetFonts") == "1"
     assert font_el.get("typeface") == "Test Embed"
     assert rel.get("Type").endswith("/font")
     assert "application/x-fontdata" in content_types
@@ -1050,6 +1081,62 @@ def test_embed_fonts_in_pptx_embeds_subset_font_data(tmp_path):
     assert 65 in cmap
     assert 66 in cmap
     assert 67 not in cmap
+
+
+def test_embed_fonts_require_complete_truetype_family(tmp_path):
+    from docx import Document
+
+    font_path = tmp_path / "TestEmbed-Regular.ttf"
+    _write_test_ttf(font_path)
+    docx_path = tmp_path / "test.docx"
+    Document().save(docx_path)
+
+    with pytest.raises(ValueError, match="Missing styles: bold, italic, bold_italic"):
+        embed_fonts_in_docx(docx_path, str(font_path), font_name="Test Embed")
+
+
+def test_embed_fonts_reject_non_truetype_styles(tmp_path, monkeypatch):
+    from docx import Document
+
+    font_paths = _write_test_ttf_family(tmp_path)
+    docx_path = tmp_path / "test.docx"
+    Document().save(docx_path)
+    bold_path = os.path.abspath(font_paths["bold"])
+
+    def fake_has_truetype_outlines(path):
+        return os.path.abspath(path) != bold_path
+
+    monkeypatch.setattr(
+        "chgksuite.composer.docx._font_has_truetype_outlines",
+        fake_has_truetype_outlines,
+    )
+
+    with pytest.raises(ValueError, match="Non-TrueType styles: bold="):
+        embed_fonts_in_docx(
+            docx_path,
+            str(font_paths["regular"]),
+            font_name="Test Embed",
+        )
+
+
+def test_select_font_faces_prefers_complete_truetype_family_from_one_directory(tmp_path):
+    split_dir = tmp_path / "a_split"
+    complete_dir = tmp_path / "z_complete"
+    split_dir.mkdir()
+    complete_dir.mkdir()
+    _write_test_ttf(split_dir / "TestEmbed-Regular.ttf", subfamily="Regular")
+    _write_test_ttf(split_dir / "TestEmbed-Italic.ttf", subfamily="Italic")
+    font_paths = _write_test_ttf_family(complete_dir)
+
+    selected = _select_font_faces(
+        "Test Embed",
+        search_dirs=[str(complete_dir), str(split_dir)],
+    )
+
+    assert selected["regular"].path == str(font_paths["regular"])
+    assert selected["bold"].path == str(font_paths["bold"])
+    assert selected["italic"].path == str(font_paths["italic"])
+    assert selected["bold_italic"].path == str(font_paths["bold_italic"])
 
 
 def test_optimize_docx_images_recompresses_png_as_jpeg(tmp_path):
@@ -1144,13 +1231,12 @@ def test_optimize_raster_image_data_preserves_transparent_png():
 
 
 def test_docx_exporter_embeds_font_from_font_argument(tmp_path):
-    font_path = tmp_path / "TestEmbed-Regular.ttf"
-    _write_test_ttf(font_path)
+    font_paths = _write_test_ttf_family(tmp_path)
     output_path = tmp_path / "exported.docx"
     args = DefaultArgs(
         docx_template=os.path.join(parentdir, "chgksuite", "resources", "template.docx"),
         embed_fonts="on",
-        font=str(font_path),
+        font=str(font_paths["regular"]),
         game="chgk",
         regexes_file=os.path.join(parentdir, "chgksuite", "resources", "regexes_ru.json"),
         spoilers="off",

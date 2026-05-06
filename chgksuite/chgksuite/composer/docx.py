@@ -63,6 +63,7 @@ _FONT_EMBED_TAGS = {
     "italic": "embedItalic",
     "bold_italic": "embedBoldItalic",
 }
+_REQUIRED_EMBED_FONT_ROLES = ("regular", "bold", "italic", "bold_italic")
 _EMBEDDABLE_FONT_EXTENSIONS = {".ttf", ".otf"}
 _WORD_TEXT_TAGS = {
     f"{{{_W_NS}}}t",
@@ -208,8 +209,21 @@ def _font_embedding_restricted(font_data, font_offset=0):
     return bool(fs_type & 0x0002)
 
 
+def _font_has_truetype_outlines(font_path):
+    with open(font_path, "rb") as font_file:
+        font_data = font_file.read()
+    table_records = _font_table_records(font_data)
+    return "glyf" in table_records and "loca" in table_records
+
+
+def _font_outline_priority(face):
+    return 0 if _font_has_truetype_outlines(face.path) else 1
+
+
 def _font_face_role(subfamily, full_name, path):
-    style_source = subfamily or full_name or os.path.splitext(os.path.basename(path))[0]
+    style_source = " ".join(
+        filter(None, (subfamily, full_name, os.path.splitext(os.path.basename(path))[0]))
+    )
     style = _normalize_font_name(style_source)
     compact_style = style.replace(" ", "")
     tokens = set(style.split())
@@ -324,7 +338,24 @@ def _font_face_matches(face, font_name):
 def _find_font_faces(font_spec, search_dirs=None):
     expanded_font_spec = os.path.abspath(os.path.expanduser(font_spec))
     if os.path.isfile(expanded_font_spec):
-        return _font_faces_from_file(expanded_font_spec)
+        direct_faces = _font_faces_from_file(expanded_font_spec)
+        if not direct_faces:
+            return []
+        family = direct_faces[0].family
+        faces = list(direct_faces)
+        seen = {face.path for face in faces}
+        for font_path in _iter_font_files([os.path.dirname(expanded_font_spec)]):
+            if os.path.abspath(font_path) in seen:
+                continue
+            try:
+                file_faces = _font_faces_from_file(font_path)
+            except (OSError, ValueError, struct.error):
+                continue
+            for face in file_faces:
+                if _font_face_matches(face, family):
+                    faces.append(face)
+                    seen.add(face.path)
+        return faces
 
     faces = []
     for font_path in _iter_font_files(search_dirs):
@@ -337,13 +368,84 @@ def _find_font_faces(font_spec, search_dirs=None):
 
 
 def _font_role_priority(face, role):
-    style = _normalize_font_name(face.subfamily)
+    style = _normalize_font_name(
+        " ".join(
+            filter(
+                None,
+                (
+                    face.subfamily,
+                    face.full_name,
+                    os.path.splitext(os.path.basename(face.path))[0],
+                ),
+            )
+        )
+    )
+    tokens = set(style.split())
+    weight_tokens = {
+        "black",
+        "bold",
+        "demibold",
+        "extrabold",
+        "heavy",
+        "medium",
+        "semibold",
+    }
     if role == "regular":
-        if style in {"regular", "book", "roman", "normal"}:
+        if tokens & {"regular", "book", "roman", "normal"} and not (
+            tokens & weight_tokens
+        ):
             return 0
         if not style:
             return 1
     return 2
+
+
+def _select_role_faces(faces):
+    selected = {}
+    for role in _REQUIRED_EMBED_FONT_ROLES:
+        role_faces = [face for face in faces if face.role == role]
+        if role_faces:
+            selected[role] = sorted(
+                role_faces,
+                key=lambda face: (
+                    _font_role_priority(face, role),
+                    _font_outline_priority(face),
+                    face.path,
+                ),
+            )[0]
+
+    if "regular" not in selected and faces:
+        selected["regular"] = sorted(
+            faces, key=lambda face: (_font_outline_priority(face), face.path)
+        )[0]
+    return selected
+
+
+def _complete_truetype_face_set(faces):
+    truetype_faces = [face for face in faces if _font_has_truetype_outlines(face.path)]
+    selected = _select_role_faces(truetype_faces)
+    for role in _REQUIRED_EMBED_FONT_ROLES:
+        face = selected.get(role)
+        if face is None or face.role != role:
+            return None
+    return selected
+
+
+def _complete_truetype_face_set_from_one_directory(faces):
+    directories = []
+    faces_by_directory = {}
+    for face in faces:
+        directory = os.path.dirname(face.path)
+        if directory not in faces_by_directory:
+            directories.append(directory)
+            faces_by_directory[directory] = []
+        faces_by_directory[directory].append(face)
+
+    for directory in directories:
+        selected = _complete_truetype_face_set(faces_by_directory[directory])
+        if selected is not None:
+            return selected
+    return None
 
 
 def _select_font_faces(font_spec, search_dirs=None):
@@ -360,17 +462,48 @@ def _select_font_faces(font_spec, search_dirs=None):
             "Font license forbids embedding: {}".format(", ".join(sorted(restricted)))
         )
 
-    selected = {}
-    for role in ("regular", "bold", "italic", "bold_italic"):
-        role_faces = [face for face in faces if face.role == role]
-        if role_faces:
-            selected[role] = sorted(
-                role_faces, key=lambda face: (_font_role_priority(face, role), face.path)
-            )[0]
+    return _complete_truetype_face_set_from_one_directory(faces) or _select_role_faces(faces)
 
-    if "regular" not in selected:
-        selected["regular"] = faces[0]
-    return selected
+
+def _validate_embedding_font_faces(font_faces, font_name=None):
+    missing_roles = []
+    non_truetype_faces = []
+    for role in _REQUIRED_EMBED_FONT_ROLES:
+        face = font_faces.get(role)
+        if face is None or face.role != role:
+            missing_roles.append(role)
+            continue
+        if not _font_has_truetype_outlines(face.path):
+            non_truetype_faces.append((role, face.path))
+
+    if missing_roles or non_truetype_faces:
+        parts = [
+            "Font embedding requires a complete TrueType-outline (.ttf) family "
+            "with regular, bold, italic, and bold_italic styles."
+        ]
+        if font_name:
+            parts.append(f"Font: {font_name}.")
+        if missing_roles:
+            parts.append("Missing styles: {}.".format(", ".join(missing_roles)))
+        if non_truetype_faces:
+            parts.append(
+                "Non-TrueType styles: {}.".format(
+                    ", ".join(
+                        f"{role}={path}" for role, path in non_truetype_faces
+                    )
+                )
+            )
+        raise ValueError(" ".join(parts))
+    return font_faces
+
+
+def _log_embedding_font_faces(logger, font_name, font_faces):
+    if logger is None:
+        return
+    face_paths = ", ".join(
+        f"{role}={font_faces[role].path}" for role in _REQUIRED_EMBED_FONT_ROLES
+    )
+    logger.info(f"Embedding font '{font_name}': {face_paths}")
 
 
 def _docx_font_spec(args):
@@ -581,12 +714,15 @@ def embed_fonts_in_docx(
     font_faces=None,
     search_dirs=None,
     subset_characters=None,
+    logger=None,
 ):
     if not font_spec:
         raise ValueError("--embed_fonts=on requires --font.")
 
     font_faces = font_faces or _select_font_faces(font_spec, search_dirs=search_dirs)
     font_name = font_name or _docx_font_name(font_spec, font_faces)
+    _validate_embedding_font_faces(font_faces, font_name)
+    _log_embedding_font_faces(logger, font_name, font_faces)
     subset_tmp_dir = None
     if subset_characters is not None:
         subset_tmp_dir = tempfile.TemporaryDirectory()
@@ -1240,6 +1376,8 @@ class DocxExporter(BaseExporter):
                 raise ValueError("--embed_fonts=on requires --font.")
             self.font_faces = _select_font_faces(self.font_spec)
         self.font_name = _docx_font_name(self.font_spec, self.font_faces)
+        if _embed_fonts_enabled(self.args):
+            _validate_embedding_font_faces(self.font_faces, self.font_name)
 
         if self.font_name:
             self.args.docx_template = replace_font_in_docx(
@@ -1483,6 +1621,7 @@ class DocxExporter(BaseExporter):
                 font_name=self.font_name,
                 font_faces=self.font_faces,
                 subset_characters=subset_characters,
+                logger=self.logger,
             )
         self.logger.info("Output: {}".format(outfilename))
 

@@ -266,6 +266,10 @@ def test_pptx_exporter_embeds_fonts_when_enabled(tmp_path, monkeypatch):
         "chgksuite.composer.pptx._select_font_faces",
         lambda font_spec: {"regular": SimpleNamespace(family="Test Embed")},
     )
+    monkeypatch.setattr(
+        "chgksuite.composer.pptx._validate_embedding_font_faces",
+        lambda font_faces, font_name=None: font_faces,
+    )
     monkeypatch.setattr("chgksuite.composer.pptx.embed_fonts_in_pptx", fake_embed)
     _export_pptx(
         tmp_path,
