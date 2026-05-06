@@ -1309,6 +1309,49 @@ def test_handout_image_scale_and_spacing_apply_to_question_slide(tmp_path):
     assert question_shape.top == picture.top + picture.height + PptxPt(24)
 
 
+def test_inline_images_render_without_driving_pptx_image_layout(tmp_path):
+    image_path = tmp_path / "inline.png"
+    Image.new("RGB", (64, 64), "white").save(image_path)
+
+    prs = _export_pptx(
+        tmp_path,
+        [
+            ("heading", "Тестовый пакет"),
+            (
+                "Question",
+                {
+                    "question": (
+                        f"Вопрос с (img inline=1 w=0.25in {image_path.name}) "
+                        "маленькой картинкой."
+                    ),
+                    "answer": (
+                        f"Ответ с (img inline=1 w=0.25in {image_path.name}) "
+                        "маленькой картинкой."
+                    ),
+                },
+            ),
+        ],
+        config_updates={"add_plug": False},
+    )
+
+    picture_shapes = [
+        shape for slide in prs.slides for shape in slide.shapes if shape.shape_type == 13
+    ]
+    question_shape = next(
+        shape
+        for shape in prs.slides[1].shapes
+        if hasattr(shape, "text_frame") and "Вопрос с" in shape.text
+    )
+    slide_text = "\n".join(_slide_text(slide) for slide in prs.slides)
+
+    assert len(picture_shapes) == 2
+    assert question_shape.left == PptxInches(0.8)
+    assert question_shape.top == PptxInches(0.8)
+    assert "(img" not in slide_text
+    assert "Вопрос с" in slide_text
+    assert "Ответ с" in slide_text
+
+
 def test_overlay_image_and_text_keeps_textbox_on_base_rect(tmp_path):
     image_path = ROOT / "tests" / "test.jpg"
     prs = _export_pptx(

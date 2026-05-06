@@ -789,7 +789,11 @@ def test_inline_image():
     with make_temp_directory(dir=".") as temp_dir:
         shutil.copy(os.path.join(currentdir, "test.jpg"), temp_dir)
         img_parsed = parseimg(img[0][1], tmp_dir=temp_dir)
+        img_parsed_inline_value = parseimg("inline=1 test.jpg", tmp_dir=temp_dir)
     assert img_parsed["inline"]
+    assert img_parsed_inline_value["inline"]
+    assert img_parsed_inline_value["width"] > 0
+    assert img_parsed_inline_value["height"] > 0
     assert os.path.basename(img_parsed["imgfile"]) == "test.jpg"
     assert compose_4s(structure, DefaultArgs()).strip() == TEST_INLINE_IMAGE.strip()
 
@@ -1002,6 +1006,75 @@ def test_docx_screen_mode_preserves_zachet_brackets(tmp_path):
     assert "Незачет." in text
     assert "Комментарий." in text
     assert "[убрать]" not in text
+
+
+def test_docx_block_images_clear_question_space_before(tmp_path):
+    import xml.etree.ElementTree as ET
+
+    image_path = tmp_path / "image.png"
+    Image.new("RGB", (800, 200), "white").save(image_path)
+    output_path = tmp_path / "images.docx"
+    args = DefaultArgs(
+        docx_template=os.path.join(parentdir, "chgksuite", "resources", "template.docx"),
+        game="chgk",
+        regexes_file=os.path.join(parentdir, "chgksuite", "resources", "regexes_ru.json"),
+        optimize_size="off",
+        spoilers="off",
+        screen_mode="off",
+    )
+    exporter = DocxExporter(
+        parse_4s(
+            f"? Plain question\n! Plain answer\n\n"
+            f"? (img {image_path.name})\nImage question\n"
+            f"! Image answer (img inline=1 w=0.25in {image_path.name})",
+            game="chgk",
+        ),
+        args,
+        {"tmp_dir": str(tmp_path), "targetdir": str(tmp_path)},
+    )
+    exporter.export(output_path)
+
+    w_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    w = f"{{{w_ns}}}"
+
+    def paragraph_text(paragraph):
+        return "".join(node.text or "" for node in paragraph.findall(f".//{w}t"))
+
+    def spacing_before(paragraph):
+        spacing = paragraph.find(f"{w}pPr/{w}spacing")
+        if spacing is None:
+            return None
+        return spacing.attrib.get(f"{w}before")
+
+    def paragraph_starts_with_break(paragraph):
+        for child in paragraph:
+            if child.tag == f"{w}pPr":
+                continue
+            return child.find(f"{w}br") is not None
+        return False
+
+    with zipfile.ZipFile(output_path) as docx_file:
+        root = ET.fromstring(docx_file.read("word/document.xml"))
+
+    paragraphs = root.findall(f".//{w}body/{w}p")
+    plain_question = next(
+        paragraph
+        for paragraph in paragraphs
+        if paragraph_text(paragraph).startswith("Вопрос 1. Plain question")
+    )
+    image_question = next(
+        paragraph for paragraph in paragraphs if paragraph.find(f".//{w}drawing") is not None
+    )
+    image_answer = next(
+        paragraph
+        for paragraph in paragraphs
+        if paragraph_text(paragraph).startswith("Ответ: Image answer")
+    )
+
+    assert spacing_before(plain_question) == "360"
+    assert spacing_before(image_question) is None
+    assert paragraph_starts_with_break(image_question)
+    assert spacing_before(image_answer) == "120"
 
 
 def test_docx_cli_accepts_font():
