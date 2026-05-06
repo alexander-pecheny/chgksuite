@@ -468,6 +468,30 @@ def add_hyperlink_to_docx(doc, paragraph, text, url):
     return hyperlink
 
 
+def paragraph_starts_with_line_break(paragraph):
+    for child in paragraph._p:
+        if child.tag == qn("w:pPr"):
+            continue
+        if child.tag != qn("w:r"):
+            return False
+        for run_child in child:
+            if run_child.tag == qn("w:br"):
+                return True
+            if run_child.tag in (qn("w:t"), qn("w:drawing"), qn("w:pict")):
+                return False
+        return False
+    return False
+
+
+def prepend_line_break_to_paragraph(paragraph):
+    if paragraph_starts_with_line_break(paragraph):
+        return
+    run = OxmlElement("w:r")
+    run.append(OxmlElement("w:br"))
+    insert_index = 1 if paragraph._p.pPr is not None else 0
+    paragraph._p.insert(insert_index, run)
+
+
 def format_docx_element(
     doc,
     el,
@@ -645,6 +669,11 @@ def format_docx_element(
                 if inline:
                     r = para.add_run("")
                 else:
+                    # Word for Windows can misplace block images at the top of
+                    # a page when the containing paragraph has space-before.
+                    if para.paragraph_format.space_before is not None:
+                        prepend_line_break_to_paragraph(para)
+                    para.paragraph_format.space_before = None
                     r = para.add_run("" if at_line_start else "\n")
 
                 try:

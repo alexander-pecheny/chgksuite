@@ -80,6 +80,7 @@ class PptxExporter(BaseExporter):
             if "heading_name" in font_cfg:
                 font_cfg["heading_name"] = self.font_name
         self.qcount = 0
+        self._pending_inline_images = []
         hs = self.labels["question_labels"]["handout"]
         self.re_handout_1 = re.compile(
             "\\[" + hs + ".(?P<body>.+?)\\]", flags=re.DOTALL
@@ -491,6 +492,9 @@ class PptxExporter(BaseExporter):
             return 0
         return value / _EMU_PER_INCH * _PX_PER_INCH
 
+    def _px_to_emu(self, value):
+        return int(value / _PX_PER_INCH * _EMU_PER_INCH)
+
     def _effective_paragraph_size(self, paragraph):
         if paragraph.font.size:
             return paragraph.font.size.pt
@@ -542,6 +546,12 @@ class PptxExporter(BaseExporter):
                 return None
             total += width
         return total
+
+    def _token_width_px_or_estimate(self, paragraph, run, text):
+        width = self._token_width_px(paragraph, [(run, text)])
+        if width is not None:
+            return width
+        return len(text) * self._pt_to_px(self._effective_run_size(run, paragraph)) * 0.35
 
     def _run_can_break_like_url(self, run, text):
         hyperlink = getattr(run, "hyperlink", None)
@@ -778,6 +788,98 @@ class PptxExporter(BaseExporter):
         image["height"] *= scale
         return image
 
+    def _inline_image_placeholder_text(self, paragraph, width):
+        font_size = self._effective_paragraph_size(paragraph)
+        space_width = self._text_width_px("\u00a0", font_size)
+        if space_width is None:
+            space_width = self._pt_to_px(font_size) * 0.35
+        return "\u00a0" * max(1, round(width * _PX_PER_INCH / max(space_width, 1)))
+
+    def _normalize_inline_image_size(self, image, spec):
+        if re.search(r"(?:^|\s)[wh]=", spec):
+            return image
+        height = 1 / 6
+        image = dict(image)
+        image["width"] = image["width"] * (height / image["height"])
+        image["height"] = height
+        return image
+
+    def _add_inline_image(self, para, slide, image, spec):
+        image = self._normalize_inline_image_size(image, spec)
+        placeholder = self._inline_image_placeholder_text(para, image["width"])
+        run = self.add_run(para, placeholder)
+        self._pending_inline_images.append(
+            {
+                "paragraph_id": id(para._p),
+                "placeholder": placeholder,
+                "image": image,
+                "slide": slide,
+            }
+        )
+        return run
+
+    def _fallback_paragraph_layout_lines(self, paragraph):
+        return [
+            [(run, text) for run, text, _breakable_space in line]
+            for line in self._split_runs_for_wrapping(paragraph)
+        ]
+
+    def _place_inline_images(self, textbox, slide):
+        entries = [
+            entry
+            for entry in self._pending_inline_images
+            if entry["slide"] is slide
+        ]
+        if not entries:
+            return
+        self._pending_inline_images = [
+            entry
+            for entry in self._pending_inline_images
+            if entry["slide"] is not slide
+        ]
+        entries_by_paragraph = {}
+        for entry in entries:
+            entries_by_paragraph.setdefault(entry["paragraph_id"], []).append(entry)
+
+        margin_left = textbox.text_frame.margin_left or 0
+        margin_top = textbox.text_frame.margin_top or 0
+        origin_x = self._length_to_px(margin_left)
+        y = self._length_to_px(margin_top)
+        max_width = self._textbox_inner_width_px(textbox) * 0.99
+
+        for paragraph in textbox.text_frame.paragraphs:
+            y += self._length_to_px(paragraph.space_before)
+            paragraph_entries = entries_by_paragraph.get(id(paragraph._p), [])
+            layout = self._paragraph_layout_lines(paragraph, max_width)
+            lines = (
+                self._fallback_paragraph_layout_lines(paragraph)
+                if layout is None
+                else layout[0]
+            )
+            for line in lines:
+                x = origin_x
+                line_height = self._paragraph_line_height_px(paragraph, line)
+                for run, text in line:
+                    for entry in paragraph_entries:
+                        if entry.get("placed") or entry["placeholder"] != text:
+                            continue
+                        entry["placed"] = True
+                        image = entry["image"]
+                        image_height_px = image["height"] * _PX_PER_INCH
+                        entry["slide"].shapes.add_picture(
+                            image["imgfile"],
+                            left=textbox.left + self._px_to_emu(x),
+                            top=textbox.top
+                            + self._px_to_emu(
+                                y + max(0, (line_height - image_height_px) / 2)
+                            ),
+                            width=PptxInches(image["width"]),
+                            height=PptxInches(image["height"]),
+                        )
+                    x += self._token_width_px_or_estimate(paragraph, run, text)
+                y += line_height
+            y += self._length_to_px(paragraph.space_after)
+
     def _prepare_text_frame(self, text_frame):
         text_frame.word_wrap = True
         text_frame.auto_size = MSO_AUTO_SIZE.NONE
@@ -940,7 +1042,14 @@ class PptxExporter(BaseExporter):
                     self.add_hyperlink_runs(para, run[1], run[1])
 
                 elif run[0] == "img":
-                    pass  # image processing is moved to other places
+                    parsed_image = parseimg(
+                        run[1],
+                        dimensions="inches",
+                        tmp_dir=self.dir_kwargs.get("tmp_dir"),
+                        targetdir=self.dir_kwargs.get("targetdir"),
+                    )
+                    if parsed_image["inline"]:
+                        self._add_inline_image(para, slide, parsed_image, run[1])
 
                 else:
                     self._add_styled_runs(para, r_sp(run[1]), run[0])
@@ -1092,6 +1201,7 @@ class PptxExporter(BaseExporter):
                 )
                 add_line_break = True
         self._custom_shrink_textbox(textbox)
+        self._place_inline_images(textbox, slide)
 
     def process_buffer(self, buffer):
         heading_block = []
@@ -1235,6 +1345,8 @@ class PptxExporter(BaseExporter):
                         tmp_dir=self.dir_kwargs.get("tmp_dir"),
                         targetdir=self.dir_kwargs.get("targetdir"),
                     )
+                    if parsed_image["inline"]:
+                        continue
                     parsed_image["handout"] = bool(
                         handout_match and run[1] in handout_match.group(0)
                     )
@@ -1411,6 +1523,7 @@ class PptxExporter(BaseExporter):
             )
         self.pptx_format(question_text, p, tf, slide, blank_lines_between_items=True)
         self._custom_shrink_textbox(textbox)
+        self._place_inline_images(textbox, slide)
 
     def recursive_join(self, s):
         if isinstance(s, str):
@@ -1436,6 +1549,7 @@ class PptxExporter(BaseExporter):
         self._set_paragraph_alignment(p, handout_cfg.get("align"))
         self.pptx_format(handout_text, p, tf, slide)
         self._custom_shrink_textbox(textbox)
+        self._place_inline_images(textbox, slide)
 
     def process_question_text(self, q):
         image = self._get_image_from_4s(q["question"])
@@ -1531,6 +1645,7 @@ class PptxExporter(BaseExporter):
             r.font.bold = True
             self.pptx_format(author_text, p, tf, slide)
         self._custom_shrink_textbox(textbox)
+        self._place_inline_images(textbox, slide)
 
     def process_question(self, q):
         if "number" not in q:

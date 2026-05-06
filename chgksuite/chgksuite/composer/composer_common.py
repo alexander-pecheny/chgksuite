@@ -159,6 +159,10 @@ def parse_single_size(ssize, dpi=120, emsize=25):
     return float(ssize)
 
 
+def parse_bool_option(value):
+    return value.lower() not in {"0", "false", "no", "off"}
+
+
 def parseimg(s, dimensions="pixels", tmp_dir=None, targetdir=None):
     width = -1
     height = -1
@@ -174,6 +178,11 @@ def parseimg(s, dimensions="pixels", tmp_dir=None, targetdir=None):
     if "inline" in sp:
         inline = True
         sp = [x for x in sp if x != "inline"]
+    for option in list(sp[:-1]):
+        key, separator, value = option.partition("=")
+        if key == "inline" and separator:
+            inline = parse_bool_option(value)
+            sp.remove(option)
 
     if len(sp) == 1:
         width, height = convert_size(*size, dimensions=dimensions)
