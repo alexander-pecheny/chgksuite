@@ -11,3 +11,4 @@ dist
 tmp*
 tests_password.txt
 .tmp
+.vscode
