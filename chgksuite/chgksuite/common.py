@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 import argparse
 import csv
-import itertools
 import json
 import logging
 import os
@@ -628,7 +627,12 @@ def xlsx_to_results(xlsx_file_path):
                 if tryint(element) in (1, 0):
                     mask.append(str(element))
                 else:
-                    mask.append("0")
+                    print(
+                        f"Неожиданное значение в расплюсовке (возможно, в турнире "
+                        f"остаются спорные ответы): значение={element!r}, "
+                        f"команда={team_name!r}, путь={xlsx_file_path}."
+                    )
+                    return []
         results.append(
             {
                 "team": {"id": team_id},
@@ -643,12 +647,33 @@ def custom_csv_to_results(csv_file_path, **kwargs):
     results = []
     with open(csv_file_path, encoding="utf8") as f:
         reader = csv.reader(f, **kwargs)
-        for row in itertools.islice(reader, 1, None):
+        try:
+            # Use the header to validate the format of the file.
+            header = next(reader)
+        except StopIteration:
+            print(f"Файл CSV пуст: путь={csv_file_path}")
+            return []
+        col3 = header[3] if len(header) > 3 else ""
+        if not col3 or col3 == "Тур":
+            print(
+                f"CSV файл неправильного формата, ожидается таблица без разбиения на туры: "
+                f"путь={csv_file_path}."
+            )
+            return []
+        for row_no, row in enumerate(reader):
             val = {
                 "team": {"id": tryint(row[0])},
                 "current": {"name": row[1]},
                 "mask": "".join(row[3:]),
             }
+            bad = next((cell for cell in row[3:] if cell not in ("0", "1")), None)
+            if bad is not None:
+                print(
+                    f"Неожиданное значение в расплюсовке (возможно, в турнире "
+                    f"остаются спорные ответы): значение={bad!r}, строка={row_no+2}, "
+                    f"команда={val['current']['name']!r}, путь={csv_file_path}."
+                )
+                return []
             results.append(val)
     return results
 
