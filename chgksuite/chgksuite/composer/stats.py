@@ -76,10 +76,12 @@ class StatsAdder(BaseExporter):
             for filename in filenames:
                 if filename.lower().endswith(".csv"):
                     results = custom_csv_to_results(
-                        filename, **json.loads(self.args.custom_csv_args)
+                        filename,
+                        logger=self.logger,
+                        **json.loads(self.args.custom_csv_args),
                     )
                 elif filename.lower().endswith(".xlsx"):
-                    results = xlsx_to_results(filename)
+                    results = xlsx_to_results(filename, logger=self.logger)
                 self.process_tournament(results)
         qnumber = 1
         for element in self.structure:
