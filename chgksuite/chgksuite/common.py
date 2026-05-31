@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 import argparse
 import csv
-import itertools
 import json
 import logging
 import os
@@ -584,51 +583,85 @@ def tryint(s):
         return
 
 
-def xlsx_to_results(xlsx_file_path):
-    wb = openpyxl.load_workbook(xlsx_file_path, data_only=True)
-    sheet = wb.active
-    first = True
+def _results_table_to_masks(rows, logger=None, source=""):
+    """Convert a rating.chgk.info "вопросная таблица" into per-team results.
+
+    ``rows`` is any iterable of rows, where each row is a sequence of cell
+    values (as produced by ``csv.reader`` or ``openpyxl``'s ``iter_rows``). Both
+    layouts the rating site exports are supported:
+
+    * "full" -- one row per team: ``id, name, city, q1, q2, ...``
+    * "tour" -- one row per team per tour, with a "Тур" column:
+      ``id, name, city, tour, q1, q2, ...``
+
+    Leading blank rows (and a UTF-8 BOM, for CSV) are skipped. Unexpected or
+    disputed cell values (anything that is not 0/1, e.g. unresolved
+    controversials) are counted as not taken and reported via ``logger`` instead
+    of aborting.
+
+    Returns a list of ``{"team": {"id": ...}, "current": {"name": ...},
+    "mask": "0101..."}`` dicts.
+    """
+    logger = logger or DummyLogger()
     res_by_tour = defaultdict(lambda: defaultdict(list))
     tour_len = defaultdict(lambda: 0)
-    for row in sheet.iter_rows(values_only=True):
-        if not any(x for x in row):
+    table_type = None
+    disputed = []
+    for row in rows:
+        if not any(cell not in (None, "") for cell in row):
             continue
-        if first:
-            assert row[1] == "Название"
-            if row[3] == "Тур":
-                table_type = "tour"
-            elif row[3] in ("1", 1):
-                table_type = "full"
-            first = False
+        if table_type is None:
+            # Locate the header row (the one labelling the "Название" column),
+            # skipping any leading blank/garbage rows.
+            if len(row) > 1 and str(row[1]).strip() == "Название":
+                table_type = "tour" if (len(row) > 3 and row[3] == "Тур") else "full"
             continue
-        team_id = row[0]
-        if not tryint(team_id):
+        team_id = tryint(row[0])
+        if team_id is None:
             continue
         team_name = row[1]
         if table_type == "tour":
-            tour = row[3]
-            results = [x if x is not None else 0 for x in row[4:]]
+            tour = tryint(row[3]) or 0
+            raw = row[4:]
         else:
             tour = 1
-            results = [x if x is not None else 0 for x in row[3:]]
-        rlen = len(results)
-        tour_len[tour] = max(tour_len[tour], rlen)
-        res_by_tour[(team_id, team_name)][tour] = results
-    results = []
+            raw = row[3:]
+        mask_row = []
+        for element in raw:
+            value = tryint(element)
+            if value == 1:
+                mask_row.append("1")
+            elif value == 0 or element in (None, ""):
+                mask_row.append("0")
+            else:
+                mask_row.append("0")
+                disputed.append((team_name, element))
+        tour_len[tour] = max(tour_len[tour], len(mask_row))
+        res_by_tour[(team_id, team_name)][tour] = mask_row
 
+    if table_type is None:
+        logger.warning(
+            f"Не удалось найти заголовок вопросной таблицы (строку со столбцом "
+            f"«Название»): путь={source}."
+        )
+        return []
+    if disputed:
+        team, value = disputed[0]
+        logger.warning(
+            f"В расплюсовке найдены нерассмотренные спорные или неожиданные "
+            f"значения ({len(disputed)} шт.), они засчитаны как неверные. "
+            f"Например: значение={value!r}, команда={team!r}, путь={source}."
+        )
+
+    results = []
     tours = sorted(tour_len)
-    for team_tup in res_by_tour:
-        team_id, team_name = team_tup
+    for (team_id, team_name), by_tour in res_by_tour.items():
         mask = []
         for tour in tours:
-            team_res = res_by_tour[team_tup].get(tour) or []
+            team_res = list(by_tour.get(tour) or [])
             if len(team_res) < tour_len[tour]:
-                team_res += [0] * (tour_len[tour] - len(team_res))
-            for element in team_res:
-                if tryint(element) in (1, 0):
-                    mask.append(str(element))
-                else:
-                    mask.append("0")
+                team_res += ["0"] * (tour_len[tour] - len(team_res))
+            mask.extend(team_res)
         results.append(
             {
                 "team": {"id": team_id},
@@ -639,18 +672,19 @@ def xlsx_to_results(xlsx_file_path):
     return results
 
 
-def custom_csv_to_results(csv_file_path, **kwargs):
-    results = []
-    with open(csv_file_path, encoding="utf8") as f:
-        reader = csv.reader(f, **kwargs)
-        for row in itertools.islice(reader, 1, None):
-            val = {
-                "team": {"id": tryint(row[0])},
-                "current": {"name": row[1]},
-                "mask": "".join(row[3:]),
-            }
-            results.append(val)
-    return results
+def xlsx_to_results(xlsx_file_path, logger=None):
+    wb = openpyxl.load_workbook(xlsx_file_path, data_only=True)
+    sheet = wb.active
+    return _results_table_to_masks(
+        sheet.iter_rows(values_only=True), logger=logger, source=xlsx_file_path
+    )
+
+
+def custom_csv_to_results(csv_file_path, logger=None, **kwargs):
+    # encoding="utf-8-sig" transparently strips a leading BOM if present.
+    with open(csv_file_path, encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.reader(f, **kwargs))
+    return _results_table_to_masks(rows, logger=logger, source=csv_file_path)
 
 
 def replace_escaped(s):
