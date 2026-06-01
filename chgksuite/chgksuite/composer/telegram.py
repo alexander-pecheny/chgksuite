@@ -1104,7 +1104,7 @@ class TelegramExporter(BaseExporter):
             "chat_id": chat_id,
             "question": question_text,
             "options": json.dumps(options),
-            "is_anonymous": True,
+            "is_anonymous": poll_cfg.get("is_anonymous", True),
             "disable_notification": True,
         }
 
@@ -1119,6 +1119,8 @@ class TelegramExporter(BaseExporter):
                 data["type"] = "regular"
         else:
             data["type"] = "regular"
+            if "allows_revoting" in poll_cfg:
+                data["allows_revoting"] = poll_cfg["allows_revoting"]
 
         if reply_to_message_id:
             data["reply_to_message_id"] = reply_to_message_id
