@@ -17,5 +17,6 @@ chgksuite-tk = { path = "chgksuite_tk", editable = true }
 dev = [
     "ipython>=8.18.1",
     "pytest>=8.4.2",
+    "pytest-xdist>=3.6",
     "ruff>=0.14.10",
 ]
