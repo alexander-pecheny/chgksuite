@@ -383,6 +383,38 @@ class TestMaxWidthLayout:
                 {"columns": 3, "max_width": 1.5, "text": "test"}
             )
 
+    def test_generate_keeps_question_label_with_handout_grid(self, generator):
+        generator.args.filename = "handouts.hndt"
+        generator.parse_input = lambda filename: [
+            {"for_question": 18, "columns": 3, "text": "test"}
+        ]
+
+        tex = generator.generate()
+
+        assert r"\begin{minipage}{\linewidth}" in tex
+        assert r"\textcolor{gray}" in tex
+        assert r"\begin{tikzpicture}" in tex
+        assert tex.index(r"\begin{minipage}{\linewidth}") < tex.index(
+            r"\textcolor{gray}"
+        )
+        assert tex.index(r"\textcolor{gray}") < tex.index(r"\begin{tikzpicture}")
+        assert tex.index(r"\begin{tikzpicture}") < tex.index(r"\end{minipage}")
+        assert r"\end{minipage}\par\vspace{1.5mm}" in tex
+
+    def test_generate_keeps_question_label_without_handout_grid(self, generator):
+        generator.args.filename = "handouts.hndt"
+        generator.parse_input = lambda filename: [{"for_question": 18}]
+
+        tex = generator.generate()
+
+        assert r"\begin{minipage}{\linewidth}" in tex
+        assert r"\textcolor{gray}" in tex
+        assert r"\begin{tikzpicture}" not in tex
+        assert tex.index(r"\begin{minipage}{\linewidth}") < tex.index(
+            r"\textcolor{gray}"
+        )
+        assert tex.index(r"\textcolor{gray}") < tex.index(r"\end{minipage}")
+
     def test_split_fit_multiplies_half_width_columns(self, tmp_path):
         block = HandoutBlock(
             ordinal=1,
