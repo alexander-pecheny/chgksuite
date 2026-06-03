@@ -17,6 +17,7 @@ from pypdf.generic import (
     DictionaryObject,
     NameObject,
     NumberObject,
+    TextStringObject,
 )
 
 from chgksuite.handouter import utils as handouter_utils
@@ -484,6 +485,29 @@ def test_recompress_pdf_image_converts_raw_rgb_to_smaller_jpeg():
     assert stream["/Filter"] == "/DCTDecode"
     assert stream["/ColorSpace"] == "/DeviceRGB"
     assert len(stream._data) < len(raw_data)
+
+
+def test_recompress_pdf_image_handles_indexed_palette_text_string():
+    raw_data = bytes([0, 1, 0, 1]) * (96 * 96 // 4)
+
+    stream = DecodedStreamObject()
+    stream.set_data(raw_data)
+    stream[NameObject("/Subtype")] = NameObject("/Image")
+    stream[NameObject("/Width")] = NumberObject(96)
+    stream[NameObject("/Height")] = NumberObject(96)
+    stream[NameObject("/BitsPerComponent")] = NumberObject(8)
+    stream[NameObject("/ColorSpace")] = ArrayObject(
+        [
+            NameObject("/Indexed"),
+            NameObject("/DeviceRGB"),
+            NumberObject(1),
+            TextStringObject("\xff\x00\x00\x00\x00\xff"),
+        ]
+    )
+
+    assert handouter_utils._recompress_pdf_image(stream, quality=80)
+    assert stream["/Filter"] == "/DCTDecode"
+    assert stream["/ColorSpace"] == "/DeviceRGB"
 
 
 def test_write_pypdf_compressed_deduplicates_repeated_form_xobjects(tmp_path):

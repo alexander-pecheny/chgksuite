@@ -6,11 +6,13 @@ from PIL import Image
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
     ArrayObject,
+    ByteStringObject,
     DictionaryObject,
     IndirectObject,
     NameObject,
     NumberObject,
     StreamObject,
+    TextStringObject,
 )
 
 from chgksuite.common import optimize_raster_image_data, pil_image_to_jpeg_bytes
@@ -62,6 +64,15 @@ def _pdf_lookup_bytes(lookup):
     lookup = _pdf_deref(lookup)
     if isinstance(lookup, (bytes, bytearray)):
         return bytes(lookup)
+    if isinstance(lookup, ByteStringObject):
+        return bytes(lookup)
+    if isinstance(lookup, TextStringObject):
+        original_bytes = getattr(lookup, "original_bytes", None)
+        if original_bytes is not None:
+            return original_bytes
+        return lookup.encode("latin-1")
+    if not hasattr(lookup, "get_data"):
+        raise TypeError("unsupported PDF indexed color lookup")
     return lookup.get_data()
 
 
@@ -101,7 +112,10 @@ def _pdf_image_to_pillow(stream):
             if base_color_space != "/DeviceRGB":
                 return None
             max_index = int(color_space[2])
-            lookup = _pdf_lookup_bytes(color_space[3])
+            try:
+                lookup = _pdf_lookup_bytes(color_space[3])
+            except (AttributeError, TypeError, UnicodeEncodeError):
+                return None
             expected_size = width * height
             if len(data) < expected_size:
                 return None
