@@ -17,6 +17,7 @@ from pypdf.generic import (
     DictionaryObject,
     NameObject,
     NumberObject,
+    TextStringObject,
 )
 
 from chgksuite.handouter import utils as handouter_utils
@@ -29,7 +30,7 @@ from chgksuite.handouter.split_fit import (
     split_fit_columns,
     write_handout,
 )
-from chgksuite.handouter.tex_internals import EDGE_SOLID, EDGE_NONE
+from chgksuite.handouter.tex_internals import EDGE_DASHED, EDGE_SOLID, EDGE_NONE
 from chgksuite.handouter.utils import (
     optimize_raster_image_for_tex,
     parse_handouts,
@@ -304,6 +305,20 @@ class TestEdgeBoundaries:
         # Left edge is internal, should be NONE (to avoid double lines)
         assert edges["left"] == EDGE_NONE
 
+    def test_internal_row_separator_is_centered_in_gap(self, generator):
+        edges, ext = generator.get_edge_styles(
+            row_idx=0,
+            col_idx=0,
+            num_rows=3,
+            columns=1,
+            team_cols=1,
+            team_rows=3,
+            vspace=1.0,
+        )
+
+        assert edges["bottom"] == EDGE_DASHED
+        assert ext["bottom_yshift"] == "-0.5mm"
+
 
 class TestGroupingParsing:
     """Tests for parsing the grouping option from txt files."""
@@ -381,6 +396,38 @@ class TestMaxWidthLayout:
             generator.generate_regular_block(
                 {"columns": 3, "max_width": 1.5, "text": "test"}
             )
+
+    def test_generate_keeps_question_label_with_handout_grid(self, generator):
+        generator.args.filename = "handouts.hndt"
+        generator.parse_input = lambda filename: [
+            {"for_question": 18, "columns": 3, "text": "test"}
+        ]
+
+        tex = generator.generate()
+
+        assert r"\begin{minipage}{\linewidth}" in tex
+        assert r"\textcolor{gray}" in tex
+        assert r"\begin{tikzpicture}" in tex
+        assert tex.index(r"\begin{minipage}{\linewidth}") < tex.index(
+            r"\textcolor{gray}"
+        )
+        assert tex.index(r"\textcolor{gray}") < tex.index(r"\begin{tikzpicture}")
+        assert tex.index(r"\begin{tikzpicture}") < tex.index(r"\end{minipage}")
+        assert r"\end{minipage}\par\vspace{1.5mm}" in tex
+
+    def test_generate_keeps_question_label_without_handout_grid(self, generator):
+        generator.args.filename = "handouts.hndt"
+        generator.parse_input = lambda filename: [{"for_question": 18}]
+
+        tex = generator.generate()
+
+        assert r"\begin{minipage}{\linewidth}" in tex
+        assert r"\textcolor{gray}" in tex
+        assert r"\begin{tikzpicture}" not in tex
+        assert tex.index(r"\begin{minipage}{\linewidth}") < tex.index(
+            r"\textcolor{gray}"
+        )
+        assert tex.index(r"\textcolor{gray}") < tex.index(r"\end{minipage}")
 
     def test_split_fit_multiplies_half_width_columns(self, tmp_path):
         block = HandoutBlock(
@@ -484,6 +531,29 @@ def test_recompress_pdf_image_converts_raw_rgb_to_smaller_jpeg():
     assert stream["/Filter"] == "/DCTDecode"
     assert stream["/ColorSpace"] == "/DeviceRGB"
     assert len(stream._data) < len(raw_data)
+
+
+def test_recompress_pdf_image_handles_indexed_palette_text_string():
+    raw_data = bytes([0, 1, 0, 1]) * (96 * 96 // 4)
+
+    stream = DecodedStreamObject()
+    stream.set_data(raw_data)
+    stream[NameObject("/Subtype")] = NameObject("/Image")
+    stream[NameObject("/Width")] = NumberObject(96)
+    stream[NameObject("/Height")] = NumberObject(96)
+    stream[NameObject("/BitsPerComponent")] = NumberObject(8)
+    stream[NameObject("/ColorSpace")] = ArrayObject(
+        [
+            NameObject("/Indexed"),
+            NameObject("/DeviceRGB"),
+            NumberObject(1),
+            TextStringObject("\xff\x00\x00\x00\x00\xff"),
+        ]
+    )
+
+    assert handouter_utils._recompress_pdf_image(stream, quality=80)
+    assert stream["/Filter"] == "/DCTDecode"
+    assert stream["/ColorSpace"] == "/DeviceRGB"
 
 
 def test_write_pypdf_compressed_deduplicates_repeated_form_xobjects(tmp_path):

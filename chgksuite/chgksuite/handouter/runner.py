@@ -124,6 +124,13 @@ class HandoutGenerator:
         )
         return GREYTEXT.replace("<GREYTEXT>", handout_text)
 
+    def keep_together(self, parts):
+        return (
+            "\\par\\noindent\\begin{minipage}{\\linewidth}\n"
+            + "\n\n".join(parts)
+            + "\n\\end{minipage}\\par\\vspace{1.5mm}"
+        )
+
     def make_tikzbox(self, block, edges=None, ext=None, inner_sep=None):
         """
         Create a TikZ box with configurable edge styles and extensions.
@@ -173,6 +180,8 @@ class HandoutGenerator:
             .replace("<TOP_EXT_R>", ext["top"][1])
             .replace("<BOTTOM_EXT_L>", ext["bottom"][0])
             .replace("<BOTTOM_EXT_R>", ext["bottom"][1])
+            .replace("<TOP_YSHIFT>", ext["top_yshift"])
+            .replace("<BOTTOM_YSHIFT>", ext["bottom_yshift"])
             .replace("<LEFT_EXT_T>", ext["left"][0])
             .replace("<LEFT_EXT_B>", ext["left"][1])
             .replace("<RIGHT_EXT_T>", ext["right"][0])
@@ -278,6 +287,8 @@ class HandoutGenerator:
             "bottom": ("0pt", "0pt"),
             "left": ("0pt", "0pt"),
             "right": ("0pt", "0pt"),
+            "top_yshift": "0pt",
+            "bottom_yshift": "0pt",
         }
 
         # Gap sizes (half of spacing to extend into)
@@ -341,6 +352,9 @@ class HandoutGenerator:
 
         if edges["top"] == EDGE_DASHED and row_idx > 0:
             edges["top"] = EDGE_NONE
+
+        if edges["bottom"] == EDGE_DASHED and row_idx < num_rows - 1:
+            ext["bottom_yshift"] = "-" + v_gap
 
         # Calculate extensions for solid edges to close gaps
         # But don't extend into team boundary gaps!
@@ -488,12 +502,15 @@ class HandoutGenerator:
                 continue
             if self.args.debug:
                 print(block)
+            parts = []
             if block.get("for_question"):
-                self.blocks.append(self.generate_for_question(block["for_question"]))
+                parts.append(self.generate_for_question(block["for_question"]))
             if block.get("columns"):
-                block = self.generate_regular_block(block)
-                if block:
-                    self.blocks.append(block)
+                generated_block = self.generate_regular_block(block)
+                if generated_block:
+                    parts.append(generated_block)
+            if parts:
+                self.blocks.append(self.keep_together(parts))
         self.blocks.append("\\end{document}")
         return "\n\n".join(self.blocks)
 
