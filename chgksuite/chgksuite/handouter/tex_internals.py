@@ -28,8 +28,8 @@ TIKZBOX_INNER = r"""
 \begin{tikzpicture}
 \node[box, minimum width=\boxwidth<INNER_SEP_OVERRIDE><TEXTWIDTH><ALIGN>] (b) {<FONTSIZE>\hstrut <CONTENTS>\par};
 \useasboundingbox (b.south west) rectangle (b.north east);
-\draw[<TOP>] ([xshift=<TOP_EXT_L>]b.north west) -- ([xshift=<TOP_EXT_R>]b.north east);
-\draw[<BOTTOM>] ([xshift=<BOTTOM_EXT_L>]b.south west) -- ([xshift=<BOTTOM_EXT_R>]b.south east);
+\draw[<TOP>] ([xshift=<TOP_EXT_L>, yshift=<TOP_YSHIFT>]b.north west) -- ([xshift=<TOP_EXT_R>, yshift=<TOP_YSHIFT>]b.north east);
+\draw[<BOTTOM>] ([xshift=<BOTTOM_EXT_L>, yshift=<BOTTOM_YSHIFT>]b.south west) -- ([xshift=<BOTTOM_EXT_R>, yshift=<BOTTOM_YSHIFT>]b.south east);
 \draw[<LEFT>] ([yshift=<LEFT_EXT_T>]b.north west) -- ([yshift=<LEFT_EXT_B>]b.south west);
 \draw[<RIGHT>] ([yshift=<RIGHT_EXT_T>]b.north east) -- ([yshift=<RIGHT_EXT_B>]b.south east);
 \end{tikzpicture}
