@@ -30,7 +30,7 @@ from chgksuite.handouter.split_fit import (
     split_fit_columns,
     write_handout,
 )
-from chgksuite.handouter.tex_internals import EDGE_SOLID, EDGE_NONE
+from chgksuite.handouter.tex_internals import EDGE_DASHED, EDGE_SOLID, EDGE_NONE
 from chgksuite.handouter.utils import (
     optimize_raster_image_for_tex,
     parse_handouts,
@@ -304,6 +304,20 @@ class TestEdgeBoundaries:
         )
         # Left edge is internal, should be NONE (to avoid double lines)
         assert edges["left"] == EDGE_NONE
+
+    def test_internal_row_separator_is_centered_in_gap(self, generator):
+        edges, ext = generator.get_edge_styles(
+            row_idx=0,
+            col_idx=0,
+            num_rows=3,
+            columns=1,
+            team_cols=1,
+            team_rows=3,
+            vspace=1.0,
+        )
+
+        assert edges["bottom"] == EDGE_DASHED
+        assert ext["bottom_yshift"] == "-0.5mm"
 
 
 class TestGroupingParsing:

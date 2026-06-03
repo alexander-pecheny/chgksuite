@@ -180,6 +180,8 @@ class HandoutGenerator:
             .replace("<TOP_EXT_R>", ext["top"][1])
             .replace("<BOTTOM_EXT_L>", ext["bottom"][0])
             .replace("<BOTTOM_EXT_R>", ext["bottom"][1])
+            .replace("<TOP_YSHIFT>", ext["top_yshift"])
+            .replace("<BOTTOM_YSHIFT>", ext["bottom_yshift"])
             .replace("<LEFT_EXT_T>", ext["left"][0])
             .replace("<LEFT_EXT_B>", ext["left"][1])
             .replace("<RIGHT_EXT_T>", ext["right"][0])
@@ -285,6 +287,8 @@ class HandoutGenerator:
             "bottom": ("0pt", "0pt"),
             "left": ("0pt", "0pt"),
             "right": ("0pt", "0pt"),
+            "top_yshift": "0pt",
+            "bottom_yshift": "0pt",
         }
 
         # Gap sizes (half of spacing to extend into)
@@ -348,6 +352,9 @@ class HandoutGenerator:
 
         if edges["top"] == EDGE_DASHED and row_idx > 0:
             edges["top"] = EDGE_NONE
+
+        if edges["bottom"] == EDGE_DASHED and row_idx < num_rows - 1:
+            ext["bottom_yshift"] = "-" + v_gap
 
         # Calculate extensions for solid edges to close gaps
         # But don't extend into team boundary gaps!
