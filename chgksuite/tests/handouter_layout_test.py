@@ -368,6 +368,31 @@ test"""
         assert result[0]["max_width"] == 0.5
         assert "max_width" not in result[0]["text"]
 
+    def test_parse_column_widths(self):
+        contents = """columns: 3
+column_widths: 1, 2, 1
+test"""
+        result = parse_handouts(contents)
+
+        assert result[0]["column_widths"] == [1.0, 2.0, 1.0]
+        assert "column_widths" not in result[0]["text"]
+
+    def test_parse_column_texts(self):
+        contents = """columns: 3
+left & text
+|||
+middle text
+|||
+right text"""
+        result = parse_handouts(contents)
+
+        assert result[0]["column_texts"] == [
+            r"left \& text",
+            "middle text",
+            "right text",
+        ]
+        assert "text" not in result[0]
+
     def test_split_fit_parse_max_width_as_metadata(self):
         """split_fit should preserve max_width as metadata, not handout text."""
         contents = """columns: 3
@@ -375,6 +400,14 @@ max_width: 0.5
 test"""
         result = parse_blocks(contents)
         assert result[0].meta["max_width"] == "0.5"
+
+    def test_split_fit_parse_column_widths_as_metadata(self):
+        contents = """columns: 3
+column_widths: 1, 2, 1
+test"""
+        result = parse_blocks(contents)
+
+        assert result[0].meta["column_widths"] == "1, 2, 1"
 
     def test_wrap_val_grouping_invalid(self):
         """Invalid grouping value should raise ValueError."""
@@ -395,6 +428,43 @@ class TestMaxWidthLayout:
         with pytest.raises(ValueError, match="max_width must be between 0 and 1"):
             generator.generate_regular_block(
                 {"columns": 3, "max_width": 1.5, "text": "test"}
+            )
+
+    def test_column_widths_use_relative_weights(self, generator):
+        tex = generator.generate_regular_block(
+            {"columns": 3, "column_widths": [1.0, 2.0, 1.0], "text": "test"}
+        )
+
+        assert r"\setlength{\boxwidth}{48.75mm}%" in tex
+        assert r"\setlength{\boxwidth}{97.5mm}%" in tex
+        assert r"\setlength{\boxwidthinner}{46.75mm}%" in tex
+        assert r"\setlength{\boxwidthinner}{95.5mm}%" in tex
+
+    def test_column_widths_must_match_columns(self, generator):
+        with pytest.raises(ValueError, match="column_widths must contain 3 values"):
+            generator.generate_regular_block(
+                {"columns": 3, "column_widths": [1.0, 2.0], "text": "test"}
+            )
+
+    def test_column_texts_render_different_text_per_column(self, generator):
+        tex = generator.generate_regular_block(
+            {
+                "columns": 3,
+                "column_widths": [1.0, 2.0, 1.0],
+                "column_texts": ["left", "middle", "right"],
+            }
+        )
+
+        assert "left" in tex
+        assert "middle" in tex
+        assert "right" in tex
+        assert tex.index("left") < tex.index("middle") < tex.index("right")
+        assert "minimum height=" in tex
+
+    def test_column_texts_must_match_columns(self, generator):
+        with pytest.raises(ValueError, match="column_texts must contain 3 values"):
+            generator.generate_regular_block(
+                {"columns": 3, "column_texts": ["left", "right"]}
             )
 
     def test_generate_keeps_question_label_with_handout_grid(self, generator):

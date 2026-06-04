@@ -36,6 +36,7 @@ RESERVED_WORDS = [
     "hspace",
     "vspace",
     "max_width",
+    "column_widths",
 ]
 
 
@@ -545,6 +546,13 @@ def wrap_val(key, val):
         "max_width",
     ):
         return float(val.strip())
+    if key == "column_widths":
+        values = [float(item.strip()) for item in val.split(",") if item.strip()]
+        if not values:
+            raise ValueError("column_widths must contain at least one value")
+        if any(value <= 0 for value in values):
+            raise ValueError("column_widths values must be positive")
+        return values
     if key == "grouping":
         val = val.strip().lower()
         if val not in ("horizontal", "vertical"):
@@ -598,8 +606,19 @@ def parse_handouts(contents):
             elif line.strip():
                 text.append(line.strip())
         if text:
-            block_dict["text"] = "\n".join(text).strip()
-            if not block_dict.get("raw_tex"):
-                block_dict["text"] = escape_latex(block_dict["text"])
+            column_texts = split_array_by_value(text, "|||")
+            if len(column_texts) > 1:
+                block_dict["column_texts"] = [
+                    "\n".join(column_text).strip() for column_text in column_texts
+                ]
+                if not block_dict.get("raw_tex"):
+                    block_dict["column_texts"] = [
+                        escape_latex(column_text)
+                        for column_text in block_dict["column_texts"]
+                    ]
+            else:
+                block_dict["text"] = "\n".join(text).strip()
+                if not block_dict.get("raw_tex"):
+                    block_dict["text"] = escape_latex(block_dict["text"])
         result.append(block_dict)
     return result
