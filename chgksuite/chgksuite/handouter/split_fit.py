@@ -39,6 +39,7 @@ RESERVED_WORDS = {
     "hspace",
     "vspace",
     "max_width",
+    "column_widths",
 }
 
 TECTONIC_LOCK = Lock()

@@ -166,10 +166,13 @@ class HandoutGenerator:
         if block.get("font_family"):
             contents = "\\fontspec{" + block["font_family"] + "}" + contents
         inner_sep_str = f", inner sep={inner_sep}mm" if inner_sep is not None else ""
+        min_height = block.get("min_height")
+        min_height_str = f", minimum height={min_height}mm" if min_height else ""
         return (
             TIKZBOX_INNER.replace("<CONTENTS>", contents)
             .replace("<ALIGN>", align)
             .replace("<TEXTWIDTH>", textwidth)
+            .replace("<MIN_HEIGHT>", min_height_str)
             .replace("<INNER_SEP_OVERRIDE>", inner_sep_str)
             .replace("<FONTSIZE>", fontsize)
             .replace("<TOP>", edges["top"])
@@ -196,6 +199,73 @@ class HandoutGenerator:
         if max_width <= 0 or max_width > 1:
             raise ValueError(f"max_width must be between 0 and 1, got {max_width}")
         return max_width
+
+    def get_column_widths(self, block, columns, available_width, hspace):
+        weights = block.get("column_widths")
+        spaces = columns - 1
+        if not weights:
+            boxwidth = self.args.boxwidth or round(
+                (available_width - spaces * hspace) / columns,
+                3,
+            )
+            return [boxwidth] * columns
+
+        if self.args.boxwidth is not None:
+            raise ValueError("column_widths cannot be used with --boxwidth")
+        if len(weights) != columns:
+            raise ValueError(
+                f"column_widths must contain {columns} values, got {len(weights)}"
+            )
+
+        box_area_width = available_width - spaces * hspace
+        if box_area_width <= 0:
+            raise ValueError("column widths do not fit available page width")
+
+        total_weight = sum(weights)
+        widths = []
+        for weight in weights[:-1]:
+            widths.append(round(box_area_width * weight / total_weight, 3))
+        widths.append(round(box_area_width - sum(widths), 3))
+        return widths
+
+    def get_column_texts(self, block, columns):
+        column_texts = block.get("column_texts")
+        if not column_texts:
+            return None
+        if len(column_texts) != columns:
+            raise ValueError(
+                f"column_texts must contain {columns} values, got {len(column_texts)}"
+            )
+        return column_texts
+
+    def estimate_column_text_min_height(self, block, column_texts, boxwidths, inner_sep):
+        font_size = block.get("font_size") or self.args.font_size
+        line_height_mm = font_size * 1.2 * 25.4 / 72
+        avg_char_width_mm = font_size * 25.4 / 72 * 0.55
+
+        max_lines = 1
+        for text, boxwidth in zip(column_texts, boxwidths):
+            text_width = max(1, boxwidth - 2 * inner_sep)
+            chars_per_line = max(1, int(text_width / avg_char_width_mm))
+            estimated_lines = 0
+            for line in text.splitlines() or [""]:
+                words = line.split()
+                if not words:
+                    estimated_lines += 1
+                    continue
+                line_count = 1
+                current_len = 0
+                for word in words:
+                    next_len = len(word) if current_len == 0 else current_len + 1 + len(word)
+                    if current_len and next_len > chars_per_line:
+                        line_count += 1
+                        current_len = len(word)
+                    else:
+                        current_len = next_len
+                estimated_lines += line_count
+            max_lines = max(max_lines, estimated_lines)
+
+        return round(max_lines * line_height_mm + 2 * inner_sep, 3)
 
     def resolve_image_path(self, image_path):
         if os.path.isabs(image_path):
@@ -403,7 +473,7 @@ class HandoutGenerator:
 
     def generate_regular_block(self, block_):
         block = block_.copy()
-        if not (block.get("image") or block.get("text")):
+        if not (block.get("image") or block.get("text") or block.get("column_texts")):
             return
         columns = block["columns"]
         num_rows = block.get("rows") or 1
@@ -423,16 +493,13 @@ class HandoutGenerator:
         vspace_val = block.get("vspace")
         tikz_mm = block.get("tikz_mm")
 
-        spaces = columns - 1
         available_width = self.get_page_width() * self.get_block_max_width(block)
-        boxwidth = self.args.boxwidth or round(
-            (available_width - spaces * hspace) / columns,
-            3,
-        )
-        total_width = boxwidth * columns + spaces * hspace
+        boxwidths = self.get_column_widths(block, columns, available_width, hspace)
+        total_width = sum(boxwidths) + (columns - 1) * hspace
         if self.args.debug:
             print(
-                f"columns: {columns}, boxwidth: {boxwidth}, total width: {total_width}"
+                f"columns: {columns}, boxwidths: {boxwidths}, "
+                f"total width: {total_width}"
             )
         if self.args.tikz_mm is not None:
             effective_tikz_mm = self.args.tikz_mm
@@ -440,11 +507,18 @@ class HandoutGenerator:
             effective_tikz_mm = tikz_mm
         else:
             effective_tikz_mm = self.DEFAULT_TIKZ_MM
-        boxwidthinner = self.args.boxwidthinner or (boxwidth - 2 * effective_tikz_mm)
-        header = [
-            r"\setlength{\boxwidth}{<Q>mm}%".replace("<Q>", str(boxwidth)),
-            r"\setlength{\boxwidthinner}{<Q>mm}%".replace("<Q>", str(boxwidthinner)),
-        ]
+        uses_variable_widths = bool(block.get("column_widths"))
+        header = []
+        if not uses_variable_widths:
+            boxwidthinner = self.args.boxwidthinner or (
+                boxwidths[0] - 2 * effective_tikz_mm
+            )
+            header = [
+                r"\setlength{\boxwidth}{<Q>mm}%".replace("<Q>", str(boxwidths[0])),
+                r"\setlength{\boxwidthinner}{<Q>mm}%".replace(
+                    "<Q>", str(boxwidthinner)
+                ),
+            ]
         contents = []
         if block.get("image"):
             image_path = block["image"]
@@ -463,7 +537,13 @@ class HandoutGenerator:
             )
         if block.get("text"):
             contents.append(block["text"])
-        block["contents"] = "\\linebreak\n\\hstrut ".join(contents)
+        column_texts = self.get_column_texts(block, columns)
+        shared_contents = "\\linebreak\n\\hstrut ".join(contents)
+        column_text_min_height = None
+        if column_texts:
+            column_text_min_height = self.estimate_column_text_min_height(
+                block, column_texts, boxwidths, effective_tikz_mm
+            )
         if block.get("no_center"):
             block["centering"] = ""
         else:
@@ -483,9 +563,33 @@ class HandoutGenerator:
                     hspace=hspace,
                     vspace=vspace_val if vspace_val is not None else 1.0,
                 )
-                row_boxes.append(
-                    self.make_tikzbox(block, edges, ext, inner_sep=effective_tikz_mm)
+                boxwidth = boxwidths[col_idx]
+                boxwidthinner = self.args.boxwidthinner or (
+                    boxwidth - 2 * effective_tikz_mm
                 )
+                box_block = block.copy()
+                if column_texts:
+                    box_contents = contents + [column_texts[col_idx]]
+                    box_block["contents"] = "\\linebreak\n\\hstrut ".join(box_contents)
+                    box_block["min_height"] = column_text_min_height
+                else:
+                    box_block["contents"] = shared_contents
+                box = self.make_tikzbox(
+                    box_block, edges, ext, inner_sep=effective_tikz_mm
+                )
+                if uses_variable_widths:
+                    box = (
+                        r"\setlength{\boxwidth}{<Q>mm}%".replace(
+                            "<Q>", str(boxwidth)
+                        )
+                        + "\n"
+                        + r"\setlength{\boxwidthinner}{<Q>mm}%".replace(
+                            "<Q>", str(boxwidthinner)
+                        )
+                        + "\n"
+                        + box
+                    )
+                row_boxes.append(box)
             row = (
                 TIKZBOX_START.replace("<CENTERING>", block["centering"])
                 + "\n".join(row_boxes)
@@ -493,7 +597,10 @@ class HandoutGenerator:
             )
             rows.append(row)
         vs = vspace_val if vspace_val is not None else 1
-        return "\n".join(header) + "\n" + f"\n\n\\vspace{{{vs}mm}}\n\n".join(rows)
+        header_text = "\n".join(header)
+        if header_text:
+            header_text += "\n"
+        return header_text + f"\n\n\\vspace{{{vs}mm}}\n\n".join(rows)
 
     def generate(self):
         for block in self.parse_input(self.args.filename):
