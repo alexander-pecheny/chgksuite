@@ -17,7 +17,7 @@ from chgksuite.composer.composer_common import ext_to_game
 from chgksuite.composer.telegram import get_saved_telegram_targets
 from chgksuite.handouter.runner import gui_handouter
 from chgksuite.parser import gui_parse
-from chgksuite.trello import gui_trello
+from chgksuite.board import gui_board
 from chgksuite.version import __version__
 
 LANGS = ["az", "by", "by_tar", "en", "kz_cyr", "ru", "sr", "ua", "uz", "uz_cyr"] + [
@@ -862,25 +862,25 @@ class ArgparseBuilder:
             filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
 
-        cmdtrello = subparsers.add_parser("trello")
-        cmdtrello_subcommands = cmdtrello.add_subparsers(dest="trellosubcommand")
-        cmdtrello_download = self.add_parser(
-            cmdtrello_subcommands, "download", caption="Скачать из Трелло"
+        cmdboard = subparsers.add_parser("board", aliases=["trello"])
+        cmdboard_subcommands = cmdboard.add_subparsers(dest="boardsubcommand")
+        cmdboard_download = self.add_parser(
+            cmdboard_subcommands, "download", caption="Скачать с доски"
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboard_download,
             "folder",
-            help="path to the folderto synchronize with a trello board.",
+            help="path to the folder to synchronize with a board.",
             caption="Папка",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboard_download,
             "--lists",
             help="Download only specified lists.",
             caption="Скачать только указанные списки (через запятую)",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboard_download,
             "--si",
             action="store_true",
             help="This flag includes card captions "
@@ -890,7 +890,7 @@ class ArgparseBuilder:
             caption="Формат Своей игры",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboard_download,
             "--replace_double_line_breaks",
             "-rd",
             action="store_true",
@@ -898,7 +898,7 @@ class ArgparseBuilder:
             caption="Убрать двойные переносы строк",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboard_download,
             "--fix_trello_new_editor",
             "-ftne",
             choices=["on", "off"],
@@ -909,71 +909,83 @@ class ArgparseBuilder:
             argtype="radiobutton",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboard_download,
             "--onlyanswers",
             action="store_true",
             help="This flag forces SI download to only include answers.",
             caption="Только ответы",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboard_download,
             "--noanswers",
             action="store_true",
             help="This flag forces SI download to not include answers.",
             caption="Без ответов",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboard_download,
             "--singlefile",
             action="store_true",
             help="This flag forces SI download all themes to single file.",
             caption="Склеить всё в один файл",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboard_download,
             "--qb",
             action="store_true",
             help="Quizbowl format",
             caption="Формат квизбола",
         )
         self.add_argument(
-            cmdtrello_download,
+            cmdboard_download,
             "--labels",
             action="store_true",
             help="Use this if you also want to have lists based on labels.",
             caption="Создать файлы из лейблов Трелло",
         )
 
-        cmdtrello_upload = self.add_parser(
-            cmdtrello_subcommands, "upload", caption="Загрузить в Трелло"
+        cmdboard_upload = self.add_parser(
+            cmdboard_subcommands, "upload", caption="Загрузить на доску"
         )
         self.add_argument(
-            cmdtrello_upload, "board_id", help="trello board id.", caption="ID доски"
+            cmdboard_upload,
+            "board_url",
+            help="board url (trello.com/b/… or xy …/board/…).",
+            caption="Ссылка на доску",
         )
         self.add_argument(
-            cmdtrello_upload,
+            cmdboard_upload,
             "filename",
             nargs="*",
             help="file(s) to upload to trello.",
             caption="Имя 4s-файла",
         )
         self.add_argument(
-            cmdtrello_upload,
+            cmdboard_upload,
             "--author",
             action="store_true",
             help="Display authors in cards' captions",
             caption="Дописать авторов в заголовок карточки",
         )
         self.add_argument(
-            cmdtrello_upload,
+            cmdboard_upload,
             "--list_name",
             help="List name where to upload cards",
             caption="Имя списка для загрузки карточек",
         )
 
-        cmdtrello_token = cmdtrello_subcommands.add_parser("token")
+        cmdboard_token = cmdboard_subcommands.add_parser("token")
         self.add_argument(
-            cmdtrello_token,
+            cmdboard_token,
+            "board_service_url",
+            nargs="?",
+            default="https://trello.com",
+            help="board service url; determines the auth flow "
+            "(trello OAuth vs xy token page). Default: https://trello.com",
+            caption="Адрес сервиса доски",
+        )
+        self.add_argument(
+            cmdboard_token,
             "--no-browser",
             action="store_true",
             help="Don't try to open in browser",
@@ -1552,8 +1564,8 @@ def single_action(args, use_wrapper, resourcedir):
         gui_parse(args)
     if args.action == "compose":
         gui_compose(args)
-    if args.action == "trello":
-        gui_trello(args)
+    if args.action in ("board", "trello"):
+        gui_board(args)
     if args.action == "handouts":
         gui_handouter(args)
 
