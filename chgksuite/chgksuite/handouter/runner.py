@@ -15,8 +15,12 @@ from watchdog.observers import Observer
 from chgksuite.common import get_source_dirs, set_lastdir
 from chgksuite.handouter.gen import generate_handouts
 from chgksuite.handouter.pack import pack_handouts
-from chgksuite.handouter.installer import get_tectonic_path, install_tectonic
-from chgksuite.handouter.tex_internals import (
+from chgksuite.handouter.installer import (
+    get_bundled_fonts_dir,
+    get_typst_path,
+    install_typst,
+)
+from chgksuite.handouter.typst_internals import (
     EDGE_DASHED,
     EDGE_NONE,
     EDGE_SOLID,
@@ -24,9 +28,6 @@ from chgksuite.handouter.tex_internals import (
     HEADER,
     IMG,
     IMGWIDTH,
-    TIKZBOX_END,
-    TIKZBOX_INNER,
-    TIKZBOX_START,
 )
 from chgksuite.handouter.utils import (
     compress_pdf,
@@ -72,6 +73,9 @@ def rotate_image(image_path, direction):
     return tmp_path
 
 
+DEFAULT_FONT = "Noto Sans"
+
+
 class HandoutGenerator:
     SPACE = 1.5  # mm
     DEFAULT_TIKZ_MM = 2  # mm
@@ -101,17 +105,9 @@ class HandoutGenerator:
             .replace("<MARGIN_RIGHT>", str(self.args.margin_right))
             .replace("<MARGIN_TOP>", str(self.args.margin_top))
             .replace("<MARGIN_BOTTOM>", str(self.args.margin_bottom))
-            .replace(
-                "<TIKZ_MM>",
-                str(
-                    self.args.tikz_mm
-                    if self.args.tikz_mm is not None
-                    else self.DEFAULT_TIKZ_MM
-                ),
-            )
+            .replace("<FONT>", self.args.font or DEFAULT_FONT)
+            .replace("<FONTSIZE>", str(self.args.font_size))
         )
-        if self.args.font:
-            header = header.replace("Arial", self.args.font)
         return header
 
     def parse_input(self, filepath):
@@ -124,19 +120,44 @@ class HandoutGenerator:
         )
         return GREYTEXT.replace("<GREYTEXT>", handout_text)
 
-    def keep_together(self, parts):
-        return (
-            "\\par\\noindent\\begin{minipage}{\\linewidth}\n"
-            + "\n\n".join(parts)
-            + "\n\\end{minipage}\\par\\vspace{1.5mm}"
-        )
+    def wrap_question_block(self, label, grid):
+        """Assemble a question's grey label and its handout grid.
 
-    def make_tikzbox(self, block, edges=None, ext=None, inner_sep=None):
+        The grid stays breakable so an over-long grid paginates (this is what
+        the auto-fitter relies on to detect overflow). When a grid is present
+        the label is made ``sticky`` so it is never orphaned from it.
         """
-        Create a TikZ box with configurable edge styles and extensions.
-        edges is a dict with keys 'top', 'bottom', 'left', 'right'
-        values are EDGE_DASHED or EDGE_SOLID
-        ext is a dict with edge extensions to close gaps at boundaries
+        pieces = []
+        if label and grid:
+            pieces.append(f"#block(sticky: true)[{label}]")
+        elif label:
+            pieces.append(label)
+        if grid:
+            pieces.append(grid)
+        return "\n".join(pieces) + "\n#v(1.5mm)"
+
+    @staticmethod
+    def _flip_y(value):
+        """Flip the sign of a length string for Typst's y-down coordinates.
+
+        TikZ measures y upward, Typst downward, so every vertical extension /
+        shift produced by ``get_edge_styles`` has its sign inverted.
+        """
+        s = str(value).strip()
+        if s.startswith("-"):
+            return s[1:]
+        if s in ("0pt", "0mm", "0", "0.0pt", "0.0mm", "0.0"):
+            return s
+        return "-" + s
+
+    def make_typst_box(self, block, width, inset, edges=None, ext=None):
+        """
+        Render a single handout cell as a ``#hcell(...)`` Typst call with
+        configurable edge styles and gap-closing extensions.
+
+        ``edges`` maps 'top'/'bottom'/'left'/'right' to EDGE_SOLID/DASHED/NONE.
+        ``ext`` holds the per-edge extensions used to close gaps at boundaries.
+        ``width`` and ``inset`` are millimetre floats.
         """
         if edges is None:
             edges = {
@@ -151,42 +172,42 @@ class HandoutGenerator:
                 "bottom": ("0pt", "0pt"),
                 "left": ("0pt", "0pt"),
                 "right": ("0pt", "0pt"),
+                "top_yshift": "0pt",
+                "bottom_yshift": "0pt",
             }
 
-        if block.get("no_center"):
-            align = ""
-        else:
-            align = ", align=center"
-        textwidth = ", text width=\\boxwidthinner"
+        halign = "left" if block.get("no_center") else "center"
         fs = block.get("font_size") or self.args.font_size
-        fontsize = "\\fontsize{FSpt}{LHpt}\\selectfont ".replace("FS", str(fs)).replace(
-            "LH", str(round(fs * 1.2, 1))
-        )
         contents = block["contents"]
         if block.get("font_family"):
-            contents = "\\fontspec{" + block["font_family"] + "}" + contents
-        inner_sep_str = f", inner sep={inner_sep}mm" if inner_sep is not None else ""
-        return (
-            TIKZBOX_INNER.replace("<CONTENTS>", contents)
-            .replace("<ALIGN>", align)
-            .replace("<TEXTWIDTH>", textwidth)
-            .replace("<INNER_SEP_OVERRIDE>", inner_sep_str)
-            .replace("<FONTSIZE>", fontsize)
-            .replace("<TOP>", edges["top"])
-            .replace("<BOTTOM>", edges["bottom"])
-            .replace("<LEFT>", edges["left"])
-            .replace("<RIGHT>", edges["right"])
-            .replace("<TOP_EXT_L>", ext["top"][0])
-            .replace("<TOP_EXT_R>", ext["top"][1])
-            .replace("<BOTTOM_EXT_L>", ext["bottom"][0])
-            .replace("<BOTTOM_EXT_R>", ext["bottom"][1])
-            .replace("<TOP_YSHIFT>", ext["top_yshift"])
-            .replace("<BOTTOM_YSHIFT>", ext["bottom_yshift"])
-            .replace("<LEFT_EXT_T>", ext["left"][0])
-            .replace("<LEFT_EXT_B>", ext["left"][1])
-            .replace("<RIGHT_EXT_T>", ext["right"][0])
-            .replace("<RIGHT_EXT_B>", ext["right"][1])
-        )
+            body = f'text(font: "{block["font_family"]}", size: {fs}pt)[{contents}]'
+        else:
+            body = f"text(size: {fs}pt)[{contents}]"
+
+        flip = self._flip_y
+        args = [
+            f"{width}mm",
+            f"{inset}mm",
+            halign,
+            body,
+            f'"{edges["top"]}"',
+            f'"{edges["bottom"]}"',
+            f'"{edges["left"]}"',
+            f'"{edges["right"]}"',
+            ext["top"][0],
+            ext["top"][1],
+            ext["bottom"][0],
+            ext["bottom"][1],
+            flip(ext["left"][0]),
+            flip(ext["left"][1]),
+            flip(ext["right"][0]),
+            flip(ext["right"][1]),
+            flip(ext["top_yshift"]),
+            flip(ext["bottom_yshift"]),
+        ]
+        # No leading "#": cells are emitted as positional arguments to grid(),
+        # which is already in code mode.
+        return "hcell(" + ", ".join(args) + ")"
 
     def get_page_width(self):
         return self.args.paperwidth - self.args.margin_left - self.args.margin_right - 2
@@ -441,10 +462,7 @@ class HandoutGenerator:
         else:
             effective_tikz_mm = self.DEFAULT_TIKZ_MM
         boxwidthinner = self.args.boxwidthinner or (boxwidth - 2 * effective_tikz_mm)
-        header = [
-            r"\setlength{\boxwidth}{<Q>mm}%".replace("<Q>", str(boxwidth)),
-            r"\setlength{\boxwidthinner}{<Q>mm}%".replace("<Q>", str(boxwidthinner)),
-        ]
+        inset = round((boxwidth - boxwidthinner) / 2, 3)
         contents = []
         if block.get("image"):
             image_path = block["image"]
@@ -455,7 +473,7 @@ class HandoutGenerator:
                 self._temp_files.append(image_path)
             image_path = self.prepare_image(image_path)
             img_qwidth = block.get("resize_image") or 1.0
-            imgwidth = IMGWIDTH.replace("<QWIDTH>", str(img_qwidth))
+            imgwidth = IMGWIDTH.replace("<QWIDTH>", f"{img_qwidth * 100}%")
             contents.append(
                 IMG.replace("<IMGPATH>", tex_image_path(image_path)).replace(
                     "<IMGWIDTH>", imgwidth
@@ -463,15 +481,14 @@ class HandoutGenerator:
             )
         if block.get("text"):
             contents.append(block["text"])
-        block["contents"] = "\\linebreak\n\\hstrut ".join(contents)
-        if block.get("no_center"):
-            block["centering"] = ""
-        else:
-            block["centering"] = "\\centering"
+        # Stack image + text inside a cell, separated by a forced line break.
+        block["contents"] = " \\\n".join(contents)
 
-        rows = []
+        halign = "left" if block.get("no_center") else "center"
+        vs = vspace_val if vspace_val is not None else 1
+
+        cells = []
         for row_idx in range(num_rows):
-            row_boxes = []
             for col_idx in range(columns):
                 edges, ext = self.get_edge_styles(
                     row_idx,
@@ -483,35 +500,36 @@ class HandoutGenerator:
                     hspace=hspace,
                     vspace=vspace_val if vspace_val is not None else 1.0,
                 )
-                row_boxes.append(
-                    self.make_tikzbox(block, edges, ext, inner_sep=effective_tikz_mm)
+                cells.append(
+                    self.make_typst_box(block, boxwidth, inset, edges, ext)
                 )
-            row = (
-                TIKZBOX_START.replace("<CENTERING>", block["centering"])
-                + "\n".join(row_boxes)
-                + TIKZBOX_END
-            )
-            rows.append(row)
-        vs = vspace_val if vspace_val is not None else 1
-        return "\n".join(header) + "\n" + f"\n\n\\vspace{{{vs}mm}}\n\n".join(rows)
+
+        column_spec = ", ".join([f"{boxwidth}mm"] * columns)
+        grid = (
+            f"#align({halign})[#grid(\n"
+            f"  columns: ({column_spec},),\n"
+            f"  column-gutter: {hspace}mm,\n"
+            f"  row-gutter: {vs}mm,\n"
+            + "".join(f"  {cell},\n" for cell in cells)
+            + ")]"
+        )
+        return grid
 
     def generate(self):
         for block in self.parse_input(self.args.filename):
             if not block:
-                self.blocks.append("\n\\clearpage\n")
+                self.blocks.append("\n#pagebreak()\n")
                 continue
             if self.args.debug:
                 print(block)
-            parts = []
+            label = None
+            grid = None
             if block.get("for_question"):
-                parts.append(self.generate_for_question(block["for_question"]))
+                label = self.generate_for_question(block["for_question"])
             if block.get("columns"):
-                generated_block = self.generate_regular_block(block)
-                if generated_block:
-                    parts.append(generated_block)
-            if parts:
-                self.blocks.append(self.keep_together(parts))
-        self.blocks.append("\\end{document}")
+                grid = self.generate_regular_block(block)
+            if label or grid:
+                self.blocks.append(self.wrap_question_block(label, grid))
         return "\n\n".join(self.blocks)
 
 
@@ -530,30 +548,59 @@ def get_num_teams(filepath):
     return None
 
 
+def typst_root():
+    """Root passed to ``typst compile`` so absolute image paths (including
+    optimized temp files outside the project dir) remain readable."""
+    return os.path.abspath(os.sep)
+
+
+def typst_compile_command(typst_path, typ_basename, pdf_basename):
+    """Build the ``typst compile`` argv, pointing the font search at the
+    bundled fonts (Noto Sans) while still allowing system fonts."""
+    return [
+        typst_path,
+        "compile",
+        "--root",
+        typst_root(),
+        "--font-path",
+        get_bundled_fonts_dir(),
+        typ_basename,
+        pdf_basename,
+    ]
+
+
+def ensure_typst_path(args):
+    typst_path = get_typst_path()
+    if not typst_path:
+        print("typst is not present, installing it...")
+        install_typst(args)
+        typst_path = get_typst_path()
+    if not typst_path:
+        raise Exception("typst couldn't be installed successfully :(")
+    return typst_path
+
+
 def process_file(args, file_dir, bn):
     generator = HandoutGenerator(args)
-    tex_contents = generator.generate()
+    typst_contents = generator.generate()
     add_n_teams = getattr(args, "add_n_teams", "off") == "on"
     num_teams = get_num_teams(args.filename) if add_n_teams else None
     if num_teams is not None:
         pdf_bn = f"{bn}_{num_teams}teams_{args.language}"
     else:
         pdf_bn = f"{bn}_{args.language}"
-    tex_path = os.path.join(file_dir, f"{pdf_bn}.tex")
-    write_file(tex_path, tex_contents)
+    typ_path = os.path.join(file_dir, f"{pdf_bn}.typ")
+    write_file(typ_path, typst_contents)
 
-    tectonic_path = get_tectonic_path()
-    if not tectonic_path:
-        print("tectonic is not present, installing it...")
-        install_tectonic(args)
-        tectonic_path = get_tectonic_path()
-    if not tectonic_path:
-        raise Exception("tectonic couldn't be installed successfully :(")
+    typst_path = ensure_typst_path(args)
     if args.debug:
-        print(f"tectonic found at `{tectonic_path}`")
+        print(f"typst found at `{typst_path}`")
 
+    output_file = replace_ext(typ_path, "pdf")
     proc = subprocess.run(
-        [tectonic_path, os.path.basename(tex_path)],
+        typst_compile_command(
+            typst_path, os.path.basename(typ_path), os.path.basename(output_file)
+        ),
         check=False,
         cwd=file_dir,
         text=True,
@@ -571,15 +618,13 @@ def process_file(args, file_dir, bn):
         except OSError:
             pass
 
-    output_file = replace_ext(tex_path, "pdf")
-
     if args.compress_pdf == "on":
         compress_pdf(output_file)
 
     print(f"Output file: {output_file}")
 
     if not args.debug:
-        os.remove(tex_path)
+        os.remove(typ_path)
 
 
 class FileChangeHandler(FileSystemEventHandler):
@@ -627,7 +672,7 @@ def gui_handouter(args):
     elif args.handoutssubcommand in ("hndt2pdf", "run"):
         run_handouter(args)
     elif args.handoutssubcommand == "install":
-        install_tectonic(args)
+        install_typst(args)
     elif args.handoutssubcommand == "split_fit":
         from chgksuite.handouter.split_fit import run_split_fit
 

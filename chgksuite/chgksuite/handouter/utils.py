@@ -16,7 +16,7 @@ from pypdf.generic import (
 )
 
 from chgksuite.common import optimize_raster_image_data, pil_image_to_jpeg_bytes
-from chgksuite.handouter.installer import escape_latex
+from chgksuite.handouter.installer import escape_typst
 
 RESERVED_WORDS = [
     "image",
@@ -600,6 +600,6 @@ def parse_handouts(contents):
         if text:
             block_dict["text"] = "\n".join(text).strip()
             if not block_dict.get("raw_tex"):
-                block_dict["text"] = escape_latex(block_dict["text"])
+                block_dict["text"] = escape_typst(block_dict["text"])
         result.append(block_dict)
     return result

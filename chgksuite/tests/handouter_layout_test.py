@@ -30,7 +30,7 @@ from chgksuite.handouter.split_fit import (
     split_fit_columns,
     write_handout,
 )
-from chgksuite.handouter.tex_internals import EDGE_DASHED, EDGE_SOLID, EDGE_NONE
+from chgksuite.handouter.typst_internals import EDGE_DASHED, EDGE_SOLID, EDGE_NONE
 from chgksuite.handouter.utils import (
     optimize_raster_image_for_tex,
     parse_handouts,
@@ -384,12 +384,13 @@ test"""
 
 class TestMaxWidthLayout:
     def test_max_width_limits_auto_box_width(self, generator):
-        tex = generator.generate_regular_block(
+        typst = generator.generate_regular_block(
             {"columns": 3, "rows": 1, "max_width": 0.5, "text": "test"}
         )
 
-        assert r"\setlength{\boxwidth}{32.0mm}%" in tex
-        assert r"\setlength{\boxwidthinner}{30.0mm}%" in tex
+        # boxwidth 32mm, inner 30mm -> inset (32-30)/2 = 1mm
+        assert "columns: (32.0mm, 32.0mm, 32.0mm,)" in typst
+        assert "hcell(32.0mm, 1.0mm," in typst
 
     def test_invalid_max_width_raises(self, generator):
         with pytest.raises(ValueError, match="max_width must be between 0 and 1"):
@@ -403,31 +404,28 @@ class TestMaxWidthLayout:
             {"for_question": 18, "columns": 3, "text": "test"}
         ]
 
-        tex = generator.generate()
+        typst = generator.generate()
 
-        assert r"\begin{minipage}{\linewidth}" in tex
-        assert r"\textcolor{gray}" in tex
-        assert r"\begin{tikzpicture}" in tex
-        assert tex.index(r"\begin{minipage}{\linewidth}") < tex.index(
-            r"\textcolor{gray}"
-        )
-        assert tex.index(r"\textcolor{gray}") < tex.index(r"\begin{tikzpicture}")
-        assert tex.index(r"\begin{tikzpicture}") < tex.index(r"\end{minipage}")
-        assert r"\end{minipage}\par\vspace{1.5mm}" in tex
+        # Label is glued to its grid via a sticky block, the grid stays breakable.
+        sticky = "#block(sticky: true)["
+        assert sticky in typst
+        assert "fill: gray" in typst
+        assert "#grid(" in typst
+        assert typst.index(sticky) < typst.index("fill: gray")
+        assert typst.index("fill: gray") < typst.index("#grid(")
+        assert typst.index("#grid(") < typst.index("#v(1.5mm)")
 
     def test_generate_keeps_question_label_without_handout_grid(self, generator):
         generator.args.filename = "handouts.hndt"
         generator.parse_input = lambda filename: [{"for_question": 18}]
 
-        tex = generator.generate()
+        typst = generator.generate()
 
-        assert r"\begin{minipage}{\linewidth}" in tex
-        assert r"\textcolor{gray}" in tex
-        assert r"\begin{tikzpicture}" not in tex
-        assert tex.index(r"\begin{minipage}{\linewidth}") < tex.index(
-            r"\textcolor{gray}"
-        )
-        assert tex.index(r"\textcolor{gray}") < tex.index(r"\end{minipage}")
+        # No grid: the label stands alone (not sticky) above the spacer.
+        assert "fill: gray" in typst
+        assert "#grid(" not in typst
+        assert "#block(sticky: true)[" not in typst
+        assert typst.index("fill: gray") < typst.index("#v(1.5mm)")
 
     def test_split_fit_multiplies_half_width_columns(self, tmp_path):
         block = HandoutBlock(
@@ -630,13 +628,13 @@ def test_handout_generator_normalizes_windows_temp_image_path(generator, monkeyp
         fake_optimize_raster_image_for_tex,
     )
 
-    tex = generator.generate_regular_block({"image": "handout.png", "columns": 1})
+    typst = generator.generate_regular_block({"image": "handout.png", "columns": 1})
 
     assert (
-        r"\includegraphics[width=1.0\textwidth]{C:/Users/USER~1/AppData/Local/Temp/2/tmpigabk_hf.jpg}"
-        in tex
+        'image("C:/Users/USER~1/AppData/Local/Temp/2/tmpigabk_hf.jpg", width: 100.0%)'
+        in typst
     )
-    assert windows_temp_path not in tex
+    assert windows_temp_path not in typst
 
 
 def test_handout_generator_can_disable_image_optimization(generator, tmp_path):
@@ -650,7 +648,7 @@ def test_handout_generator_can_disable_image_optimization(generator, tmp_path):
     assert not generator._temp_files
 
 
-def test_process_file_replays_tectonic_output_on_failure(
+def test_process_file_replays_typst_output_on_failure(
     tmp_path, monkeypatch, capsys
 ):
     class FakeGenerator:
@@ -660,7 +658,7 @@ def test_process_file_replays_tectonic_output_on_failure(
             self.args = args
 
         def generate(self):
-            return "\\end{document}"
+            return "#pagebreak()"
 
     def fake_run(cmd, check, cwd, text, capture_output):
         assert check is False
@@ -669,8 +667,8 @@ def test_process_file_replays_tectonic_output_on_failure(
         return subprocess.CompletedProcess(
             cmd,
             1,
-            stdout="tectonic stdout\n",
-            stderr="Undefined control sequence\n",
+            stdout="typst stdout\n",
+            stderr="unexpected end of block\n",
         )
 
     hndt_path = tmp_path / "handout.hndt"
@@ -683,15 +681,15 @@ def test_process_file_replays_tectonic_output_on_failure(
         debug=False,
     )
     monkeypatch.setattr("chgksuite.handouter.runner.HandoutGenerator", FakeGenerator)
-    monkeypatch.setattr("chgksuite.handouter.runner.get_tectonic_path", lambda: "tectonic")
+    monkeypatch.setattr("chgksuite.handouter.runner.get_typst_path", lambda: "typst")
     monkeypatch.setattr("chgksuite.handouter.runner.subprocess.run", fake_run)
 
     with pytest.raises(subprocess.CalledProcessError):
         process_file(args, str(tmp_path), "handout")
 
     captured = capsys.readouterr()
-    assert "tectonic stdout" in captured.out
-    assert "Undefined control sequence" in captured.err
+    assert "typst stdout" in captured.out
+    assert "unexpected end of block" in captured.err
 
 
 def test_compress_pdf_keeps_original_when_compressed_file_is_larger(

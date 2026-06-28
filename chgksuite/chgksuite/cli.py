@@ -1174,9 +1174,9 @@ class ArgparseBuilder:
         cmdhandouts_install = self.add_parser(cmdhandouts_subcommands, "install")
         self.add_argument(
             cmdhandouts_install,
-            "--tectonic_package_regex",
+            "--typst_package_regex",
             advanced=True,
-            caption="Переопределить имя файла с релизом tectonic",
+            caption="Переопределить имя файла с релизом typst",
         )
 
         cmdhandouts_split_fit = self.add_parser(cmdhandouts_subcommands, "split_fit")
@@ -1421,9 +1421,9 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdhandouts_split_fit,
-            "--tectonic_package_regex",
+            "--typst_package_regex",
             advanced=True,
-            caption="Переопределить имя файла с релизом tectonic",
+            caption="Переопределить имя файла с релизом typst",
         )
 
         cmdhandouts_pack = self.add_parser(cmdhandouts_subcommands, "pack")

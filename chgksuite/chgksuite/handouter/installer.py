@@ -17,49 +17,63 @@ def get_utils_dir():
     return path
 
 
-def escape_latex(text):
-    text = text.replace("\\", "\\textbackslash")
-    text = text.replace("~", "\\textasciitilde")
-    text = text.replace("^", "\\textasciicircum")
-    for char in ("%", "&", "$", "#", "{", "}", "_"):
+def get_bundled_fonts_dir():
+    """Directory of fonts shipped with the package (e.g. Noto Sans)."""
+    from chgksuite.common import get_source_dirs
+
+    _, resourcedir = get_source_dirs()
+    return os.path.join(resourcedir, "fonts")
+
+
+def escape_typst(text):
+    r"""Escape user text so it renders literally in Typst markup mode.
+
+    Only the characters that carry markup meaning are escaped; newlines become
+    forced line breaks (``\`` followed by the newline).
+    """
+    text = text.replace("\\", "\\\\")
+    for char in ("#", "$", "[", "]", "*", "_", "`", "<", ">", "@", "~"):
         text = text.replace(char, "\\" + char)
-    text = text.replace("\n", "\\linebreak\n\\hstrut ")
+    # Neutralise comment sequences (`//`, `/* */`).
+    text = text.replace("//", "\\/\\/").replace("/*", "\\/*").replace("*/", "*\\/")
+    # A backslash immediately before a newline is a forced line break in Typst.
+    text = text.replace("\n", "\\\n")
     return text
 
 
-def check_tectonic_path(tectonic_path):
-    proc = subprocess.run([tectonic_path, "--help"], capture_output=True, check=True)
+def check_typst_path(typst_path):
+    proc = subprocess.run([typst_path, "--version"], capture_output=True, check=True)
     return proc.returncode == 0
 
 
-def get_tectonic_path():
+def get_typst_path():
     errors = []
     system = platform.system()
 
     cpdir = get_utils_dir()
     if system == "Windows":
-        binary_name = "tectonic.exe"
-        tectonic_path = os.path.join(cpdir, binary_name)
+        binary_name = "typst.exe"
+        typst_path = os.path.join(cpdir, binary_name)
     else:
-        binary_name = "tectonic"
-        tectonic_path = os.path.join(cpdir, binary_name)
+        binary_name = "typst"
+        typst_path = os.path.join(cpdir, binary_name)
 
-    tectonic_ok = False
+    typst_ok = False
     try:
-        tectonic_ok = check_tectonic_path(binary_name)
+        typst_ok = check_typst_path(binary_name)
     except FileNotFoundError:
-        pass  # tectonic not found in PATH
+        pass  # typst not found in PATH
     except subprocess.CalledProcessError as e:
-        errors.append(f"tectonic --version failed: {type(e)} {e}")
-    if tectonic_ok:
+        errors.append(f"typst --version failed: {type(e)} {e}")
+    if typst_ok:
         return binary_name
-    if os.path.isfile(tectonic_path):
+    if os.path.isfile(typst_path):
         try:
-            tectonic_ok = check_tectonic_path(tectonic_path)
+            typst_ok = check_typst_path(typst_path)
         except subprocess.CalledProcessError as e:
-            errors.append(f"tectonic --version failed: {type(e)} {e}")
-    if tectonic_ok:
-        return tectonic_path
+            errors.append(f"typst --version failed: {type(e)} {e}")
+    if typst_ok:
+        return typst_path
 
 
 def github_get_latest_release(repo):
@@ -82,22 +96,26 @@ def darwin_is_emulated():
         return 0
 
 
-def parse_tectonic_archive_name(archive_name):
-    if archive_name.endswith(".tar.gz"):
-        archive_name = archive_name[: -len(".tar.gz")]
-    elif archive_name.endswith(".zip"):
-        archive_name = archive_name[: -len(".zip")]
+def parse_typst_archive_name(archive_name):
+    """Parse a typst release asset name such as
+    ``typst-x86_64-unknown-linux-musl.tar.xz`` into its components.
+    """
+    for suffix in (".tar.xz", ".tar.gz", ".zip"):
+        if archive_name.endswith(suffix):
+            archive_name = archive_name[: -len(suffix)]
+            break
     else:
         return
     sp = archive_name.split("-")
+    if len(sp) < 4 or sp[0] != "typst":
+        return
     result = {
-        "version": sp[1],
-        "arch": sp[2],
-        "manufacturer": sp[3],
-        "system": sp[4],
+        "arch": sp[1],
+        "manufacturer": sp[2],
+        "system": sp[3],
     }
-    if len(sp) > 5:
-        result["toolchain"] = sp[5]
+    if len(sp) > 4:
+        result["toolchain"] = sp[4]
     return result
 
 
@@ -129,49 +147,48 @@ def extract_tar(tar_file, dirname=None):
 
 
 def extract_archive(filename, dirname=None):
-    if filename.lower().endswith((".tar", ".tar.gz")):
+    if filename.lower().endswith((".tar", ".tar.gz", ".tar.xz")):
         extract_tar(filename, dirname=dirname)
     elif filename.lower().endswith(".zip"):
         extract_zip(filename, dirname=dirname)
 
 
+def _machine_arch():
+    machine = (platform.machine() or "").lower()
+    if machine in ("arm64", "aarch64"):
+        return "aarch64"
+    if machine in ("x86_64", "amd64"):
+        return "x86_64"
+    return machine
+
+
 def guess_archive_url(assets):
     system = platform.system()
-    proc = platform.processor()
     if system == "Darwin":
-        if proc == "arm" or (proc == "i386" and darwin_is_emulated()):
+        if _machine_arch() == "aarch64" or darwin_is_emulated():
             arch = "aarch64"
         else:
             arch = "x86_64"
-        for k, v in assets.items():
-            parsed = parse_tectonic_archive_name(k)
-            if not parsed:
-                continue
-            if parsed["arch"] == arch and parsed["system"] == "darwin":
-                return v
+        target_system, toolchain = "darwin", None
     elif system == "Windows":
-        for k, v in assets.items():
-            parsed = parse_tectonic_archive_name(k)
-            if not parsed:
-                continue
-            if (
-                parsed["arch"] == "x86_64"
-                and parsed["system"] == "windows"
-                and parsed["toolchain"] == "msvc"
-            ):
-                return v
+        arch = _machine_arch() or "x86_64"
+        target_system, toolchain = "windows", "msvc"
     elif system == "Linux":
-        for k, v in assets.items():
-            parsed = parse_tectonic_archive_name(k)
-            if not parsed:
-                continue
-            if (
-                (not proc or (proc and parsed["arch"] == proc))
-                and parsed["system"] == "linux"
-                and parsed["toolchain"] == "musl"
-            ):
-                return v
-    raise Exception(f"Archive for system {system} proc {proc} not found")
+        arch = _machine_arch() or "x86_64"
+        target_system, toolchain = "linux", "musl"
+    else:
+        raise Exception(f"Unsupported system {system}")
+
+    for k, v in assets.items():
+        parsed = parse_typst_archive_name(k)
+        if not parsed:
+            continue
+        if parsed["arch"] != arch or parsed["system"] != target_system:
+            continue
+        if toolchain and parsed.get("toolchain") != toolchain:
+            continue
+        return v
+    raise Exception(f"typst archive for system {system} arch {arch} not found")
 
 
 def archive_url_from_regex(assets, regex):
@@ -181,22 +198,31 @@ def archive_url_from_regex(assets, regex):
     raise Exception(f"Archive for regex {regex} not found")
 
 
-def install_tectonic(args):
+def _find_binary(root_dir, filename):
+    for dir_, _, files in os.walk(root_dir):
+        if filename in files:
+            return os.path.join(dir_, filename)
+    raise Exception(f"{filename} not found in extracted archive {root_dir}")
+
+
+def install_typst(args):
     system = platform.system()
-    assets = github_get_latest_release("tectonic-typesetting/tectonic")
-    if args.tectonic_package_regex:
-        archive_url = archive_url_from_regex(assets, args.tectonic_package_regex)
+    assets = github_get_latest_release("typst/typst")
+    regex = getattr(args, "typst_package_regex", None)
+    if regex:
+        archive_url = archive_url_from_regex(assets, regex)
     else:
         archive_url = guess_archive_url(assets)
     downloaded = download_file(archive_url)
-    dirname = "tectonic_folder"
+    dirname = "typst_folder"
     extract_archive(downloaded, dirname=dirname)
-    if system == "Windows":
-        filename = "tectonic.exe"
-    else:
-        filename = "tectonic"
+    filename = "typst.exe" if system == "Windows" else "typst"
+    # The binary lives inside a per-target subfolder (e.g. typst-<triple>/typst).
+    extracted_binary = _find_binary(dirname, filename)
     target_path = os.path.join(get_utils_dir(), filename)
-    shutil.move(os.path.join(dirname, filename), target_path)
+    shutil.move(extracted_binary, target_path)
+    if not os.access(target_path, os.X_OK):
+        os.chmod(target_path, 0o755)
     shutil.rmtree(dirname)
     return target_path
 
