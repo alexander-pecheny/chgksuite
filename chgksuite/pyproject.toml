@@ -26,6 +26,7 @@ classifiers = [
 dependencies = [
     "beautifulsoup4",
     "chardet==5.2.0",
+    "cryptography",
     "dateparser",
     "mammoth",
     "openpyxl",

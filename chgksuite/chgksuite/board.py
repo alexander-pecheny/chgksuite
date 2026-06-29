@@ -10,9 +10,17 @@ from collections import defaultdict
 
 import requests
 
+from chgksuite import xy_crypto
+from chgksuite.board_config import (
+    get_token_for_host,
+    migrate_legacy_board_id,
+    parse_board_url,
+    read_board_metadata,
+    service_host,
+    set_token_for_host,
+    write_board_metadata,
+)
 from chgksuite.common import (
-    get_chgksuite_dir,
-    get_lastdir,
     get_source_dirs,
     log_wrap,
     read_text_file,
@@ -28,16 +36,47 @@ TRELLO_URL = (
 )
 
 
-def upload_file(filepath, trello, list_name=None):
-    req = requests.get(
-        "{}/boards/{}/lists".format(API, trello["board_id"]),
-        params={"token": trello["params"]["token"], "key": trello["params"]["key"]},
-    )
+def _trello_config():
+    """Load resources/trello.json (the Trello app key + GET field params)."""
+    _, resourcedir = get_source_dirs()
+    with open(os.path.join(resourcedir, "trello.json")) as f:
+        return json.load(f)
+
+
+def _board_lists(board):
+    """Fetch a board's lists (service-aware). xy list names are decrypted."""
+    if board["service"] == "xy":
+        url = "{}/1/boards/{}/lists".format(board["base_url"], board["board_id"])
+        req = requests.get(url, params={"token": board["token"]})
+    else:
+        url = "{}/boards/{}/lists".format(API, board["board_id"])
+        req = requests.get(url, params={"token": board["token"], "key": board["key"]})
     if req.status_code != 200:
         print("Error: {}".format(req.text))
         sys.exit(1)
-
     lists = json.loads(req.content.decode("utf8"))
+    if board["service"] == "xy":
+        for list_ in lists:
+            list_["name"] = xy_crypto.decrypt_field(board["dk"], list_.get("name"))
+    return lists
+
+
+def _post_card(board, lid, name, desc):
+    """Create a card in a list (service-aware). xy desc is encrypted first."""
+    if board["service"] == "xy":
+        url = "{}/1/lists/{}/cards".format(board["base_url"], lid)
+        return requests.post(
+            url,
+            {"token": board["token"], "name": name, "desc": xy_crypto.encrypt_field(board["dk"], desc)},
+        )
+    url = "{}/lists/{}/cards".format(API, lid)
+    return requests.post(
+        url, {"key": board["key"], "token": board["token"], "desc": desc, "name": name}
+    )
+
+
+def upload_file(filepath, board, list_name=None):
+    lists = _board_lists(board)
     lid = None
     if list_name is None:
         list_ = lists[0]
@@ -58,57 +97,45 @@ def upload_file(filepath, trello, list_name=None):
         caption = "вопрос"
         if re.search("\n! (.+?)\r?\n", card):
             caption = re.search("\n! (.+?)\\.?\r?\n", card).group(1)
-            if trello["author"] and re.search("\n@ (.+?)\\.?\r?\n", card):
+            if board.get("author") and re.search("\n@ (.+?)\\.?\r?\n", card):
                 caption += " {}".format(re.search("\n@ (.+?)\r?\n", card).group(1))
 
-        req = requests.post(
-            "{}/lists/{}/cards".format(API, lid),
-            {
-                "key": trello["params"]["key"],
-                "token": trello["params"]["token"],
-                "desc": card,
-                "name": caption,
-            },
-        )
+        req = _post_card(board, lid, caption, card)
         if req.status_code == 200:
             print("Successfully sent {}".format(log_wrap(caption)))
         else:
             print("Error {}: {}".format(req.status_code, req.content))
 
 
-def gui_trello_upload(args):
-    get_lastdir()
-
-    if not args.board_id:
-        board_id = get_board_id()
-    else:
-        board_id = args.board_id
-
-    trelloconfig = args.trelloconfig
-    trelloconfig["board_id"] = board_id
-
-    trelloconfig["author"] = args.author
+def gui_board_upload(args):
+    board_url = getattr(args, "board_url", None) or get_board_url()
+    board = _attach_token(parse_board_url(board_url))
+    board["author"] = args.author
+    if board["service"] == "xy":
+        passphrase = board.get("passphrase") or prompt_passphrase()
+        data = _fetch_xy_keymeta(board)
+        board["dk"] = xy_crypto.derive_dk(passphrase, data["keymeta"])
 
     if isinstance(args.filename, (list, tuple)):
         if len(args.filename) == 1 and os.path.isdir(args.filename[0]):
             for filename in os.listdir(args.filename[0]):
                 if filename.endswith((".4s", ".si4s", ".br4s", ".tr4s")):
                     filepath = os.path.join(args.filename[0], filename)
-                    upload_file(filepath, trelloconfig, list_name=args.list_name)
+                    upload_file(filepath, board, list_name=args.list_name)
             set_lastdir(args.filename[0])
         else:
             for filename in args.filename:
-                upload_file(filename, trelloconfig, list_name=args.list_name)
+                upload_file(filename, board, list_name=args.list_name)
                 set_lastdir(filename)
     elif isinstance(args.filename, str):
         if os.path.isdir(args.filename):
             for filename in os.listdir(args.filename):
                 if filename.endswith((".4s", ".si4s", ".br4s", ".tr4s")):
                     filepath = os.path.join(args.filename, filename)
-                    upload_file(filepath, trelloconfig, list_name=args.list_name)
+                    upload_file(filepath, board, list_name=args.list_name)
                     set_lastdir(filepath)
         elif os.path.isfile(args.filename):
-            upload_file(args.filename, trelloconfig, list_name=args.list_name)
+            upload_file(args.filename, board, list_name=args.list_name)
             set_lastdir(args.filename)
 
 
@@ -246,37 +273,20 @@ def init_doc(doc_, id_):
     return doc_.add_paragraph()
 
 
-def gui_trello_download(args):
-    ld = get_lastdir()
-
+def gui_board_download(args):
     template_path = args.docx_template
 
-    board_id_path = os.path.join(args.folder, ".board_id")
-    if os.path.isfile(board_id_path):
-        with open(board_id_path, "r", encoding="utf-8") as f:
-            board_id = f.read().rstrip()
-    else:
-        board_id = get_board_id(path=args.folder)
-
-    params = args.trelloconfig["params"]
-    ld = args.folder
-    set_lastdir(ld)
+    board = resolve_download_board(args)
+    set_lastdir(args.folder)
     os.chdir(args.folder)
 
     if args.si or args.qb:
         from docx import Document
 
-    req = requests.get("{}/boards/{}".format(API, board_id), params=params)
-    if req.status_code != 200:
-        print("Error: {}".format(req.text))
-        if args.debug:
-            pdb.set_trace()
-        sys.exit(1)
+    json_ = fetch_board_json(board, args)
 
     _lists = defaultdict(lambda: [])
     _list_counters = defaultdict(lambda: 0)
-
-    json_ = json.loads(req.content.decode("utf8"))
     _names = defaultdict(lambda: None)
     open_lists = list(filter(lambda x: not x["closed"], json_["lists"]))
     for list_ in open_lists:
@@ -411,53 +421,149 @@ def gui_trello_download(args):
                     f.write("\n" + item + "\n")
 
 
-def get_board_id(path=None):
-    print("To communicate with your trello board we need its board_id.")
-    print("Your board link looks like this:")
+def get_board_url():
+    print("Чтобы работать с доской, нужна ссылка на неё. Примеры:")
+    print("  https://trello.com/b/Bi0z2H49/title-of-your-board")
+    print("  https://xy.pecheny.me/board/2")
     print()
-    print("https://trello.com/b/Bi0z2H49/title-of-your-board")
-    print("                     board_id")
-    print()
-    board_id = input(
-        "Please paste your board_id (or the board link, we'll parse it): "
-    ).rstrip()
-    if "trello.com" in board_id:
-        board_id = re_bi.search(board_id).group(1)
-    if path:
-        with open(os.path.join(path, ".board_id"), "w", encoding="utf-8") as f:
-            f.write(board_id)
-    return board_id
+    return input("Вставьте ссылку на доску: ").strip()
 
 
-def get_token(tokenpath, args):
-    if args.no_browser:
+def prompt_passphrase():
+    return input(
+        "Введите пароль доски xy (он будет сохранён в board_metadata.toml): "
+    ).strip()
+
+
+def _attach_token(board):
+    """Look up the saved token for a board's host, or tell the user to mint one."""
+    token = get_token_for_host(board["host"])
+    if not token:
+        print(
+            "Нет сохранённого токена для {host}. Сначала выполните:\n"
+            "  chgksuite board token {base}".format(
+                host=board["host"], base=board["base_url"]
+            )
+        )
+        sys.exit(1)
+    board["token"] = token
+    if board["service"] == "trello":
+        board["key"] = _trello_config()["params"]["key"]
+    return board
+
+
+def resolve_download_board(args):
+    """Determine the board to download for a folder.
+
+    Reads ``board_metadata.toml`` (migrating a legacy ``.board_id`` into it on
+    first run); otherwise prompts for a board URL (and, for xy, the passphrase)
+    and persists it.
+    """
+    folder = args.folder
+    migrate_legacy_board_id(folder)
+
+    meta = read_board_metadata(folder)
+    if meta and meta.get("board_url"):
+        board = parse_board_url(meta["board_url"])
+        board["passphrase"] = meta.get("passphrase")
+        return _attach_token(board)
+
+    board_url = get_board_url()
+    board = parse_board_url(board_url)
+    passphrase = None
+    if board["service"] == "xy":
+        passphrase = prompt_passphrase()
+        board["passphrase"] = passphrase
+    write_board_metadata(folder, board_url, passphrase)
+    return _attach_token(board)
+
+
+def _fetch_xy_keymeta(board):
+    """GET an xy board (token-authed) and return the raw JSON (incl. keymeta)."""
+    url = "{}/1/boards/{}".format(board["base_url"], board["board_id"])
+    req = requests.get(url, params={"token": board["token"]})
+    if req.status_code != 200:
+        print("Error: {}".format(req.text))
+        sys.exit(1)
+    return json.loads(req.content.decode("utf8"))
+
+
+def _fetch_xy_board(board):
+    """Fetch an xy board and decrypt every field into a Trello-shaped dict."""
+    data = _fetch_xy_keymeta(board)
+    passphrase = board.get("passphrase") or prompt_passphrase()
+    dk = xy_crypto.derive_dk(passphrase, data["keymeta"])
+    board["dk"] = dk
+    for list_ in data.get("lists", []):
+        list_["name"] = xy_crypto.decrypt_field(dk, list_.get("name"))
+        list_.setdefault("closed", False)
+    for card in data.get("cards", []):
+        card["desc"] = xy_crypto.decrypt_field(dk, card.get("desc"))
+        card["name"] = card.get("name") or ""  # xy derives titles from the desc
+        card.setdefault("closed", False)
+        for label in card.get("labels", []):
+            label["name"] = xy_crypto.decrypt_field(dk, label.get("name"))
+    return data
+
+
+def fetch_board_json(board, args):
+    """Return the board as a Trello-shaped, plaintext dict (decrypting xy)."""
+    if board["service"] == "xy":
+        return _fetch_xy_board(board)
+    params = dict(_trello_config()["params"])
+    params["token"] = board["token"]
+    req = requests.get("{}/boards/{}".format(API, board["board_id"]), params=params)
+    if req.status_code != 200:
+        print("Error: {}".format(req.text))
+        if getattr(args, "debug", False):
+            pdb.set_trace()
+        sys.exit(1)
+    return json.loads(req.content.decode("utf8"))
+
+
+def get_trello_token(args):
+    if getattr(args, "no_browser", False):
         print(f"Please open in browser the following url: {TRELLO_URL}")
     else:
         webbrowser.open(TRELLO_URL)
     token = input("Please paste the obtained token: ").rstrip()
-    with open(tokenpath, "w", encoding="utf-8") as f:
-        f.write(token)
+    set_token_for_host("trello.com", token)
     return token
 
 
-def gui_trello(args):
-    csdir = get_chgksuite_dir()
-    _, resourcedir = get_source_dirs()
-    tokenpath = os.path.join(csdir, ".trello_token")
-    if args.trellosubcommand == "token":
-        get_token(tokenpath, args)
-        sys.exit(1)
-    if not os.path.isfile(tokenpath):
-        token = get_token(tokenpath, args)
+def board_token(args):
+    """`board token [board_service_url]` — mint/store a token for a service.
+
+    Trello uses the OAuth connect URL; xy issues tokens in its UI, so we point
+    the user at ``{xy_url}/profile/tokens`` and store what they paste.
+    """
+    service_url = getattr(args, "board_service_url", None) or "https://trello.com"
+    host = service_host(service_url)
+    if host == "trello.com":
+        get_trello_token(args)
+        return
+    base = service_url if "://" in service_url else "https://" + service_url
+    base = base.rstrip("/")
+    print(f"Откройте в браузере {base}/profile/tokens,")
+    print("создайте токен и вставьте его сюда.")
+    token = input("Токен: ").strip()
+    set_token_for_host(host, token)
+
+
+def gui_board(args):
+    subcommand = getattr(args, "boardsubcommand", None) or getattr(
+        args, "trellosubcommand", None
+    )
+    if subcommand == "token":
+        board_token(args)
+    elif subcommand == "download":
+        gui_board_download(args)
+    elif subcommand == "upload":
+        gui_board_upload(args)
     else:
-        with open(tokenpath, "r", encoding="utf-8") as f:
-            token = f.read().rstrip()
+        print("Unknown board subcommand: {}".format(subcommand))
+        sys.exit(1)
 
-    with open(os.path.join(resourcedir, "trello.json")) as f:
-        args.trelloconfig = json.load(f)
-    args.trelloconfig["params"]["token"] = token
 
-    if args.trellosubcommand == "download":
-        gui_trello_download(args)
-    elif args.trellosubcommand == "upload":
-        gui_trello_upload(args)
+# Backwards-compatible alias (module + command were "trello").
+gui_trello = gui_board
