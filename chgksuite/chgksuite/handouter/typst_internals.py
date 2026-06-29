@@ -1,16 +1,17 @@
-"""Typst markup fragments used to render handout grids.
+"""Typst markup for rendering handout grids.
 
-This replaces the previous TeX/TikZ backend (``tex_internals``). The visual
-contract is identical: a grid of identical handout cells whose four edges are
-drawn independently as solid (team boundary / outer), dashed (internal
-separator) or omitted, with the solid lines extended into the inter-cell gaps
-so they meet across cuts.
+The layout is expressed with native Typst primitives instead of hand-drawn
+lines. A handout block is a set of *teams* (the rectangles a sheet is cut into)
+laid out in a ``grid`` with gaps between them. Each team is a solid-bordered
+``box`` wrapping a ``table`` whose internal separators are dashed and whose
+cells are centred (or left-aligned) both horizontally and vertically.
+
+``HandoutGenerator`` fills the ``<...>`` placeholders in ``HEADER`` and then
+emits one ``#qlabel`` + ``#handout(...)`` pair per question.
 """
 
-# Document preamble: page geometry, default font and the ``hcell`` helper that
-# draws a single handout box with four independently styled edges.
-#
-# Placeholders (``<...>``) are filled in by HandoutGenerator.get_header().
+# Document preamble: page geometry, default font and the helper functions
+# ``handout`` / ``qlabel``. Placeholders are filled by HandoutGenerator.
 HEADER = r"""
 #set page(
   width: <PAPERWIDTH>mm,
@@ -23,75 +24,64 @@ HEADER = r"""
   ),
 )
 #set text(font: "<FONT>", size: <FONTSIZE>pt)
-#set par(justify: false, leading: 0.5em)
+#set par(justify: false, leading: 0.55em)
+#set block(spacing: 0pt)
 
-#let _edge_stroke(kind) = {
-  if kind == "solid" { (paint: black, thickness: 0.8pt) }
-  else if kind == "dashed" { (paint: black, thickness: 0.4pt, dash: "dashed") }
-  else { none }
+#let _solid = 0.8pt + black
+#let _dashed = (paint: black, thickness: 0.5pt, dash: "dashed")
+
+// One team: a box of tcols x trows identical cells separated inside by dashed
+// lines, each cell's content aligned and vertically centred. Cells are flush so
+// each dash sits on a shared edge, centred between the two cells' content (the
+// cell inset `pad` is the only gap); this keeps the text optically centred.
+// `border` is the outer stroke (solid for a real team, dashed when uncut).
+#let _team(border, tcols, trows, cellw, rowh, pad, centered, cells) = box(
+  stroke: border,
+  inset: 0pt,
+  table(
+    columns: (cellw,) * tcols,
+    rows: (rowh,) * trows,
+    inset: pad,
+    align: (if centered { center } else { left }) + horizon,
+    stroke: (x, y) => (
+      left: if x > 0 { _dashed },
+      top: if y > 0 { _dashed },
+    ),
+    ..cells,
+  ),
+)
+
+// A question block: ncols x nrows cells grouped into (tcols x trows) teams,
+// tiled with gaps. Every cell holds the same `cellbody`; a single measurement
+// fixes the shared row height to max(content height, strut) + padding. `pad`
+// (cell inset) and `strut` (single-line floor) scale per block. `teamed` is
+// false when the sheet can't be cut into teams, giving an all-dashed block.
+#let handout(ncols, nrows, tcols, trows, gap, cellw, pad, strut, teamed, centered, cellbody) = context {
+  let ntc = int(ncols / tcols)
+  let ntr = int(nrows / trows)
+  let border = if teamed { _solid } else { _dashed }
+  let rowh = calc.max(measure(box(width: cellw - 2 * pad, cellbody)).height, strut) + 2 * pad
+  let one = _team(border, tcols, trows, cellw, rowh, pad, centered, (cellbody,) * (tcols * trows))
+  // Left-aligned so the block's left edge lines up with the grey label above it;
+  // gaps separate the teams (cells within a team stay flush).
+  align(left, grid(
+    columns: ntc,
+    column-gutter: gap,
+    row-gutter: gap,
+    ..(one,) * (ntc * ntr),
+  ))
 }
 
-// A single handout cell. `width`/`inset` are lengths; `halign` is an alignment;
-// `body` is content. The four `e_*` are "solid"/"dashed"/"none". The remaining
-// arguments are gap-closing extensions (lengths), already converted to Typst's
-// y-down coordinate system by the caller.
-//
-// The cell height is measured up front so the vertical edges get a concrete
-// length: a placed line's `100%` would otherwise resolve against the page
-// region (full height) rather than the cell when laid out inside a grid.
-#let hcell(
-  width, inset, halign, body,
-  e_top, e_bottom, e_left, e_right,
-  top_l, top_r, bottom_l, bottom_r,
-  left_t, left_b, right_t, right_b,
-  top_y, bottom_y,
-) = context {
-  let inner = width - 2 * inset
-  let h = measure(box(width: inner, body)).height + 2 * inset
-  box(width: width, height: h, inset: inset, {
-    if e_top != "none" {
-      place(top + left, line(
-        start: (top_l, top_y),
-        end: (width + top_r, top_y),
-        stroke: _edge_stroke(e_top),
-      ))
-    }
-    if e_bottom != "none" {
-      place(top + left, line(
-        start: (bottom_l, h + bottom_y),
-        end: (width + bottom_r, h + bottom_y),
-        stroke: _edge_stroke(e_bottom),
-      ))
-    }
-    if e_left != "none" {
-      place(top + left, line(
-        start: (0pt, left_t),
-        end: (0pt, h + left_b),
-        stroke: _edge_stroke(e_left),
-      ))
-    }
-    if e_right != "none" {
-      place(top + left, line(
-        start: (width, right_t),
-        end: (width, h + right_b),
-        stroke: _edge_stroke(e_right),
-      ))
-    }
-    align(halign, body)
-  })
-}
+// Small grey caption sitting just above (and left-aligned with) its block; it is
+// sticky so a page break never orphans it from the handout beneath it.
+#let qlabel(body) = block(above: <LABEL_ABOVE>mm, below: <LABEL_BELOW>mm,
+  sticky: true, text(fill: gray, size: 9pt, body))
 """.strip()
 
-# A small grey caption above a handout grid (e.g. "Handout for question 5").
-GREYTEXT = r"""#text(fill: gray, size: 9pt)[<GREYTEXT>]"""
+# Grey caption text, left-aligned directly atop a block.
+GREYTEXT = r"""#qlabel[<GREYTEXT>]"""
 
 # Image inside a cell, scaled relative to the cell's inner content width.
-IMG = r"""#image("<IMGPATH>", width: <IMGWIDTH>)"""
+IMG = r"""image("<IMGPATH>", width: <IMGWIDTH>)"""
 
 IMGWIDTH = r"""<QWIDTH>"""
-
-# Line styles for box edges. Values double as the literal tokens passed to the
-# Typst `hcell` helper, so they must stay in sync with `_edge_stroke` above.
-EDGE_SOLID = "solid"
-EDGE_DASHED = "dashed"
-EDGE_NONE = "none"
