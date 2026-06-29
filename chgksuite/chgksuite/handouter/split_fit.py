@@ -17,8 +17,12 @@ from typing import Callable
 from pypdf import PdfReader
 from pypdf.generic import ContentStream, IndirectObject
 
-from chgksuite.handouter.installer import get_tectonic_path, install_tectonic
-from chgksuite.handouter.runner import HandoutGenerator, get_num_teams
+from chgksuite.handouter.installer import get_typst_path, install_typst
+from chgksuite.handouter.runner import (
+    HandoutGenerator,
+    get_num_teams,
+    typst_compile_command,
+)
 from chgksuite.handouter.utils import compress_pdf
 
 RESERVED_WORDS = {
@@ -41,8 +45,8 @@ RESERVED_WORDS = {
     "max_width",
 }
 
-TECTONIC_LOCK = Lock()
-TECTONIC_PATH: str | None = None
+TYPST_LOCK = Lock()
+TYPST_PATH: str | None = None
 RENDERER_DEFAULTS = {
     "debug": False,
     "compress_pdf": "off",
@@ -59,7 +63,7 @@ RENDERER_DEFAULTS = {
     "boxwidthinner": None,
     "tikz_mm": None,
     "add_n_teams": "off",
-    "tectonic_package_regex": None,
+    "typst_package_regex": None,
 }
 
 
@@ -265,19 +269,19 @@ def build_renderer_args(hndt_path: Path, args) -> SimpleNamespace:
     return SimpleNamespace(**values)
 
 
-def cached_tectonic_path(renderer_args: SimpleNamespace) -> str | None:
-    global TECTONIC_PATH
-    if TECTONIC_PATH:
-        return TECTONIC_PATH
-    with TECTONIC_LOCK:
-        if TECTONIC_PATH:
-            return TECTONIC_PATH
-        tectonic_path = get_tectonic_path()
-        if not tectonic_path:
-            install_tectonic(renderer_args)
-            tectonic_path = get_tectonic_path()
-        TECTONIC_PATH = tectonic_path
-        return TECTONIC_PATH
+def cached_typst_path(renderer_args: SimpleNamespace) -> str | None:
+    global TYPST_PATH
+    if TYPST_PATH:
+        return TYPST_PATH
+    with TYPST_LOCK:
+        if TYPST_PATH:
+            return TYPST_PATH
+        typst_path = get_typst_path()
+        if not typst_path:
+            install_typst(renderer_args)
+            typst_path = get_typst_path()
+        TYPST_PATH = typst_path
+        return TYPST_PATH
 
 
 IDENTITY_MATRIX = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
@@ -502,7 +506,7 @@ def run_hndt2pdf(
 ) -> ProbeResult:
     renderer_args = build_renderer_args(hndt_path, args)
     generator = HandoutGenerator(renderer_args)
-    tex_contents = generator.generate()
+    typst_contents = generator.generate()
     file_dir = hndt_path.parent
     base_name = hndt_path.stem
     add_n_teams = getattr(renderer_args, "add_n_teams", "off") == "on"
@@ -512,15 +516,15 @@ def run_hndt2pdf(
             pdf_base_name = f"{base_name}_{num_teams}teams_{args.language}"
         else:
             pdf_base_name = f"{base_name}_{args.language}"
-        tex_path = file_dir / f"{pdf_base_name}.tex"
-        pdf_path = tex_path.with_suffix(".pdf")
+        typ_path = file_dir / f"{pdf_base_name}.typ"
+        pdf_path = typ_path.with_suffix(".pdf")
     else:
         pdf_path = output_pdf_path
-        tex_path = output_pdf_path.with_suffix(".tex")
-    tex_path.write_text(tex_contents, encoding="utf8")
+        typ_path = output_pdf_path.with_suffix(".typ")
+    typ_path.write_text(typst_contents, encoding="utf8")
 
-    tectonic_path = cached_tectonic_path(renderer_args)
-    if not tectonic_path:
+    typst_path = cached_typst_path(renderer_args)
+    if not typst_path:
         return ProbeResult(
             rows=-1,
             ok=False,
@@ -528,11 +532,11 @@ def run_hndt2pdf(
             pdf_path=None,
             bottom_space_mm=None,
             stdout="",
-            stderr="tectonic could not be found or installed",
+            stderr="typst could not be found or installed",
         )
 
     proc = subprocess.run(
-        [tectonic_path, tex_path.name],
+        typst_compile_command(typst_path, typ_path.name, pdf_path.name),
         cwd=file_dir,
         text=True,
         capture_output=True,
@@ -547,7 +551,7 @@ def run_hndt2pdf(
             pass
     if not getattr(renderer_args, "debug", False):
         try:
-            tex_path.unlink()
+            typ_path.unlink()
         except OSError:
             pass
     if proc.returncode != 0:

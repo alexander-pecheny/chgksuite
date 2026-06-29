@@ -30,7 +30,6 @@ from chgksuite.handouter.split_fit import (
     split_fit_columns,
     write_handout,
 )
-from chgksuite.handouter.tex_internals import EDGE_DASHED, EDGE_SOLID, EDGE_NONE
 from chgksuite.handouter.utils import (
     optimize_raster_image_for_tex,
     parse_handouts,
@@ -264,62 +263,6 @@ class TestGroupingPreference:
         assert team_rows_h == team_rows_v == 3
 
 
-class TestEdgeBoundaries:
-    """Tests for boundary detection in get_edge_styles."""
-
-    def test_single_team_all_solid_outer(self, generator):
-        """Single team rectangle has solid outer edges."""
-        # 1×3 grid, 1 team
-        edges, _ = generator.get_edge_styles(
-            row_idx=0, col_idx=0, num_rows=3, columns=1, team_cols=1, team_rows=3
-        )
-        assert edges["top"] == EDGE_SOLID
-        assert edges["left"] == EDGE_SOLID
-        assert edges["right"] == EDGE_SOLID
-
-    def test_vertical_team_boundary(self, generator):
-        """Test vertical boundary between teams in 2×3 grid (1×3 teams)."""
-        # Cell at (0, 0) - right edge should be at team boundary
-        edges, _ = generator.get_edge_styles(
-            row_idx=0, col_idx=0, num_rows=3, columns=2, team_cols=1, team_rows=3
-        )
-        # Right edge is at team boundary (col 0 is right edge of team 0)
-        assert edges["right"] == EDGE_SOLID
-
-    def test_horizontal_team_boundary(self, generator):
-        """Test horizontal boundary between teams in 3×3 grid (3×1 teams)."""
-        # Cell at (0, 0) - bottom edge should be at team boundary
-        edges, _ = generator.get_edge_styles(
-            row_idx=0, col_idx=0, num_rows=3, columns=3, team_cols=3, team_rows=1
-        )
-        # Bottom edge is at team boundary (row 0 is bottom of team 0)
-        assert edges["bottom"] == EDGE_SOLID
-
-    def test_internal_dashed_edges(self, generator):
-        """Internal edges within team should be dashed or none."""
-        # Cell at (1, 1) in 3×3 grid with 3×1 teams
-        # This cell is in middle of row, internal to team
-        edges, _ = generator.get_edge_styles(
-            row_idx=0, col_idx=1, num_rows=3, columns=3, team_cols=3, team_rows=1
-        )
-        # Left edge is internal, should be NONE (to avoid double lines)
-        assert edges["left"] == EDGE_NONE
-
-    def test_internal_row_separator_is_centered_in_gap(self, generator):
-        edges, ext = generator.get_edge_styles(
-            row_idx=0,
-            col_idx=0,
-            num_rows=3,
-            columns=1,
-            team_cols=1,
-            team_rows=3,
-            vspace=1.0,
-        )
-
-        assert edges["bottom"] == EDGE_DASHED
-        assert ext["bottom_yshift"] == "-0.5mm"
-
-
 class TestGroupingParsing:
     """Tests for parsing the grouping option from txt files."""
 
@@ -384,12 +327,14 @@ test"""
 
 class TestMaxWidthLayout:
     def test_max_width_limits_auto_box_width(self, generator):
-        tex = generator.generate_regular_block(
+        typst = generator.generate_regular_block(
             {"columns": 3, "rows": 1, "max_width": 0.5, "text": "test"}
         )
 
-        assert r"\setlength{\boxwidth}{32.0mm}%" in tex
-        assert r"\setlength{\boxwidthinner}{30.0mm}%" in tex
+        # available width = page width (198mm) * 0.5 = 99mm; one team (3x1) so no
+        # between-team gaps -> cellw = 99 / 3 = 33mm.
+        assert "#handout(3, 1, 3, 1, 1.5mm, 33.0mm, 1mm, 5.08mm, true, true," in typst
+        assert "[test]" in typst
 
     def test_invalid_max_width_raises(self, generator):
         with pytest.raises(ValueError, match="max_width must be between 0 and 1"):
@@ -403,31 +348,24 @@ class TestMaxWidthLayout:
             {"for_question": 18, "columns": 3, "text": "test"}
         ]
 
-        tex = generator.generate()
+        typst = generator.generate()
 
-        assert r"\begin{minipage}{\linewidth}" in tex
-        assert r"\textcolor{gray}" in tex
-        assert r"\begin{tikzpicture}" in tex
-        assert tex.index(r"\begin{minipage}{\linewidth}") < tex.index(
-            r"\textcolor{gray}"
-        )
-        assert tex.index(r"\textcolor{gray}") < tex.index(r"\begin{tikzpicture}")
-        assert tex.index(r"\begin{tikzpicture}") < tex.index(r"\end{minipage}")
-        assert r"\end{minipage}\par\vspace{1.5mm}" in tex
+        # The grey label is emitted directly above its handout block.
+        assert "#qlabel[" in typst
+        assert "#handout(" in typst
+        assert typst.index("#qlabel[") < typst.index("#handout(")
+        # The sticky label keeps glued to its block across page breaks.
+        assert "sticky: true" in typst
 
     def test_generate_keeps_question_label_without_handout_grid(self, generator):
         generator.args.filename = "handouts.hndt"
         generator.parse_input = lambda filename: [{"for_question": 18}]
 
-        tex = generator.generate()
+        typst = generator.generate()
 
-        assert r"\begin{minipage}{\linewidth}" in tex
-        assert r"\textcolor{gray}" in tex
-        assert r"\begin{tikzpicture}" not in tex
-        assert tex.index(r"\begin{minipage}{\linewidth}") < tex.index(
-            r"\textcolor{gray}"
-        )
-        assert tex.index(r"\textcolor{gray}") < tex.index(r"\end{minipage}")
+        # No grid: the label stands alone, no handout block is emitted.
+        assert "#qlabel[" in typst
+        assert "#handout(" not in typst
 
     def test_split_fit_multiplies_half_width_columns(self, tmp_path):
         block = HandoutBlock(
@@ -630,13 +568,13 @@ def test_handout_generator_normalizes_windows_temp_image_path(generator, monkeyp
         fake_optimize_raster_image_for_tex,
     )
 
-    tex = generator.generate_regular_block({"image": "handout.png", "columns": 1})
+    typst = generator.generate_regular_block({"image": "handout.png", "columns": 1})
 
     assert (
-        r"\includegraphics[width=1.0\textwidth]{C:/Users/USER~1/AppData/Local/Temp/2/tmpigabk_hf.jpg}"
-        in tex
+        'image("C:/Users/USER~1/AppData/Local/Temp/2/tmpigabk_hf.jpg", width: 100.0%)'
+        in typst
     )
-    assert windows_temp_path not in tex
+    assert windows_temp_path not in typst
 
 
 def test_handout_generator_can_disable_image_optimization(generator, tmp_path):
@@ -650,7 +588,7 @@ def test_handout_generator_can_disable_image_optimization(generator, tmp_path):
     assert not generator._temp_files
 
 
-def test_process_file_replays_tectonic_output_on_failure(
+def test_process_file_replays_typst_output_on_failure(
     tmp_path, monkeypatch, capsys
 ):
     class FakeGenerator:
@@ -660,7 +598,7 @@ def test_process_file_replays_tectonic_output_on_failure(
             self.args = args
 
         def generate(self):
-            return "\\end{document}"
+            return "#pagebreak()"
 
     def fake_run(cmd, check, cwd, text, capture_output):
         assert check is False
@@ -669,8 +607,8 @@ def test_process_file_replays_tectonic_output_on_failure(
         return subprocess.CompletedProcess(
             cmd,
             1,
-            stdout="tectonic stdout\n",
-            stderr="Undefined control sequence\n",
+            stdout="typst stdout\n",
+            stderr="unexpected end of block\n",
         )
 
     hndt_path = tmp_path / "handout.hndt"
@@ -683,15 +621,15 @@ def test_process_file_replays_tectonic_output_on_failure(
         debug=False,
     )
     monkeypatch.setattr("chgksuite.handouter.runner.HandoutGenerator", FakeGenerator)
-    monkeypatch.setattr("chgksuite.handouter.runner.get_tectonic_path", lambda: "tectonic")
+    monkeypatch.setattr("chgksuite.handouter.runner.get_typst_path", lambda: "typst")
     monkeypatch.setattr("chgksuite.handouter.runner.subprocess.run", fake_run)
 
     with pytest.raises(subprocess.CalledProcessError):
         process_file(args, str(tmp_path), "handout")
 
     captured = capsys.readouterr()
-    assert "tectonic stdout" in captured.out
-    assert "Undefined control sequence" in captured.err
+    assert "typst stdout" in captured.out
+    assert "unexpected end of block" in captured.err
 
 
 def test_compress_pdf_keeps_original_when_compressed_file_is_larger(

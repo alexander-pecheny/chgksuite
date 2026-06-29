@@ -15,18 +15,16 @@ from watchdog.observers import Observer
 from chgksuite.common import get_source_dirs, set_lastdir
 from chgksuite.handouter.gen import generate_handouts
 from chgksuite.handouter.pack import pack_handouts
-from chgksuite.handouter.installer import get_tectonic_path, install_tectonic
-from chgksuite.handouter.tex_internals import (
-    EDGE_DASHED,
-    EDGE_NONE,
-    EDGE_SOLID,
+from chgksuite.handouter.installer import (
+    get_bundled_fonts_dir,
+    get_typst_path,
+    install_typst,
+)
+from chgksuite.handouter.typst_internals import (
     GREYTEXT,
     HEADER,
     IMG,
     IMGWIDTH,
-    TIKZBOX_END,
-    TIKZBOX_INNER,
-    TIKZBOX_START,
 )
 from chgksuite.handouter.utils import (
     compress_pdf,
@@ -72,6 +70,9 @@ def rotate_image(image_path, direction):
     return tmp_path
 
 
+DEFAULT_FONT = "Noto Sans"
+
+
 class HandoutGenerator:
     SPACE = 1.5  # mm
     DEFAULT_TIKZ_MM = 2  # mm
@@ -92,6 +93,14 @@ class HandoutGenerator:
         )
         self.blocks = [self.get_header()]
 
+    # The grey label's gaps (large above to separate questions, tiny below so it
+    # hugs its grid), in millimetres.
+    LABEL_ABOVE = 2.0
+    LABEL_BELOW = 0.6
+    # A short single line fills a cell of this height per em of font size (the
+    # old TeX `\vphantom{Ayg}` strut + baseline skip), so cells line up.
+    STRUT_EM = 1.2
+
     def get_header(self):
         header = HEADER
         header = (
@@ -101,18 +110,21 @@ class HandoutGenerator:
             .replace("<MARGIN_RIGHT>", str(self.args.margin_right))
             .replace("<MARGIN_TOP>", str(self.args.margin_top))
             .replace("<MARGIN_BOTTOM>", str(self.args.margin_bottom))
-            .replace(
-                "<TIKZ_MM>",
-                str(
-                    self.args.tikz_mm
-                    if self.args.tikz_mm is not None
-                    else self.DEFAULT_TIKZ_MM
-                ),
-            )
+            .replace("<FONT>", self.args.font or DEFAULT_FONT)
+            .replace("<FONTSIZE>", str(self.args.font_size))
+            .replace("<LABEL_ABOVE>", str(self.LABEL_ABOVE))
+            .replace("<LABEL_BELOW>", str(self.LABEL_BELOW))
         )
-        if self.args.font:
-            header = header.replace("Arial", self.args.font)
         return header
+
+    def effective_tikz_mm(self, block):
+        """Cell inset in mm: a global override wins, then the per-block value,
+        else the default (the old TikZ ``inner sep``)."""
+        if self.args.tikz_mm is not None:
+            return self.args.tikz_mm
+        if block.get("tikz_mm") is not None:
+            return block["tikz_mm"]
+        return self.DEFAULT_TIKZ_MM
 
     def parse_input(self, filepath):
         contents = read_file(filepath)
@@ -124,69 +136,13 @@ class HandoutGenerator:
         )
         return GREYTEXT.replace("<GREYTEXT>", handout_text)
 
-    def keep_together(self, parts):
-        return (
-            "\\par\\noindent\\begin{minipage}{\\linewidth}\n"
-            + "\n\n".join(parts)
-            + "\n\\end{minipage}\\par\\vspace{1.5mm}"
-        )
+    def wrap_question_block(self, label, grid):
+        """Join a question's grey label and its handout block.
 
-    def make_tikzbox(self, block, edges=None, ext=None, inner_sep=None):
+        The label (a ``#qlabel`` sticky block) already carries its own spacing
+        and stays glued to the block below it across page breaks.
         """
-        Create a TikZ box with configurable edge styles and extensions.
-        edges is a dict with keys 'top', 'bottom', 'left', 'right'
-        values are EDGE_DASHED or EDGE_SOLID
-        ext is a dict with edge extensions to close gaps at boundaries
-        """
-        if edges is None:
-            edges = {
-                "top": EDGE_DASHED,
-                "bottom": EDGE_DASHED,
-                "left": EDGE_DASHED,
-                "right": EDGE_DASHED,
-            }
-        if ext is None:
-            ext = {
-                "top": ("0pt", "0pt"),
-                "bottom": ("0pt", "0pt"),
-                "left": ("0pt", "0pt"),
-                "right": ("0pt", "0pt"),
-            }
-
-        if block.get("no_center"):
-            align = ""
-        else:
-            align = ", align=center"
-        textwidth = ", text width=\\boxwidthinner"
-        fs = block.get("font_size") or self.args.font_size
-        fontsize = "\\fontsize{FSpt}{LHpt}\\selectfont ".replace("FS", str(fs)).replace(
-            "LH", str(round(fs * 1.2, 1))
-        )
-        contents = block["contents"]
-        if block.get("font_family"):
-            contents = "\\fontspec{" + block["font_family"] + "}" + contents
-        inner_sep_str = f", inner sep={inner_sep}mm" if inner_sep is not None else ""
-        return (
-            TIKZBOX_INNER.replace("<CONTENTS>", contents)
-            .replace("<ALIGN>", align)
-            .replace("<TEXTWIDTH>", textwidth)
-            .replace("<INNER_SEP_OVERRIDE>", inner_sep_str)
-            .replace("<FONTSIZE>", fontsize)
-            .replace("<TOP>", edges["top"])
-            .replace("<BOTTOM>", edges["bottom"])
-            .replace("<LEFT>", edges["left"])
-            .replace("<RIGHT>", edges["right"])
-            .replace("<TOP_EXT_L>", ext["top"][0])
-            .replace("<TOP_EXT_R>", ext["top"][1])
-            .replace("<BOTTOM_EXT_L>", ext["bottom"][0])
-            .replace("<BOTTOM_EXT_R>", ext["bottom"][1])
-            .replace("<TOP_YSHIFT>", ext["top_yshift"])
-            .replace("<BOTTOM_YSHIFT>", ext["bottom_yshift"])
-            .replace("<LEFT_EXT_T>", ext["left"][0])
-            .replace("<LEFT_EXT_B>", ext["left"][1])
-            .replace("<RIGHT_EXT_T>", ext["right"][0])
-            .replace("<RIGHT_EXT_B>", ext["right"][1])
-        )
+        return "\n\n".join(p for p in (label, grid) if p)
 
     def get_page_width(self):
         return self.args.paperwidth - self.args.margin_left - self.args.margin_right - 2
@@ -256,150 +212,42 @@ class HandoutGenerator:
 
         return valid_layouts[0]
 
-    def get_edge_styles(
-        self,
-        row_idx,
-        col_idx,
-        num_rows,
-        columns,
-        team_cols,
-        team_rows,
-        hspace=None,
-        vspace=None,
-    ):
-        """
-        Determine edge styles and extensions for a box at position (row_idx, col_idx).
-        Outer edges of team rectangles are solid (thicker), inner edges are dashed.
-        Extensions are used to close gaps in ALL solid lines.
-        Duplicate dashed edges are skipped to avoid double lines.
+    def build_cell_body(self, block):
+        """Build the Typst content placed in every cell of a block: an optional
+        image, an optional (possibly multi-line) text, and a centred caption
+        beneath the image when both are present."""
+        fs = block.get("font_size") or self.args.font_size
 
-        team_cols and team_rows define the dimensions of each team rectangle.
-        """
-        # Default: all dashed, no extension
-        edges = {
-            "top": EDGE_DASHED,
-            "bottom": EDGE_DASHED,
-            "left": EDGE_DASHED,
-            "right": EDGE_DASHED,
-        }
-        ext = {
-            "top": ("0pt", "0pt"),
-            "bottom": ("0pt", "0pt"),
-            "left": ("0pt", "0pt"),
-            "right": ("0pt", "0pt"),
-            "top_yshift": "0pt",
-            "bottom_yshift": "0pt",
-        }
+        def wrap_text(s):
+            if block.get("font_family"):
+                return f'text(font: "{block["font_family"]}", size: {fs}pt)[{s}]'
+            return f"text(size: {fs}pt)[{s}]"
 
-        # Gap sizes (half of spacing to extend into)
-        h_sp = hspace if hspace is not None else self.SPACE
-        v_sp = vspace if vspace is not None else 1.0
-        h_gap = f"{h_sp / 2}mm"
-        v_gap = f"{v_sp / 2}mm"
-
-        # Helper functions to check if position is at a team boundary
-        def is_at_right_team_boundary():
-            """Is this box at the right edge of its team (but not at grid edge)?"""
-            if not team_cols:
-                return False
-            return (col_idx + 1) % team_cols == 0 and col_idx < columns - 1
-
-        def is_at_left_team_boundary():
-            """Is this box at the left edge of its team (but not at grid edge)?"""
-            if not team_cols:
-                return False
-            return col_idx % team_cols == 0 and col_idx > 0
-
-        def is_at_bottom_team_boundary():
-            """Is this box at the bottom edge of its team (but not at grid edge)?"""
-            if not team_rows:
-                return False
-            return (row_idx + 1) % team_rows == 0 and row_idx < num_rows - 1
-
-        def is_at_top_team_boundary():
-            """Is this box at the top edge of its team (but not at grid edge)?"""
-            if not team_rows:
-                return False
-            return row_idx % team_rows == 0 and row_idx > 0
-
-        # Determine which edges are solid
-        # Only apply solid edges if we have valid team dimensions
-        # Otherwise fall back to all-dashed (default)
-        if team_cols is not None and team_rows is not None:
-            # Outer edges of the entire grid
-            if row_idx == 0:
-                edges["top"] = EDGE_SOLID
-            if row_idx == num_rows - 1:
-                edges["bottom"] = EDGE_SOLID
-            if col_idx == 0:
-                edges["left"] = EDGE_SOLID
-            if col_idx == columns - 1:
-                edges["right"] = EDGE_SOLID
-
-            # Team boundary edges
-            if is_at_right_team_boundary():
-                edges["right"] = EDGE_SOLID
-            if is_at_left_team_boundary():
-                edges["left"] = EDGE_SOLID
-            if is_at_bottom_team_boundary():
-                edges["bottom"] = EDGE_SOLID
-            if is_at_top_team_boundary():
-                edges["top"] = EDGE_SOLID
-
-        # Skip duplicate dashed edges (to avoid double lines between adjacent boxes)
-        if edges["left"] == EDGE_DASHED and col_idx > 0:
-            edges["left"] = EDGE_NONE
-
-        if edges["top"] == EDGE_DASHED and row_idx > 0:
-            edges["top"] = EDGE_NONE
-
-        if edges["bottom"] == EDGE_DASHED and row_idx < num_rows - 1:
-            ext["bottom_yshift"] = "-" + v_gap
-
-        # Calculate extensions for solid edges to close gaps
-        # But don't extend into team boundary gaps!
-
-        if edges["top"] == EDGE_SOLID:
-            at_left_boundary = is_at_left_team_boundary()
-            ext_left = "-" + h_gap if col_idx > 0 and not at_left_boundary else "0pt"
-            at_right_boundary = is_at_right_team_boundary()
-            ext_right = (
-                h_gap if col_idx < columns - 1 and not at_right_boundary else "0pt"
+        img_expr = None
+        if block.get("image"):
+            image_path = block["image"]
+            if block.get("rotate"):
+                image_path = rotate_image(
+                    self.resolve_image_path(image_path), block["rotate"]
+                )
+                self._temp_files.append(image_path)
+            image_path = self.prepare_image(image_path)
+            img_qwidth = block.get("resize_image") or 1.0
+            imgwidth = IMGWIDTH.replace("<QWIDTH>", f"{img_qwidth * 100}%")
+            img_expr = IMG.replace("<IMGPATH>", tex_image_path(image_path)).replace(
+                "<IMGWIDTH>", imgwidth
             )
-            ext["top"] = (ext_left, ext_right)
 
-        if edges["bottom"] == EDGE_SOLID:
-            at_left_boundary = is_at_left_team_boundary()
-            ext_left = "-" + h_gap if col_idx > 0 and not at_left_boundary else "0pt"
-            at_right_boundary = is_at_right_team_boundary()
-            ext_right = (
-                h_gap if col_idx < columns - 1 and not at_right_boundary else "0pt"
+        text_expr = wrap_text(block["text"]) if block.get("text") else None
+
+        if img_expr and text_expr:
+            return (
+                f"stack(dir: ttb, spacing: 1mm, {img_expr}, "
+                f"align(center, {text_expr}))"
             )
-            ext["bottom"] = (ext_left, ext_right)
-
-        if edges["left"] == EDGE_SOLID:
-            at_top_boundary = is_at_top_team_boundary()
-            ext_top = v_gap if row_idx > 0 and not at_top_boundary else "0pt"
-            at_bottom_boundary = is_at_bottom_team_boundary()
-            ext_bottom = (
-                "-" + v_gap
-                if row_idx < num_rows - 1 and not at_bottom_boundary
-                else "0pt"
-            )
-            ext["left"] = (ext_top, ext_bottom)
-
-        if edges["right"] == EDGE_SOLID:
-            at_top_boundary = is_at_top_team_boundary()
-            ext_top = v_gap if row_idx > 0 and not at_top_boundary else "0pt"
-            at_bottom_boundary = is_at_bottom_team_boundary()
-            ext_bottom = (
-                "-" + v_gap
-                if row_idx < num_rows - 1 and not at_bottom_boundary
-                else "0pt"
-            )
-            ext["right"] = (ext_top, ext_bottom)
-
-        return edges, ext
+        if img_expr:
+            return img_expr
+        return text_expr or wrap_text("")
 
     def generate_regular_block(self, block_):
         block = block_.copy()
@@ -410,108 +258,58 @@ class HandoutGenerator:
         handouts_per_team = block.get("handouts_per_team") or 3
         grouping = block.get("grouping") or "horizontal"
 
-        # Determine team rectangle dimensions
+        # How the sheet is cut into teams: each team is a solid-bordered
+        # team_cols x team_rows rectangle. If it does not divide evenly, treat
+        # the whole block as one team (solid outline, all-dashed inside).
         team_cols, team_rows = self.get_cut_direction(
             columns, num_rows, handouts_per_team, grouping
         )
+        teamed = bool(team_cols and team_rows)
+        if not teamed:
+            team_cols, team_rows = columns, num_rows
         if self.args.debug:
             print(
                 f"team_cols: {team_cols}, team_rows: {team_rows}, grouping: {grouping}"
             )
 
-        hspace = block.get("hspace") or self.SPACE
-        vspace_val = block.get("vspace")
-        tikz_mm = block.get("tikz_mm")
-
-        spaces = columns - 1
+        # Gaps sit between teams only (cells are flush within a team), so the row
+        # width is divided among `columns` cells plus the between-team gaps.
+        gap = block.get("hspace") or self.SPACE
+        n_team_cols = columns // team_cols
         available_width = self.get_page_width() * self.get_block_max_width(block)
-        boxwidth = self.args.boxwidth or round(
-            (available_width - spaces * hspace) / columns,
-            3,
+        cellw = self.args.boxwidth or round(
+            (available_width - (n_team_cols - 1) * gap) / columns, 3
         )
-        total_width = boxwidth * columns + spaces * hspace
         if self.args.debug:
-            print(
-                f"columns: {columns}, boxwidth: {boxwidth}, total width: {total_width}"
-            )
-        if self.args.tikz_mm is not None:
-            effective_tikz_mm = self.args.tikz_mm
-        elif tikz_mm is not None:
-            effective_tikz_mm = tikz_mm
-        else:
-            effective_tikz_mm = self.DEFAULT_TIKZ_MM
-        boxwidthinner = self.args.boxwidthinner or (boxwidth - 2 * effective_tikz_mm)
-        header = [
-            r"\setlength{\boxwidth}{<Q>mm}%".replace("<Q>", str(boxwidth)),
-            r"\setlength{\boxwidthinner}{<Q>mm}%".replace("<Q>", str(boxwidthinner)),
-        ]
-        contents = []
-        if block.get("image"):
-            image_path = block["image"]
-            if block.get("rotate"):
-                image_path = rotate_image(
-                    self.resolve_image_path(image_path), block["rotate"]
-                )
-                self._temp_files.append(image_path)
-            image_path = self.prepare_image(image_path)
-            img_qwidth = block.get("resize_image") or 1.0
-            imgwidth = IMGWIDTH.replace("<QWIDTH>", str(img_qwidth))
-            contents.append(
-                IMG.replace("<IMGPATH>", tex_image_path(image_path)).replace(
-                    "<IMGWIDTH>", imgwidth
-                )
-            )
-        if block.get("text"):
-            contents.append(block["text"])
-        block["contents"] = "\\linebreak\n\\hstrut ".join(contents)
-        if block.get("no_center"):
-            block["centering"] = ""
-        else:
-            block["centering"] = "\\centering"
+            print(f"columns: {columns}, cellw: {cellw}, gap: {gap}")
 
-        rows = []
-        for row_idx in range(num_rows):
-            row_boxes = []
-            for col_idx in range(columns):
-                edges, ext = self.get_edge_styles(
-                    row_idx,
-                    col_idx,
-                    num_rows,
-                    columns,
-                    team_cols,
-                    team_rows,
-                    hspace=hspace,
-                    vspace=vspace_val if vspace_val is not None else 1.0,
-                )
-                row_boxes.append(
-                    self.make_tikzbox(block, edges, ext, inner_sep=effective_tikz_mm)
-                )
-            row = (
-                TIKZBOX_START.replace("<CENTERING>", block["centering"])
-                + "\n".join(row_boxes)
-                + TIKZBOX_END
-            )
-            rows.append(row)
-        vs = vspace_val if vspace_val is not None else 1
-        return "\n".join(header) + "\n" + f"\n\n\\vspace{{{vs}mm}}\n\n".join(rows)
+        pad = self.effective_tikz_mm(block)
+        fs = block.get("font_size") or self.args.font_size
+        strut = round(fs * self.STRUT_EM * 25.4 / 72, 3)  # em -> mm
+        cellbody = self.build_cell_body(block)
+        centered = "false" if block.get("no_center") else "true"
+        return (
+            f"#handout({columns}, {num_rows}, {team_cols}, {team_rows}, "
+            f"{gap}mm, {cellw}mm, {pad}mm, {strut}mm, "
+            f"{str(teamed).lower()}, {centered}, {cellbody})"
+        )
+
 
     def generate(self):
         for block in self.parse_input(self.args.filename):
             if not block:
-                self.blocks.append("\n\\clearpage\n")
+                self.blocks.append("\n#pagebreak()\n")
                 continue
             if self.args.debug:
                 print(block)
-            parts = []
+            label = None
+            grid = None
             if block.get("for_question"):
-                parts.append(self.generate_for_question(block["for_question"]))
+                label = self.generate_for_question(block["for_question"])
             if block.get("columns"):
-                generated_block = self.generate_regular_block(block)
-                if generated_block:
-                    parts.append(generated_block)
-            if parts:
-                self.blocks.append(self.keep_together(parts))
-        self.blocks.append("\\end{document}")
+                grid = self.generate_regular_block(block)
+            if label or grid:
+                self.blocks.append(self.wrap_question_block(label, grid))
         return "\n\n".join(self.blocks)
 
 
@@ -530,30 +328,59 @@ def get_num_teams(filepath):
     return None
 
 
+def typst_root():
+    """Root passed to ``typst compile`` so absolute image paths (including
+    optimized temp files outside the project dir) remain readable."""
+    return os.path.abspath(os.sep)
+
+
+def typst_compile_command(typst_path, typ_basename, pdf_basename):
+    """Build the ``typst compile`` argv, pointing the font search at the
+    bundled fonts (Noto Sans) while still allowing system fonts."""
+    return [
+        typst_path,
+        "compile",
+        "--root",
+        typst_root(),
+        "--font-path",
+        get_bundled_fonts_dir(),
+        typ_basename,
+        pdf_basename,
+    ]
+
+
+def ensure_typst_path(args):
+    typst_path = get_typst_path()
+    if not typst_path:
+        print("typst is not present, installing it...")
+        install_typst(args)
+        typst_path = get_typst_path()
+    if not typst_path:
+        raise Exception("typst couldn't be installed successfully :(")
+    return typst_path
+
+
 def process_file(args, file_dir, bn):
     generator = HandoutGenerator(args)
-    tex_contents = generator.generate()
+    typst_contents = generator.generate()
     add_n_teams = getattr(args, "add_n_teams", "off") == "on"
     num_teams = get_num_teams(args.filename) if add_n_teams else None
     if num_teams is not None:
         pdf_bn = f"{bn}_{num_teams}teams_{args.language}"
     else:
         pdf_bn = f"{bn}_{args.language}"
-    tex_path = os.path.join(file_dir, f"{pdf_bn}.tex")
-    write_file(tex_path, tex_contents)
+    typ_path = os.path.join(file_dir, f"{pdf_bn}.typ")
+    write_file(typ_path, typst_contents)
 
-    tectonic_path = get_tectonic_path()
-    if not tectonic_path:
-        print("tectonic is not present, installing it...")
-        install_tectonic(args)
-        tectonic_path = get_tectonic_path()
-    if not tectonic_path:
-        raise Exception("tectonic couldn't be installed successfully :(")
+    typst_path = ensure_typst_path(args)
     if args.debug:
-        print(f"tectonic found at `{tectonic_path}`")
+        print(f"typst found at `{typst_path}`")
 
+    output_file = replace_ext(typ_path, "pdf")
     proc = subprocess.run(
-        [tectonic_path, os.path.basename(tex_path)],
+        typst_compile_command(
+            typst_path, os.path.basename(typ_path), os.path.basename(output_file)
+        ),
         check=False,
         cwd=file_dir,
         text=True,
@@ -571,15 +398,13 @@ def process_file(args, file_dir, bn):
         except OSError:
             pass
 
-    output_file = replace_ext(tex_path, "pdf")
-
     if args.compress_pdf == "on":
         compress_pdf(output_file)
 
     print(f"Output file: {output_file}")
 
     if not args.debug:
-        os.remove(tex_path)
+        os.remove(typ_path)
 
 
 class FileChangeHandler(FileSystemEventHandler):
@@ -627,7 +452,7 @@ def gui_handouter(args):
     elif args.handoutssubcommand in ("hndt2pdf", "run"):
         run_handouter(args)
     elif args.handoutssubcommand == "install":
-        install_tectonic(args)
+        install_typst(args)
     elif args.handoutssubcommand == "split_fit":
         from chgksuite.handouter.split_fit import run_split_fit
 

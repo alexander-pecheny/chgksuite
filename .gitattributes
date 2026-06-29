@@ -7,3 +7,6 @@
 *.jpeg binary
 *.encrypted binary
 *.encrypted.canon binary
+
+*.ttf binary
+*.otf binary
