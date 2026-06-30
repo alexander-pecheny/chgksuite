@@ -26,7 +26,6 @@ from chgksuite.handouter.split_fit import (
     HandoutBlock,
     all_q_block_text,
     parse_blocks,
-    pdf_bottom_space_mm,
     split_fit_columns,
     write_handout,
 )
@@ -673,15 +672,64 @@ def test_compress_pdf_replaces_original_when_compressed_file_is_smaller(
     assert pdf_path.read_bytes() == b"small"
 
 
-def test_pdf_bottom_space_mm_uses_pypdf_content_bbox(tmp_path):
-    pdf_path = tmp_path / "bottom.pdf"
-    writer = PdfWriter()
-    page = writer.add_blank_page(width=200, height=300)
-    stream = DecodedStreamObject()
-    stream.set_data(b"10 20 m 190 20 l S\n")
-    page[NameObject("/Contents")] = writer._add_object(stream)
+def test_measure_handout_parses_typst_query(tmp_path, monkeypatch):
+    from chgksuite.handouter import split_fit
 
-    with open(pdf_path, "wb") as output:
-        writer.write(output)
+    hndt_path = tmp_path / "q.hndt"
+    hndt_path.write_text("columns: 3\nrows: 5\ntext: hi\n", encoding="utf8")
 
-    assert pdf_bottom_space_mm(pdf_path) == pytest.approx(20 * 25.4 / 72)
+    monkeypatch.setattr(split_fit, "cached_typst_path", lambda _renderer_args: "typst")
+    monkeypatch.setattr(
+        split_fit.HandoutGenerator, "generate", lambda self: "// handout body"
+    )
+
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"pages": 1, "y_mm": 197.0}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(split_fit.subprocess, "run", fake_run)
+
+    args = SimpleNamespace(language="ru", paperheight=297)
+    result = split_fit.measure_handout(hndt_path, args)
+
+    assert result.ok
+    assert result.pages == 1
+    assert result.fits_one_page
+    # bottom space = paperheight - y_mm
+    assert result.bottom_space_mm == pytest.approx(100.0)
+    # typst paginates the document itself: a query, not a PDF compile.
+    assert "query" in captured["cmd"]
+    # the measurement .typ is cleaned up
+    assert not (tmp_path / "q_measure.typ").exists()
+
+
+def test_measure_handout_reports_overflow_without_bottom_space(tmp_path, monkeypatch):
+    from chgksuite.handouter import split_fit
+
+    hndt_path = tmp_path / "q.hndt"
+    hndt_path.write_text("columns: 3\nrows: 50\ntext: hi\n", encoding="utf8")
+
+    monkeypatch.setattr(split_fit, "cached_typst_path", lambda _renderer_args: "typst")
+    monkeypatch.setattr(
+        split_fit.HandoutGenerator, "generate", lambda self: "// handout body"
+    )
+    monkeypatch.setattr(
+        split_fit.subprocess,
+        "run",
+        lambda cmd, **kwargs: SimpleNamespace(
+            returncode=0, stdout='{"pages": 2, "y_mm": 50.0}', stderr=""
+        ),
+    )
+
+    args = SimpleNamespace(language="ru", paperheight=297)
+    result = split_fit.measure_handout(hndt_path, args)
+
+    assert result.pages == 2
+    assert not result.fits_one_page
+    assert result.bottom_space_mm is None

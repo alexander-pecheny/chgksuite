@@ -349,6 +349,25 @@ def typst_compile_command(typst_path, typ_basename, pdf_basename):
     ]
 
 
+def typst_query_command(typst_path, typ_basename, label):
+    """Build the ``typst query`` argv used to measure a handout: typst paginates
+    the document itself and we read back a single ``<label>`` metadata element
+    (its ``value`` field as JSON) instead of rendering and parsing a PDF."""
+    return [
+        typst_path,
+        "query",
+        "--root",
+        typst_root(),
+        "--font-path",
+        get_bundled_fonts_dir(),
+        typ_basename,
+        f"<{label}>",
+        "--field",
+        "value",
+        "--one",
+    ]
+
+
 def ensure_typst_path(args):
     typst_path = get_typst_path()
     if not typst_path:

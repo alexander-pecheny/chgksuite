@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import subprocess
@@ -14,14 +15,12 @@ from threading import Lock
 from types import SimpleNamespace
 from typing import Callable
 
-from pypdf import PdfReader
-from pypdf.generic import ContentStream, IndirectObject
-
 from chgksuite.handouter.installer import get_typst_path, install_typst
 from chgksuite.handouter.runner import (
     HandoutGenerator,
     get_num_teams,
     typst_compile_command,
+    typst_query_command,
 )
 from chgksuite.handouter.utils import compress_pdf
 
@@ -284,226 +283,109 @@ def cached_typst_path(renderer_args: SimpleNamespace) -> str | None:
         return TYPST_PATH
 
 
-IDENTITY_MATRIX = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-PATH_PAINT_OPERATORS = {b"S", b"s", b"f", b"F", b"f*", b"B", b"B*", b"b", b"b*"}
-TEXT_SHOW_OPERATORS = {b"Tj", b"TJ", b"'", b'"'}
+# Label of the metadata element typst emits at the end of a measured handout.
+MEASURE_LABEL = "hndtinfo"
+# Appended to a handout's typst source so `typst query` can read back, without
+# rendering a PDF, the page the document ends on (its total page count) and where
+# the last content sits (distance from the page top, in mm). typst paginates the
+# document itself, so this replaces the old render-the-PDF-and-parse-it machinery.
+MEASURE_SNIPPET = (
+    "\n#context [#metadata((pages: here().page(), "
+    "y_mm: here().position().y / 1mm)) <" + MEASURE_LABEL + ">]\n"
+)
 
 
-def pdf_deref(obj):
-    return obj.get_object() if isinstance(obj, IndirectObject) else obj
+def measure_handout(hndt_path: Path, args) -> ProbeResult:
+    """Ask typst how a handout paginates: it returns the page count and the
+    bottom whitespace (mm) on a single page, with no PDF produced or parsed."""
+    renderer_args = build_renderer_args(hndt_path, args)
+    generator = HandoutGenerator(renderer_args)
+    typst_contents = generator.generate() + MEASURE_SNIPPET
+    file_dir = hndt_path.parent
+    typ_path = file_dir / f"{hndt_path.stem}_measure.typ"
+    typ_path.write_text(typst_contents, encoding="utf8")
 
-
-def pdf_matrix(values) -> tuple[float, float, float, float, float, float]:
-    return tuple(float(value) for value in values)  # type: ignore[return-value]
-
-
-def pdf_matrix_multiply(left, right):
-    return (
-        left[0] * right[0] + left[2] * right[1],
-        left[1] * right[0] + left[3] * right[1],
-        left[0] * right[2] + left[2] * right[3],
-        left[1] * right[2] + left[3] * right[3],
-        left[0] * right[4] + left[2] * right[5] + left[4],
-        left[1] * right[4] + left[3] * right[5] + left[5],
-    )
-
-
-def pdf_transform_point(matrix, x, y):
-    return (
-        matrix[0] * x + matrix[2] * y + matrix[4],
-        matrix[1] * x + matrix[3] * y + matrix[5],
-    )
-
-
-def pdf_expand_bbox(bbox, points):
-    if not points:
-        return bbox
-    xs = [point[0] for point in points]
-    ys = [point[1] for point in points]
-    points_bbox = (min(xs), min(ys), max(xs), max(ys))
-    if bbox is None:
-        return points_bbox
-    return (
-        min(bbox[0], points_bbox[0]),
-        min(bbox[1], points_bbox[1]),
-        max(bbox[2], points_bbox[2]),
-        max(bbox[3], points_bbox[3]),
-    )
-
-
-def pdf_text_length(text_obj) -> int:
-    if isinstance(text_obj, list):
-        return sum(len(item) for item in text_obj if isinstance(item, str))
-    if isinstance(text_obj, str):
-        return len(text_obj)
-    return 1
-
-
-def pdf_xobject_bbox(name, resources, pdf, ctm, seen_forms):
-    resources = pdf_deref(resources)
-    xobjects = pdf_deref(resources.get("/XObject")) if resources else None
-    if not xobjects or name not in xobjects:
-        return None
-
-    ref = xobjects[name]
-    obj = pdf_deref(ref)
-    subtype = obj.get("/Subtype")
-    if subtype == "/Image":
-        return pdf_expand_bbox(
-            None,
-            [
-                pdf_transform_point(ctm, 0, 0),
-                pdf_transform_point(ctm, 1, 0),
-                pdf_transform_point(ctm, 0, 1),
-                pdf_transform_point(ctm, 1, 1),
-            ],
+    typst_path = cached_typst_path(renderer_args)
+    if not typst_path:
+        return ProbeResult(
+            rows=-1,
+            ok=False,
+            pages=None,
+            pdf_path=None,
+            bottom_space_mm=None,
+            stdout="",
+            stderr="typst could not be found or installed",
         )
 
-    if subtype != "/Form":
-        return None
+    proc = subprocess.run(
+        typst_query_command(typst_path, typ_path.name, MEASURE_LABEL),
+        cwd=file_dir,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    stdout = proc.stdout or ""
+    stderr = proc.stderr or ""
+    for tmp in generator._temp_files:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    if not getattr(renderer_args, "debug", False):
+        try:
+            typ_path.unlink()
+        except OSError:
+            pass
 
-    key = (ref.idnum, ref.generation) if isinstance(ref, IndirectObject) else id(obj)
-    if key in seen_forms:
-        return None
-    seen_forms.add(key)
+    if proc.returncode != 0:
+        return ProbeResult(
+            rows=-1,
+            ok=False,
+            pages=None,
+            pdf_path=None,
+            bottom_space_mm=None,
+            stdout=stdout,
+            stderr=stderr,
+        )
 
-    form_matrix = pdf_deref(obj.get("/Matrix")) or IDENTITY_MATRIX
-    form_ctm = pdf_matrix_multiply(ctm, pdf_matrix(form_matrix))
-    return pdf_content_bbox(
-        obj,
-        pdf,
-        obj.get("/Resources") or resources,
-        ctm=form_ctm,
-        seen_forms=seen_forms,
+    try:
+        info = json.loads(stdout)
+        pages = int(info["pages"])
+        y_mm = float(info["y_mm"])
+    except (ValueError, KeyError, TypeError) as exc:
+        return ProbeResult(
+            rows=-1,
+            ok=False,
+            pages=None,
+            pdf_path=None,
+            bottom_space_mm=None,
+            stdout=stdout,
+            stderr=f"{stderr}\nCould not parse typst measurement: {exc}".strip(),
+        )
+
+    paperheight = getattr(
+        renderer_args, "paperheight", RENDERER_DEFAULTS["paperheight"]
+    )
+    bottom_space = max(0.0, paperheight - y_mm) if pages <= 1 else None
+    return ProbeResult(
+        rows=-1,
+        ok=True,
+        pages=pages,
+        pdf_path=None,
+        bottom_space_mm=bottom_space,
+        stdout=stdout,
+        stderr=stderr,
     )
 
 
-def pdf_content_bbox(
-    content,
-    pdf,
-    resources,
-    ctm=IDENTITY_MATRIX,
-    seen_forms=None,
-):
-    if seen_forms is None:
-        seen_forms = set()
-
-    try:
-        stream = ContentStream(content, pdf)
-    except Exception:
-        return None
-
-    graphics_stack = []
-    current_path = []
-    bbox = None
-    text_matrix = IDENTITY_MATRIX
-    text_line_matrix = IDENTITY_MATRIX
-    font_size = 0.0
-    leading = 0.0
-
-    for operands, operator in stream.operations:
-        if operator == b"q":
-            graphics_stack.append(ctm)
-        elif operator == b"Q":
-            ctm = graphics_stack.pop() if graphics_stack else IDENTITY_MATRIX
-        elif operator == b"cm" and len(operands) >= 6:
-            ctm = pdf_matrix_multiply(ctm, pdf_matrix(operands[:6]))
-        elif operator in (b"m", b"l") and len(operands) >= 2:
-            current_path.append(
-                pdf_transform_point(ctm, float(operands[0]), float(operands[1]))
-            )
-        elif operator == b"c" and len(operands) >= 6:
-            for index in (0, 2, 4):
-                current_path.append(
-                    pdf_transform_point(
-                        ctm, float(operands[index]), float(operands[index + 1])
-                    )
-                )
-        elif operator in (b"v", b"y") and len(operands) >= 4:
-            for index in (0, 2):
-                current_path.append(
-                    pdf_transform_point(
-                        ctm, float(operands[index]), float(operands[index + 1])
-                    )
-                )
-        elif operator == b"re" and len(operands) >= 4:
-            x, y, width, height = (float(value) for value in operands[:4])
-            current_path.extend(
-                [
-                    pdf_transform_point(ctm, x, y),
-                    pdf_transform_point(ctm, x + width, y),
-                    pdf_transform_point(ctm, x, y + height),
-                    pdf_transform_point(ctm, x + width, y + height),
-                ]
-            )
-        elif operator in PATH_PAINT_OPERATORS:
-            bbox = pdf_expand_bbox(bbox, current_path)
-            current_path = []
-        elif operator == b"n":
-            current_path = []
-        elif operator == b"BT":
-            text_matrix = IDENTITY_MATRIX
-            text_line_matrix = IDENTITY_MATRIX
-        elif operator == b"Tf" and len(operands) >= 2:
-            font_size = float(operands[1])
-        elif operator == b"TL" and operands:
-            leading = float(operands[0])
-        elif operator in (b"Td", b"TD") and len(operands) >= 2:
-            if operator == b"TD":
-                leading = -float(operands[1])
-            translation = (1.0, 0.0, 0.0, 1.0, float(operands[0]), float(operands[1]))
-            text_line_matrix = pdf_matrix_multiply(text_line_matrix, translation)
-            text_matrix = text_line_matrix
-        elif operator == b"Tm" and len(operands) >= 6:
-            text_matrix = pdf_matrix(operands[:6])
-            text_line_matrix = text_matrix
-        elif operator == b"T*":
-            translation = (1.0, 0.0, 0.0, 1.0, 0.0, -leading)
-            text_line_matrix = pdf_matrix_multiply(text_line_matrix, translation)
-            text_matrix = text_line_matrix
-        elif operator in TEXT_SHOW_OPERATORS:
-            text_obj = operands[-1] if operands else ""
-            width = max(font_size * 0.5 * pdf_text_length(text_obj), font_size * 0.5)
-            text_ctm = pdf_matrix_multiply(ctm, text_matrix)
-            bbox = pdf_expand_bbox(
-                bbox,
-                [
-                    pdf_transform_point(text_ctm, 0.0, -0.3 * font_size),
-                    pdf_transform_point(text_ctm, width, font_size),
-                ],
-            )
-        elif operator == b"Do" and operands:
-            xobject_bbox = pdf_xobject_bbox(operands[0], resources, pdf, ctm, seen_forms)
-            if xobject_bbox is not None:
-                bbox = pdf_expand_bbox(
-                    bbox,
-                    [
-                        (xobject_bbox[0], xobject_bbox[1]),
-                        (xobject_bbox[2], xobject_bbox[3]),
-                    ],
-                )
-
-    return bbox
-
-
-def pdf_bottom_space_mm(pdf_path: Path) -> float | None:
-    reader = PdfReader(str(pdf_path))
-    if not reader.pages:
-        return None
-
-    page = reader.pages[0]
-    bbox = pdf_content_bbox(page.get_contents(), reader, page.get("/Resources"))
-    if bbox is None:
-        return None
-    return max(0.0, bbox[1]) * 25.4 / 72.0
-
-
-def run_hndt2pdf(
+def render_handout_pdf(
     hndt_path: Path,
     args,
     output_pdf_path: Path | None = None,
     compress_output: bool = False,
 ) -> ProbeResult:
+    """Compile a handout to an actual PDF (the final deliverable). Pagination is
+    already settled by `measure_handout`, so this only reports compile success."""
     renderer_args = build_renderer_args(hndt_path, args)
     generator = HandoutGenerator(renderer_args)
     typst_contents = generator.generate()
@@ -554,6 +436,7 @@ def run_hndt2pdf(
             typ_path.unlink()
         except OSError:
             pass
+
     if proc.returncode != 0:
         return ProbeResult(
             rows=-1,
@@ -565,36 +448,29 @@ def run_hndt2pdf(
             stderr=stderr,
         )
 
-    try:
-        pages = len(PdfReader(str(pdf_path)).pages)
-        bottom_space = pdf_bottom_space_mm(pdf_path) if pages == 1 else None
-        if compress_output:
+    if compress_output:
+        try:
             compress_pdf(str(pdf_path))
-    except Exception as exc:
-        return ProbeResult(
-            rows=-1,
-            ok=False,
-            pages=None,
-            pdf_path=pdf_path,
-            bottom_space_mm=None,
-            stdout=stdout,
-            stderr=f"{stderr}\nCould not read {pdf_path}: {exc}".strip(),
-        )
+        except Exception as exc:
+            return ProbeResult(
+                rows=-1,
+                ok=False,
+                pages=None,
+                pdf_path=pdf_path,
+                bottom_space_mm=None,
+                stdout=stdout,
+                stderr=f"{stderr}\nCould not compress {pdf_path}: {exc}".strip(),
+            )
 
     return ProbeResult(
         rows=-1,
         ok=True,
-        pages=pages,
+        pages=None,
         pdf_path=pdf_path,
-        bottom_space_mm=bottom_space,
+        bottom_space_mm=None,
         stdout=stdout,
         stderr=stderr,
     )
-
-
-def cleanup_pdf(result: ProbeResult) -> None:
-    if result.pdf_path and result.pdf_path.exists():
-        result.pdf_path.unlink()
 
 
 def probe_rows(
@@ -608,7 +484,7 @@ def probe_rows(
     log: Callable[[str], None] | None = None,
 ) -> ProbeResult:
     write_handout(block, output_path, rows, source_dir, resize_image)
-    result = run_hndt2pdf(output_path, args)
+    result = measure_handout(output_path, args)
     result.rows = rows
     pages = "compile failed" if result.pages is None else f"{result.pages} page(s)"
     if verbose:
@@ -622,7 +498,6 @@ def probe_rows(
             log(message)
         else:
             print(message)
-    cleanup_pdf(result)
     return result
 
 
@@ -945,13 +820,16 @@ def compile_final_pdf(
     args,
     expected_rows: int,
 ) -> None:
-    result = run_hndt2pdf(
+    measurement = measure_handout(output_path, args)
+    if not measurement.fits_one_page:
+        details = measurement.stderr or measurement.stdout or "no compiler output"
+        raise RuntimeError(f"final compile failed for {output_path}:\n{details}")
+    result = render_handout_pdf(
         output_path,
         args,
         compress_output=getattr(args, "compress_pdf", "off") == "on",
     )
-    result.rows = expected_rows
-    if not result.fits_one_page:
+    if not result.ok:
         details = result.stderr or result.stdout or "no compiler output"
         raise RuntimeError(f"final compile failed for {output_path}:\n{details}")
 
@@ -1113,7 +991,7 @@ def create_all_q_pdf(
                 )
                 + "\n"
             )
-        result = run_hndt2pdf(
+        result = render_handout_pdf(
             temp_path,
             args,
             output_pdf_path=output_pdf,
