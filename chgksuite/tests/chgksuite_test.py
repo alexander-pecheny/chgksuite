@@ -477,6 +477,129 @@ https://example.com/c1-mirror""",
     assert "^ https://example.com/b3\nТемы" not in rendered
 
 
+def test_troika_multifora_bare_numbered_questions_and_reserve_pool():
+    """A "Мультифора" variant with neither "Тема" nor "Вопрос" keywords: themes are
+    bare "N. Name" headers and questions are bare "N.M. text" markers. A trailing
+    reserve pool uses "Запас" / "Запас-N. Name" / "ЗапN.M. text"."""
+    parsed = troika_parse_text(
+        """Тройка (Мультифора)
+
+Групповой этап
+
+Бой 1
+
+Темы за 1 балл
+
+1. Первая тема
+
+Комментарий: тематический комментарий.
+
+1.1. Первый текст вопроса про НЕЧТО.
+
+Ответ: альфа.
+
+Источник: https://example.com/a1
+
+1.2. Второй текст вопроса.
+
+Ответ: бета.
+
+Комментарий: комментарий ко второму вопросу.
+
+Источник: https://example.com/a2
+
+1.3. Третий текст вопроса.
+
+Ответ: гамма.
+
+Источник: https://example.com/a3
+
+2. Вторая тема
+
+2.1. Текст первого вопроса второй темы.
+
+Ответ: дельта.
+
+Источник: https://example.com/b1
+
+2.2. Ещё один текст вопроса.
+
+Ответ: эпсилон.
+
+Источник: https://example.com/b2
+
+2.3. Последний текст второй темы.
+
+Ответ: дзета.
+
+Источник: https://example.com/b3
+
+Запас
+
+Запас-1. Резервная тема
+
+Комментарий: в каждом вопросе зачёт по фамилии.
+
+Зап1.1. Первый резервный вопрос.
+
+Ответ: эта.
+
+Источник: https://example.com/r1
+
+Зап1.2. Второй резервный вопрос.
+
+Ответ: тета.
+
+Источник: https://example.com/r2
+
+Зап1.3. Третий резервный вопрос.
+
+Ответ: йота.
+
+Источник: https://example.com/r3""",
+        args=DefaultArgs(game="troika"),
+    )
+
+    themes = [element[1] for element in parsed if element[0] == "theme"]
+    assert themes == ["1. Первая тема", "2. Вторая тема", "Запас-1. Резервная тема"]
+
+    # The reserve pool header becomes a battle-level separator.
+    battles = [element[1] for element in parsed if element[0] == "battle"]
+    assert "Запас" in battles
+
+    questions = [element[1] for element in parsed if element[0] == "Question"]
+    assert len(questions) == 9
+    assert [q["number"] for q in questions] == [
+        "1", "2", "3", "1", "2", "3", "1", "2", "3",
+    ]
+
+    # Bare "N.M." markers are consumed, not left in the question text.
+    assert questions[0]["question"] == "Первый текст вопроса про НЕЧТО."
+    assert questions[0]["answer"] == "альфа."
+    # "ЗапN.M." reserve markers are consumed too.
+    assert questions[6]["question"] == "Первый резервный вопрос."
+    assert questions[6]["answer"] == "эта."
+    assert questions[6]["source"] == "https://example.com/r1"
+
+    # Theme-level comments stay standalone in both the main body and the reserve.
+    assert ["comment", "тематический комментарий."] in parsed
+    assert ["comment", "в каждом вопросе зачёт по фамилии."] in parsed
+
+    # No structural marker leaked into any field.
+    for q in questions:
+        for value in q.values():
+            text = value if isinstance(value, str) else " ".join(value)
+            assert not re.search(r"(?m)^\d+\.\d+\.\s", text)
+            assert not re.search(r"(?im)^(?:Зап\d|Запас\b)", text)
+
+    # Round-trips through the composer.
+    rendered = compose_4s(
+        parsed, args=DefaultArgs(game="troika", numbers_handling="all")
+    )
+    assert "1.1. Первый" not in rendered
+    assert "Зап1.1." not in rendered
+
+
 def test_troika_pypandoc_html_preserves_ordered_list_start_numbers(tmp_path):
     from docx import Document
 

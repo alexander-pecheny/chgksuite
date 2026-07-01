@@ -1089,17 +1089,24 @@ _TROIKA_RE_FINAL = re.compile(r"(?i)^\d+/\d+\s+ФИНАЛА\.?\s*$")
 _TROIKA_RE_QUESTION_NUM = re.compile(r"^(\d+)\.?\s+")
 _TROIKA_RE_QUESTION_NUM_ONLY = re.compile(r"^(\d+)\.?$")
 _TROIKA_QUESTION_NUMBERS = {1, 2, 3}
-# "Мультифора" Troika variant: questions carry an explicit "Вопрос N.M." marker
-# (N = theme index, M = question index within the theme) and themes are written
-# as bare "N. Name" headers instead of a heading-styled line. Capture group 1 is
-# the within-theme question index (M), used as the question number.
-_TROIKA_RE_MULTIFORA_QUESTION = re.compile(r"(?i)^ВОПРОС\s+\d+\s*\.\s*(\d+)\s*\.?\s*")
+# "Мультифора" Troika variant: questions carry an "N.M." marker (N = theme index,
+# M = question index within the theme), optionally spelled out as "Вопрос N.M." or,
+# in the reserve pool, "ЗапN.M.". Themes are written as bare "N. Name" headers
+# instead of a heading-styled line. Capture group 1 is the within-theme question
+# index (M), used as the question number. The trailing dot after M is required so
+# bare "N. Name" theme headers are not mistaken for questions.
+_TROIKA_RE_MULTIFORA_QUESTION = re.compile(
+    r"(?i)^(?:ВОПРОС\s+|ЗАП)?\d+\s*\.\s*(\d+)\s*\.\s*"
+)
 # Detects the variant anywhere in the document (optionally behind a heading marker).
 _TROIKA_RE_MULTIFORA_DETECT = re.compile(
-    r"(?im)^\s*(?:\$\$H\d\$\$\s*)?ВОПРОС\s+\d+\s*\.\s*\d+"
+    r"(?im)^\s*(?:\$\$H\d\$\$\s*)?(?:ВОПРОС\s+|ЗАП)?\d+\s*\.\s*\d+\s*\."
 )
 # Bare numbered theme header "3. Вокруг войны 1812 года" (Мультифора mode only).
 _TROIKA_RE_NUMBERED_THEME = re.compile(r"^\d+\.\s+\S")
+# Reserve pool: a bare "Запас" section header and "Запас-N. Name" theme headers.
+_TROIKA_RE_RESERVE_SECTION = re.compile(r"(?i)^ЗАПАС\s*$")
+_TROIKA_RE_RESERVE_THEME = re.compile(r"(?i)^ЗАПАС\s*-\s*\d+\s*\.\s*.+")
 _TROIKA_RE_SOURCE_ITEM = re.compile(r"^(\d+)[\.\)]\s+")
 _TROIKA_RE_HOST_NOTE = re.compile(
     r"(?i)^\[?(?:Ведущему\b|Комментарий\s+ведущему\b)"
@@ -1551,6 +1558,18 @@ class TroikaParser(SiParser):
             return
 
         if self.multifora_mode:
+            if _TROIKA_RE_RESERVE_SECTION.search(stripped):
+                self._flush()
+                self.structure.append(["battle", self._apply_typo(stripped)])
+                self.after_theme = False
+                self.last_line_blank = False
+                return
+            if _TROIKA_RE_RESERVE_THEME.search(stripped):
+                self._flush()
+                self.structure.append(["theme", self._apply_typo(stripped)])
+                self.after_theme = True
+                self.last_line_blank = False
+                return
             m_mf = _TROIKA_RE_MULTIFORA_QUESTION.search(stripped)
             if m_mf:
                 self._flush()
