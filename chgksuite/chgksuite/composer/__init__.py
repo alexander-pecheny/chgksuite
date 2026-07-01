@@ -168,8 +168,13 @@ def process_file(filename, tmp_dir, targetdir, args=None, logger=None):
         exporter.export(outfilename)
 
     if args.filetype == "telegram":
-        exporter = TelegramExporter(structure, args, dir_kwargs)
-        exporter.export()
+        exporter = None
+        try:
+            exporter = TelegramExporter(structure, args, dir_kwargs)
+            exporter.export()
+        finally:
+            if exporter is not None:
+                exporter.close()
 
     if args.filetype == "openquiz":
         outfilename = os.path.join(targetdir, make_filename(filename, "json", args))

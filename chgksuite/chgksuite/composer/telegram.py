@@ -104,6 +104,8 @@ class TelegramExporter(BaseExporter):
             tempfile.gettempdir(), f"telegram_sidecar_{uuid.uuid4().hex}.db"
         )
         self.bot_token = None
+        self.bot = None
+        self.bot_thread = None
         self.control_chat_id = None  # Chat ID where the user talks to the bot
         self.channel_id = None  # Target channel ID
         self.chat_id = None  # Discussion group ID linked to the channel
@@ -154,7 +156,9 @@ class TelegramExporter(BaseExporter):
         # Start the sidecar bot as a daemon thread
         if self.args.debug:
             print(f"Starting sidecar bot with DB at {self.temp_db_path}")
-        self.bot_thread = run_bot_in_thread(self.bot_token, self.temp_db_path)
+        self.bot_thread, self.bot = run_bot_in_thread(
+            self.bot_token, self.temp_db_path
+        )
         cur = self.db_conn.cursor()
         while True:
             time.sleep(2)
@@ -163,6 +167,23 @@ class TelegramExporter(BaseExporter):
             ).fetchall()
             if messages and json.loads(messages[0][0])["status"] == "ok":
                 break
+
+    def close(self):
+        """Stop the sidecar bot so its getUpdates poller is released.
+
+        Must be called after the export finishes (success or failure); otherwise
+        the daemon polling thread keeps running for the lifetime of the process
+        and a later export on the same token raises telegram.error.Conflict.
+        """
+        if self.bot is not None:
+            try:
+                self.bot.stop()
+            except Exception as e:
+                self.logger.warning(f"Error stopping sidecar bot: {e}")
+            self.bot = None
+        if self.bot_thread is not None:
+            self.bot_thread.join(timeout=30)
+            self.bot_thread = None
 
     def authenticate_user(self):
         print("\n" + "=" * 50)
