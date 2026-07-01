@@ -18,6 +18,9 @@ class TelegramSidecarBot:
         self.db_path = db_path
         self._local = threading.local()
         self.token = bot_token
+        self.loop = None
+        self.application = None
+        self._started = threading.Event()
 
     @property
     def conn(self):
@@ -70,6 +73,7 @@ class TelegramSidecarBot:
 
     def run(self):
         loop = asyncio.get_event_loop()
+        self.loop = loop
         application = (
             Application.builder()
             .token(self.token)
@@ -78,6 +82,7 @@ class TelegramSidecarBot:
             .write_timeout(300.0)
             .build()
         )
+        self.application = application
         application.add_handler(MessageHandler(filters.ALL, self.handle_message))
         application.add_error_handler(self.error_handler)
         loop.run_until_complete(application.initialize())
@@ -87,16 +92,40 @@ class TelegramSidecarBot:
                 allowed_updates=Update.ALL_TYPES, drop_pending_updates=True
             )
         )
+        self._started.set()
         loop.run_forever()
+        # run_forever() returns once stop() schedules loop.stop(); tear the bot
+        # down on this same thread/loop so the getUpdates poller is released.
+        try:
+            if application.updater.running:
+                loop.run_until_complete(application.updater.stop())
+            if application.running:
+                loop.run_until_complete(application.stop())
+            loop.run_until_complete(application.shutdown())
+        finally:
+            loop.close()
+
+    def stop(self):
+        """Stop polling and shut the bot down from another thread."""
+        self._started.wait(timeout=30)
+        loop = self.loop
+        if loop is not None:
+            loop.call_soon_threadsafe(loop.stop)
 
 
 def run_bot_in_thread(bot_token, db_path):
-    """Run the bot in a daemon thread."""
+    """Run the bot in a daemon thread.
+
+    Returns (thread, bot). Call ``bot.stop()`` then ``thread.join()`` to release
+    the getUpdates poller; otherwise a second poller on the same token will raise
+    ``telegram.error.Conflict``.
+    """
+
+    bot = TelegramSidecarBot(bot_token, db_path)
 
     def thread_function():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        bot = TelegramSidecarBot(bot_token, db_path)
         connectivity_ok = loop.run_until_complete(bot.check_connectivity())
         if not connectivity_ok:
             raise Exception("bot couldn't connect")
@@ -104,7 +133,7 @@ def run_bot_in_thread(bot_token, db_path):
 
     bot_thread = threading.Thread(target=thread_function, daemon=True)
     bot_thread.start()
-    return bot_thread
+    return bot_thread, bot
 
 
 def main():
