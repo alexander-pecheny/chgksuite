@@ -350,6 +350,133 @@ def test_troika_number_only_question_keeps_leading_host_note():
     assert "В 2007 году «James E. Williams»" in rendered
 
 
+def test_troika_multifora_question_markers_and_numbered_themes():
+    """The "Мультифора" Troika variant marks questions as "Вопрос N.M." and writes
+    themes as bare "N. Name" headers (plus optional "Тема N. Name"). Point-value
+    section headers ("Темы за N балл") separate blocks and must not leak into the
+    preceding source."""
+    parsed = troika_parse_text(
+        """Тройка (Мультифора)
+
+Пакет писал Некто Неизвестный.
+
+Групповой этап
+
+Бой 1
+
+Темы за 1 балл
+
+Тема 1. Первая тема
+
+Комментарий: все ответы начинаются на одну и ту же букву.
+
+Вопрос 1.1.
+
+Первый текст вопроса про НЕЧТО.
+
+Ответ: альфа.
+
+Источник: https://example.com/a1
+
+Вопрос 1. 2.
+
+Второй текст вопроса про НЕКТО.
+
+Ответ: бета.
+
+Комментарий: комментарий ко второму вопросу.
+
+Источник: https://example.com/a2
+
+Вопрос 1.3.
+
+Третий текст вопроса.
+
+Ответ: гамма.
+
+Источник: https://example.com/a3
+
+2. Вторая тема
+
+Вопрос 2.1.
+
+Текст вопроса первой темы за один балл во второй теме.
+
+Ответ: дельта.
+
+Источник: https://example.com/b1
+
+Вопрос 2.2.
+
+Ещё один текст вопроса.
+
+Ответ: эпсилон.
+
+Источник: https://example.com/b2
+
+Вопрос 2.3.
+
+Последний текст вопроса второй темы.
+
+Ответ: дзета.
+
+Источник: https://example.com/b3
+
+Темы за 2 балла
+
+3. Третья тема
+
+Вопрос 3.1.
+
+Вопрос с двумя источниками.
+
+Ответ: эта.
+
+Источник: https://example.com/c1
+
+https://example.com/c1-mirror""",
+        args=DefaultArgs(game="troika"),
+    )
+
+    themes = [element[1] for element in parsed if element[0] == "theme"]
+    assert themes == ["Тема 1. Первая тема", "2. Вторая тема", "3. Третья тема"]
+
+    questions = [element[1] for element in parsed if element[0] == "Question"]
+    assert len(questions) == 7
+    # Numbers reset to 1..3 within each theme.
+    assert [q["number"] for q in questions] == ["1", "2", "3", "1", "2", "3", "1"]
+
+    # "Вопрос N.M." markers are consumed, not left in the question text.
+    assert questions[0]["question"] == "Первый текст вопроса про НЕЧТО."
+    assert questions[0]["answer"] == "альфа."
+    assert "Вопрос" not in questions[0]["question"]
+    # "Вопрос 1. 2." with a stray space still parses.
+    assert questions[1]["question"] == "Второй текст вопроса про НЕКТО."
+    assert questions[1]["comment"] == "комментарий ко второму вопросу."
+
+    # The theme-level comment stays a standalone element, not folded into a question.
+    assert ["comment", "все ответы начинаются на одну и ту же букву."] in parsed
+    assert "question" not in questions[0] or (
+        "все ответы" not in questions[0]["question"]
+    )
+
+    # "Темы за N балл" headers do not leak into the previous question's source.
+    assert questions[5]["source"] == "https://example.com/b3"
+
+    # A genuine multi-line source becomes a list.
+    assert questions[6]["source"] == [
+        "https://example.com/c1",
+        "https://example.com/c1-mirror",
+    ]
+
+    # The whole thing round-trips through the composer.
+    rendered = compose_4s(
+        parsed, args=DefaultArgs(game="troika", numbers_handling="all")
+    )
+    assert "Вопрос 1.1." not in rendered
+    assert "^ https://example.com/b3\nТемы" not in rendered
+
+
 def test_troika_pypandoc_html_preserves_ordered_list_start_numbers(tmp_path):
     from docx import Document
 
