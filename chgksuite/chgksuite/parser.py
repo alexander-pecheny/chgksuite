@@ -1082,11 +1082,24 @@ _TROIKA_RE_THEME = re.compile(
     r"(?i)^ТЕМА(?:\s+\d+(?:\s*\([^)]+\))?)?[\.:]\s*.+"
 )
 _TROIKA_RE_SECTION = re.compile(r"(?i)^ГРУППОВОЙ\s+ЭТАП\s+\d+\s*$")
+# "Темы за N балл(а/ов)" — point-value section header separating theme blocks.
+_TROIKA_RE_POINTS_SECTION = re.compile(r"(?i)^ТЕМЫ\s+ЗА\s+\d+\s+балл\S*\s*$")
 _TROIKA_RE_BATTLE = re.compile(r"(?i)^БОЙ\s+(?:\d+|[IVXLCDM]+)\s*$")
 _TROIKA_RE_FINAL = re.compile(r"(?i)^\d+/\d+\s+ФИНАЛА\.?\s*$")
 _TROIKA_RE_QUESTION_NUM = re.compile(r"^(\d+)\.?\s+")
 _TROIKA_RE_QUESTION_NUM_ONLY = re.compile(r"^(\d+)\.?$")
 _TROIKA_QUESTION_NUMBERS = {1, 2, 3}
+# "Мультифора" Troika variant: questions carry an explicit "Вопрос N.M." marker
+# (N = theme index, M = question index within the theme) and themes are written
+# as bare "N. Name" headers instead of a heading-styled line. Capture group 1 is
+# the within-theme question index (M), used as the question number.
+_TROIKA_RE_MULTIFORA_QUESTION = re.compile(r"(?i)^ВОПРОС\s+\d+\s*\.\s*(\d+)\s*\.?\s*")
+# Detects the variant anywhere in the document (optionally behind a heading marker).
+_TROIKA_RE_MULTIFORA_DETECT = re.compile(
+    r"(?im)^\s*(?:\$\$H\d\$\$\s*)?ВОПРОС\s+\d+\s*\.\s*\d+"
+)
+# Bare numbered theme header "3. Вокруг войны 1812 года" (Мультифора mode only).
+_TROIKA_RE_NUMBERED_THEME = re.compile(r"^\d+\.\s+\S")
 _TROIKA_RE_SOURCE_ITEM = re.compile(r"^(\d+)[\.\)]\s+")
 _TROIKA_RE_HOST_NOTE = re.compile(
     r"(?i)^\[?(?:Ведущему\b|Комментарий\s+ведущему\b)"
@@ -1488,6 +1501,10 @@ class TroikaParser(SiParser):
         super()._init_state(text)
         self.last_line_blank = False
         self.source_list_mode = False
+        # "Мультифора" variant uses explicit "Вопрос N.M." question markers and
+        # bare "N. Name" theme headers; detect it up front to switch the meaning
+        # of bare numbered lines from question numbers to theme headers.
+        self.multifora_mode = bool(_TROIKA_RE_MULTIFORA_DETECT.search(text))
 
     def _flush(self):
         super()._flush()
@@ -1524,6 +1541,33 @@ class TroikaParser(SiParser):
                 )
                 self.structure.append([etype, self._apply_typo(value)])
                 self.after_theme = etype == "theme"
+                self.last_line_blank = False
+                return
+
+        if _TROIKA_RE_POINTS_SECTION.search(stripped):
+            self._flush()
+            self.structure.append(["meta", self._apply_typo(stripped)])
+            self.last_line_blank = False
+            return
+
+        if self.multifora_mode:
+            m_mf = _TROIKA_RE_MULTIFORA_QUESTION.search(stripped)
+            if m_mf:
+                self._flush()
+                self.structure.append(["number", m_mf.group(1)])
+                self.current_field = "question"
+                self.current_content = stripped[m_mf.end():].strip()
+                self.after_theme = False
+                self.last_line_blank = False
+                return
+            if _TROIKA_RE_NUMBERED_THEME.match(
+                stripped
+            ) and not self._should_continue_source_list(stripped):
+                self._flush()
+                self.structure.append(
+                    ["theme", self._apply_typo(_normalize_troika_theme_text(stripped))]
+                )
+                self.after_theme = True
                 self.last_line_blank = False
                 return
 
