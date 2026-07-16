@@ -1470,11 +1470,11 @@ def test_telegram_rich_question_with_images():
 
     assert "см. изображение" not in payload["html"]
     assert "Раздаточный материал" not in payload["html"]
-    # full-resolution upload, display size capped via width/height attrs
-    assert '<img src="tg://photo?id=img0" width="333" height="200"/>' in payload["html"]
+    assert '<img src="tg://photo?id=img0"/>' in payload["html"]
     assert [m for m, _ in payload["media_files"]] == ["img0", "img1"]
+    # resized to 200px display height (rich messages render intrinsic size)
     for _, path in payload["media_files"]:
-        assert Image.open(path).size == (1000, 600)
+        assert Image.open(path).size == (333, 200)
     # comment image lands inside the details block
     assert payload["html"].index("<details>") < payload["html"].index("img1")
 

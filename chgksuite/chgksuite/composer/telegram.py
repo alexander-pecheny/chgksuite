@@ -1004,8 +1004,8 @@ class TelegramExporter(BaseExporter):
             parts.append(f"<p>{self._rich_br(seg)}</p>")
         return "".join(parts)
 
-    # Rich messages render photos at intrinsic size, so pass explicit display
-    # dimensions while uploading the full-resolution file (crisp when zoomed).
+    # Rich messages render photos at intrinsic size and ignore width/height
+    # attributes, so physically resize to keep images modest.
     RICH_IMG_DISPLAY_HEIGHT = 200
 
     def _finalize_rich(self, html_content):
@@ -1013,17 +1013,12 @@ class TelegramExporter(BaseExporter):
         media_files = []
 
         def repl(m):
-            path = m.group(1)
+            path = self.prepare_image_for_telegram(
+                m.group(1), max_height=self.RICH_IMG_DISPLAY_HEIGHT
+            )
             media_id = f"img{len(media_files)}"
             media_files.append((media_id, path))
-            width, height = Image.open(path).size
-            if height > self.RICH_IMG_DISPLAY_HEIGHT:
-                width = round(width * self.RICH_IMG_DISPLAY_HEIGHT / height)
-                height = self.RICH_IMG_DISPLAY_HEIGHT
-            return (
-                f'<img src="tg://photo?id={media_id}" '
-                f'width="{width}" height="{height}"/>'
-            )
+            return f'<img src="tg://photo?id={media_id}"/>'
 
         return _TG_IMG_SENTINEL_RE.sub(repl, html_content), media_files
 
