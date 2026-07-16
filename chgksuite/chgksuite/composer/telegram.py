@@ -433,10 +433,16 @@ class TelegramExporter(BaseExporter):
             elif run[0] == "linebreak":
                 res += "\n"
             elif run[0] == "img":
+                rich_mode = getattr(self, "rich_mode", False)
                 if run[1].startswith(("http://", "https://")):
                     res += run[1]
                 else:
-                    res += self.labels["general"].get("cf_image", "см. изображение")
+                    if not rich_mode:
+                        # In rich mode the image is embedded in the message,
+                        # no need for a textual placeholder.
+                        res += self.labels["general"].get(
+                            "cf_image", "см. изображение"
+                        )
                     parsed_image = parseimg(
                         run[1],
                         dimensions="ems",
@@ -446,9 +452,12 @@ class TelegramExporter(BaseExporter):
                     imgfile = parsed_image["imgfile"]
                     if os.path.isfile(imgfile):
                         max_side = 800 if self.args.resize_images else None
+                        # Rich messages render photos at intrinsic size, so
+                        # cap the height to keep them modest.
+                        max_height = 200 if rich_mode else None
                         orig_size = Image.open(imgfile).size
                         image = self.prepare_image_for_telegram(
-                            imgfile, max_side=max_side
+                            imgfile, max_side=max_side, max_height=max_height
                         )
                         if max_side and max(orig_size) > max_side:
                             self.logger.info(
@@ -463,7 +472,7 @@ class TelegramExporter(BaseExporter):
         return res, image
 
     @classmethod
-    def prepare_image_for_telegram(cls, imgfile, max_side=None):
+    def prepare_image_for_telegram(cls, imgfile, max_side=None, max_height=None):
         """Prepare an image for uploading to Telegram (resize if needed)."""
         img = Image.open(imgfile)
         width, height = img.size
@@ -473,6 +482,12 @@ class TelegramExporter(BaseExporter):
         if max_side and max(width, height) > max_side:
             scale = max_side / max(width, height)
             img = img.resize((int(width * scale), int(height * scale)), Image.LANCZOS)
+            width, height = img.size
+            modified = True
+
+        if max_height and height > max_height:
+            scale = max_height / height
+            img = img.resize((int(width * scale), max_height), Image.LANCZOS)
             width, height = img.size
             modified = True
 
@@ -1088,7 +1103,13 @@ class TelegramExporter(BaseExporter):
         """
         parts = self._format_question_parts(q, number=number)
         media_files = []
-        html_content = f"<p>{self._rich_br(parts['q'].strip())}</p>"
+        # Images are embedded without a textual placeholder, which can leave
+        # an empty handout wrapper like "[Раздаточный материал: ]" behind.
+        handout_label = self.labels["question_labels"]["handout"]
+        txt_q = re.sub(
+            r"\[" + re.escape(handout_label) + r":\s*\]\s*", "", parts["q"]
+        )
+        html_content = f"<p>{self._rich_br(txt_q.strip())}</p>"
         html_content += self._rich_img_tags(parts["images_q"], media_files)
         hidden = [parts[k] for k in ("a", "z", "nz", "comm") if parts[k]]
         body = ""
