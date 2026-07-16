@@ -934,17 +934,25 @@ class ChgkParser:
                 headingdefined = True
             if not headingdefined and final_structure[0][0] == "meta":
                 final_structure[0][0] = "heading"
-                final_structure.insert(0, ["ljheading", final_structure[0][1]])
+            def make_date(i):
+                # a heading stays a heading; the date it contains becomes its
+                # own element (pre-existing behaviour, previously via the
+                # ljheading copy that used to absorb this conversion)
+                if final_structure[i][0] == "heading":
+                    final_structure.insert(i, ["date", final_structure[i][1]])
+                else:
+                    final_structure[i][0] = "date"
+
             i = 0
             while not datedefined and i < fq:
                 srch = regexes["date2"].search(final_structure[i][1])
                 if srch and len(srch.group(0)) >= len(final_structure[i][1]) / 10:
-                    final_structure[i][0] = "date"
+                    make_date(i)
                     datedefined = True
                     break
                 srch = search_for_date(final_structure[i][1])
                 if srch and len(srch.group(0)) >= len(final_structure[i][1]) / 10:
-                    final_structure[i][0] = "date"
+                    make_date(i)
                     datedefined = True
                     break
                 i += 1

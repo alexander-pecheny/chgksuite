@@ -175,7 +175,6 @@ def t_AUTHOR(t):
 def t_title_end(t):
     r"\n\n"
     t.lexer.structure.append(["heading", rt(t.lexer.text)])
-    t.lexer.structure.append(["ljheading", rt(t.lexer.text)])
     t.lexer.begin("INITIAL")
 
 
