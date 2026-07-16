@@ -344,6 +344,10 @@ def _optimize_size_enabled(args):
     return (getattr(args, "optimize_size", None) or "on") == "on"
 
 
+def _smaller_source_and_author_enabled(args):
+    return (getattr(args, "smaller_source_and_author", None) or "on") == "on"
+
+
 def optimize_docx_images(docx_path, quality=80):
     return optimize_ooxml_images(
         docx_path, media_prefix="word/media/", rels_prefix="word/", quality=quality
@@ -418,8 +422,11 @@ def remove_square_brackets_standalone(s, regexes):
     return _remove_square_brackets_standalone(s, regexes)
 
 
-# Sources/authors are set 2pt below the 12pt body.
+# Sources/authors are set 2pt below the 12pt body; their paragraph starts one
+# BODY line below the answer paragraph, not one small line (the 2pt shrink ×
+# Arial's 1.15em line box).
 SOURCE_FONT_SIZE = DocxPt(10)
+SOURCE_SPACE_BEFORE = DocxPt(2.3)
 
 
 def _paragraph_run_elements(paragraph):
@@ -726,6 +733,7 @@ def add_question_to_docx(
     add_question_label=True,
     logger=None,
     game=None,
+    smaller_source_and_author=True,
     **kwargs,
 ):
     """
@@ -747,6 +755,7 @@ def add_question_to_docx(
         only_question_number: Whether to show only question numbers
         game: Game mode ("chgk", "brain", "si") — affects label formatting
         logger: Logger instance
+        smaller_source_and_author: Whether to set source/author fields 2pt below body size
         **kwargs: Additional arguments passed to format_docx_element
 
     Returns:
@@ -878,19 +887,23 @@ def add_question_to_docx(
             **kwargs,
         )
 
-        # Add other fields
+        # Add other fields. Source and author share one paragraph; with
+        # smaller_source_and_author it is set 2pt smaller and spaced to start one
+        # body line below (an author without a source opens it too).
+        source_para = None
         for field in ["zachet", "nezachet", "comment", "source", "author"]:
             if field in q:
-                if field == "source":
-                    if external_para is None:
-                        p = doc.add_paragraph()
-                        p.paragraph_format.keep_together = True
-                    else:
-                        p.add_run("\n")
+                small = smaller_source_and_author and field in ("source", "author")
+                starts_para = field == "source" or (small and source_para is None)
+                if starts_para and external_para is None:
+                    p = doc.add_paragraph()
+                    p.paragraph_format.keep_together = True
+                    if small:
+                        p.paragraph_format.space_before = SOURCE_SPACE_BEFORE
+                    source_para = p
                 else:
                     p.add_run("\n")
 
-                small = field in ("source", "author")
                 small_start = len(_paragraph_run_elements(p)) if small else 0
                 field_label = get_label_standalone(q, field, labels, language)
                 p.add_run(f"{field_label}: ").bold = True
@@ -989,6 +1002,7 @@ class DocxExporter(BaseExporter):
             getattr(self.args, "only_question_number", False),
             game=self.game,
             logger=self.logger,
+            smaller_source_and_author=_smaller_source_and_author_enabled(self.args),
             **extra_kwargs,
         )
 

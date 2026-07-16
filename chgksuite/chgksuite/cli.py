@@ -442,6 +442,16 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdcompose_docx,
+            "--smaller_source_and_author",
+            choices=["on", "off"],
+            default=default_overrides.get("smaller_source_and_author") or "on",
+            help="set source/author fields 2pt below body size.",
+            advanced=True,
+            caption="Источники/авторы мельче",
+            argtype="radiobutton",
+        )
+        self.add_argument(
+            cmdcompose_docx,
             "filename",
             nargs="*",
             help="file(s) to compose from.",
