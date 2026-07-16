@@ -19,7 +19,7 @@ from chgksuite.composer.chgksuite_parser import parse_4s
 from chgksuite.composer.composer_common import ext_to_game, make_filename, make_temp_directory
 from chgksuite.composer.db import DbExporter
 from chgksuite.composer.docx import DocxExporter
-from chgksuite.composer.latex import LatexExporter
+from chgksuite.composer.typst import TypstExporter
 from chgksuite.composer.lj import LjExporter
 from chgksuite.composer.pptx import PptxExporter
 from chgksuite.composer.markdown import MarkdownExporter
@@ -62,14 +62,8 @@ def gui_compose(args, logger=None):
 
 
 def process_file_wrapper(filename, sourcedir, targetdir, args):
-    resourcedir = os.path.join(sourcedir, "resources")
     with make_temp_directory(dir=get_chgksuite_dir()) as tmp_dir:
-        for fn in [
-            args.docx_template,
-            os.path.join(resourcedir, "fix-unnumbered-sections.sty"),
-            args.tex_header,
-        ]:
-            shutil.copy(fn, tmp_dir)
+        shutil.copy(args.docx_template, tmp_dir)
         process_file(filename, tmp_dir, targetdir, args)
 
 
@@ -135,9 +129,9 @@ def process_file(filename, tmp_dir, targetdir, args=None, logger=None):
         exporter = DocxExporter(structure, args, dir_kwargs)
         exporter.export(outfilename)
 
-    if args.filetype == "tex":
-        outfilename = os.path.join(tmp_dir, make_filename(filename, "tex", args))
-        exporter = LatexExporter(structure, args, dir_kwargs)
+    if args.filetype == "pdf":
+        outfilename = os.path.join(tmp_dir, make_filename(filename, "typ", args))
+        exporter = TypstExporter(structure, args, dir_kwargs)
         exporter.export(outfilename)
 
     if args.filetype == "lj":

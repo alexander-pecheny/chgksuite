@@ -2,7 +2,7 @@ import pytest
 
 
 def pytest_addoption(parser):
-    parser.addoption("--tex", action="store_true", help="run tex tests")
+    parser.addoption("--pdf", action="store_true", help="run pdf tests")
     parser.addoption(
         "--parsing_engine",
         action="store",
@@ -12,12 +12,12 @@ def pytest_addoption(parser):
 
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "tex: tests that require TeX")
+    config.addinivalue_line("markers", "pdf: tests that require typst")
 
 
 def pytest_runtest_setup(item):
-    if "tex" in item.keywords and not item.config.getoption("--tex", default=False):
-        pytest.skip("need --tex option to run this test")
+    if "pdf" in item.keywords and not item.config.getoption("--pdf", default=False):
+        pytest.skip("need --pdf option to run this test")
 
 
 @pytest.fixture

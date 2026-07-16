@@ -1004,8 +1004,8 @@ def test_docx_composition(filename):
         assert 0 == code
 
 
-@pytest.mark.tex
-def test_tex_composition():
+@pytest.mark.pdf
+def test_pdf_composition():
     for filename in os.listdir(currentdir):
         if (
             filename.endswith((".docx", ".txt"))
@@ -1027,7 +1027,7 @@ def test_tex_composition():
                         "-m",
                         "chgksuite",
                         "compose",
-                        "tex",
+                        "pdf",
                         composed_abspath,
                     ],
                     cwd=parentdir,

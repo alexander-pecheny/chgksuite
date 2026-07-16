@@ -74,5 +74,5 @@ dev = [
 
 [tool.pytest.ini_options]
 markers = [
-    "tex",
+    "pdf",
 ]

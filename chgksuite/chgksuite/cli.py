@@ -533,17 +533,9 @@ class ArgparseBuilder:
             caption="Игнорировать отсутствующие картинки",
         )
 
-        cmdcompose_tex = cmdcompose_filetype.add_parser("tex")
+        cmdcompose_pdf = cmdcompose_filetype.add_parser("pdf")
         self.add_argument(
-            cmdcompose_tex,
-            "--tex_header",
-            help="a LaTeX header file.",
-            caption="Файл с заголовками",
-            advanced=True,
-            argtype="filename",
-        )
-        self.add_argument(
-            cmdcompose_tex,
+            cmdcompose_pdf,
             "filename",
             nargs="*",
             help="file(s) to compose from.",
@@ -551,11 +543,19 @@ class ArgparseBuilder:
             filetypes=[("chgksuite markup files", ("*.4s", "*.si4s", "*.br4s", "*.tr4s"))],
         )
         self.add_argument(
-            cmdcompose_tex,
-            "--rawtex",
+            cmdcompose_pdf,
+            "--rawtypst",
             action="store_true",
             advanced=True,
-            caption="Не удалять исходный tex",
+            caption="Не удалять исходный typst",
+        )
+        self.add_argument(
+            cmdcompose_pdf,
+            "--ignore_missing_images",
+            action="store_true",
+            help="insert placeholder text instead of failing when an image is not found.",
+            advanced=True,
+            caption="Игнорировать отсутствующие картинки",
         )
 
         cmdcompose_lj = cmdcompose_filetype.add_parser("lj")
@@ -1538,8 +1538,6 @@ def single_action(args, use_wrapper, resourcedir):
         args.docx_template = os.path.join(resourcedir, "template.docx")
     if not args.pptx_config:
         args.pptx_config = os.path.join(resourcedir, "pptx_config.toml")
-    if not args.tex_header:
-        args.tex_header = os.path.join(resourcedir, "cheader.tex")
     if not getattr(args, "poll_config", None):
         args.poll_config = os.path.join(resourcedir, "poll_config.toml")
     if args.config:
