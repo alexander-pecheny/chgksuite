@@ -355,7 +355,7 @@ def optimize_docx_images(docx_path, quality=80):
 
 
 def replace_font_in_docx(template_path, new_font):
-    """Replace Arial fonts with specified font in docx template"""
+    """Replace Arial/Noto Sans fonts with specified font in docx template"""
     temp_dir = tempfile.mkdtemp()
     template_name = os.path.basename(template_path)
     temp_template = os.path.join(temp_dir, template_name)
@@ -367,6 +367,16 @@ def replace_font_in_docx(template_path, new_font):
         zip_ref.extractall(temp_dir)
     os.remove(temp_zip)
 
+    # The default template embeds Noto Sans; with another font the embedded
+    # payload must go, or Word would render the new family name with Noto
+    # Sans glyph data.
+    embedded_fonts_dir = os.path.join(temp_dir, "word", "fonts")
+    if os.path.isdir(embedded_fonts_dir):
+        shutil.rmtree(embedded_fonts_dir)
+    font_table_rels = os.path.join(temp_dir, "word", "_rels", "fontTable.xml.rels")
+    if os.path.exists(font_table_rels):
+        os.remove(font_table_rels)
+
     for root, _, files in os.walk(temp_dir):
         for file in files:
             if file.endswith(".xml"):
@@ -375,8 +385,18 @@ def replace_font_in_docx(template_path, new_font):
                     with open(file_path, "r", encoding="utf-8") as f:
                         content = f.read()
 
+                    content = re.sub(
+                        r"<w:embed(?:Regular|Bold|Italic|BoldItalic)\b[^>]*/>",
+                        "",
+                        content,
+                    )
+                    content = re.sub(r"<w:embedTrueTypeFonts\s*/>", "", content)
+                    content = re.sub(
+                        r'<Default Extension="odttf"[^>]*/>', "", content
+                    )
                     content = content.replace("Arial Unicode MS", new_font)
                     content = content.replace("Arial", new_font)
+                    content = content.replace("Noto Sans", new_font)
 
                     with open(file_path, "w", encoding="utf-8") as f:
                         f.write(content)
@@ -937,7 +957,9 @@ class DocxExporter(BaseExporter):
         self.optimize_size = _optimize_size_enabled(self.args)
         self.font_name = _docx_font_name(self.font_spec)
 
-        if self.font_name:
+        # "Noto Sans" is the template's own font — replacing would only strip
+        # the embedded faces.
+        if self.font_name and _normalize_font_name(self.font_name) != "noto sans":
             self.args.docx_template = replace_font_in_docx(
                 self.args.docx_template, self.font_name
             )
