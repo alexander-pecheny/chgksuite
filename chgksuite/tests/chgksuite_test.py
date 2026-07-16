@@ -1392,6 +1392,67 @@ def test_telegram_formats_non_ascii_url_as_html_link():
     assert image is None
 
 
+def _make_rich_telegram_exporter():
+    import logging
+
+    import toml
+
+    exporter = TelegramExporter.__new__(TelegramExporter)
+    exporter.args = DefaultArgs()
+    exporter.parse_4s_elem = _parse_4s_elem
+    exporter.rich_mode = True
+    exporter.si_mode = False
+    exporter.qcount = 1
+    exporter.dir_kwargs = {}
+    exporter.logger = logging.getLogger("test")
+    exporter.labels = toml.load(exporter.args.labels_file)
+    return exporter
+
+
+def test_telegram_rich_question_formatting():
+    exporter = _make_rich_telegram_exporter()
+    q = {
+        "question": "Текст вопроса & вторая строка.\nЕщё строка.",
+        "answer": "Ответ",
+        "comment": "Комментарий",
+        "source": "https://example.com/foo?x=1&y=2",
+        "author": "Автор Авторов",
+    }
+
+    posts = exporter.tg_format_question(q, number=5)
+
+    assert len(posts) == 1
+    payload, image = posts[0]
+    assert image is None
+    html = payload["html"]
+    assert payload["media_files"] == []
+    assert html.startswith("<p><b>Вопрос 5:</b> Текст вопроса &amp; вторая строка.<br/>")
+    assert "<details><summary>Ответ</summary>" in html
+    assert "<footer>" in html
+    # source/author are in the footer, inside the details block
+    assert html.index("<details>") < html.index("<footer>")
+    assert "Автор Авторов" in html.split("<footer>")[1]
+    assert html.endswith("</footer></details>")
+
+
+def test_telegram_rich_buffer_and_headings():
+    exporter = _make_rich_telegram_exporter()
+
+    posts = exporter.split_to_messages(
+        [exporter._wrap_heading("Тур 1"), "Редакторы благодарят.\nВсех."], []
+    )
+
+    assert posts == [
+        (
+            {
+                "html": "<h3>Тур 1</h3><p>Редакторы благодарят.<br/>Всех.</p>",
+                "media_files": [],
+            },
+            None,
+        )
+    ]
+
+
 def test_long_handout():
     cwd = os.getcwd()
     with make_temp_directory(dir=".") as temp_dir:

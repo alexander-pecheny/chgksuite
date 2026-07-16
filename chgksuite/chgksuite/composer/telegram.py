@@ -113,6 +113,9 @@ class TelegramExporter(BaseExporter):
         self.chat_auth_uuid = uuid.uuid4().hex[:8]
         self.session = requests.Session()
         self.si_mode = self.game in ("si", "troika")
+        self.rich_mode = getattr(self.args, "rich", False)
+        if self.rich_mode and self.si_mode:
+            raise Exception("--rich is not supported for si/troika games yet")
         self.init_telegram()
 
     def check_connectivity(self):
@@ -393,6 +396,8 @@ class TelegramExporter(BaseExporter):
                 return "\n".join(res), images
 
     def tg_replace_chars(self, str_):
+        if getattr(self, "rich_mode", False):
+            str_ = str_.replace("&", "&amp;")
         if not self.args.disable_asterisks_processing:
             str_ = str_.replace("*", "&#42;")
         str_ = str_.replace("_", "&#95;")
@@ -549,8 +554,61 @@ class TelegramExporter(BaseExporter):
             res = "\n".join(result)
         return res, images
 
+    def _post_rich(self, chat_id, payload, reply_to_message_id=None):
+        """Send a rich message (Bot API 10.1 sendRichMessage).
+
+        ``payload`` is a dict with ``html`` and ``media_files``
+        (list of (media_id, path) referenced as tg://photo?id=<media_id>).
+        """
+        html_content = payload["html"]
+        self.logger.info(f"Posting rich message: {html_content[:50]}...")
+        media = []
+        files = {}
+        try:
+            for media_id, path in payload.get("media_files", []):
+                attach_name = f"f{media_id}"
+                files[attach_name] = open(path, "rb")
+                media.append(
+                    {
+                        "id": media_id,
+                        "media": {"type": "photo", "media": f"attach://{attach_name}"},
+                    }
+                )
+            rich_message = {"html": html_content}
+            if media:
+                rich_message["media"] = media
+            if files:
+                # Multipart request: non-file fields must be serialized strings.
+                data = {
+                    "chat_id": chat_id,
+                    "rich_message": json.dumps(rich_message),
+                    "disable_notification": "true",
+                }
+                if reply_to_message_id:
+                    data["reply_parameters"] = json.dumps(
+                        {"message_id": reply_to_message_id}
+                    )
+                result = self.send_api_request("sendRichMessage", data, files)
+            else:
+                data = {
+                    "chat_id": chat_id,
+                    "rich_message": rich_message,
+                    "disable_notification": True,
+                }
+                if reply_to_message_id:
+                    data["reply_parameters"] = {"message_id": reply_to_message_id}
+                result = self.send_api_request("sendRichMessage", data)
+        finally:
+            for f in files.values():
+                f.close()
+        return {"message_id": result["message_id"], "chat": {"id": chat_id}}
+
     def _post(self, chat_id, text, photo, reply_to_message_id=None):
         """Send a message to Telegram using API requests."""
+        if isinstance(text, dict):
+            return self._post_rich(
+                chat_id, text, reply_to_message_id=reply_to_message_id
+            )
         self.logger.info(f"Posting message: {text[:50]}...")
 
         try:
@@ -617,18 +675,19 @@ class TelegramExporter(BaseExporter):
 
         messages = []
         text, im = posts[0]
+        is_qqq = isinstance(text, str) and text.startswith("QQQ")
 
         # Step 1: Post the root message to the channel
         root_msg = self._post(
             self.channel_id,
             self.labels["general"]["handout_for_question"].format(text[3:])
-            if text.startswith("QQQ")
+            if is_qqq
             else text,
             im,
         )
 
         # Handle special case for questions with images
-        if len(posts) >= 2 and text.startswith("QQQ") and im and posts[1][0]:
+        if len(posts) >= 2 and is_qqq and im and posts[1][0]:
             prev_root_msg = root_msg
             root_msg = self._post(self.channel_id, posts[1][0], posts[1][1])
             posts = posts[1:]
@@ -755,7 +814,7 @@ class TelegramExporter(BaseExporter):
             text, images = self.tg_element_layout(pair[1])
             if not self.tg_heading:
                 self.tg_heading = text
-            self.buffer_texts.append(f"<b>{text}</b>")
+            self.buffer_texts.append(self._wrap_heading(text))
             self.buffer_images.extend(images)
         elif pair[0] == "section":
             if self.buffer_texts or self.buffer_images:
@@ -769,7 +828,7 @@ class TelegramExporter(BaseExporter):
             text, images = self.tg_element_layout(pair[1])
             self._tour_number = self._extract_tour_number(text)
             self._tour_seq += 1
-            self.buffer_texts.append(f"<b>{text}</b>")
+            self.buffer_texts.append(self._wrap_heading(text))
             self.buffer_images.extend(images)
             if self.si_mode:
                 self._si_pending_group = text
@@ -782,7 +841,7 @@ class TelegramExporter(BaseExporter):
                 self.buffer_texts = []
                 self.buffer_images = []
             text, images = self.tg_element_layout(pair[1])
-            self.buffer_texts.append(f"<b>{text}</b>")
+            self.buffer_texts.append(self._wrap_heading(text))
             self.buffer_images.extend(images)
             self._si_pending_group = text
         elif pair[0] == "theme":
@@ -799,7 +858,7 @@ class TelegramExporter(BaseExporter):
             text, images = self.tg_element_layout(theme_label)
             self._tour_number = str(pair[1]["number"])
             self._tour_seq += 1
-            self.buffer_texts.append(f"<b>{text}</b>")
+            self.buffer_texts.append(self._wrap_heading(text))
             self.buffer_images.extend(images)
             self.section = True
         elif pair[0] == "round":
@@ -809,7 +868,7 @@ class TelegramExporter(BaseExporter):
                 self.buffer_texts = []
                 self.buffer_images = []
             text, images = self.tg_element_layout(pair[1])
-            self.buffer_texts.append(f"<b>{text}</b>")
+            self.buffer_texts.append(self._wrap_heading(text))
             self.buffer_images.extend(images)
             self._si_pending_group = text
         elif pair[0] in ("comment", "author") and self.si_mode:
@@ -895,12 +954,49 @@ class TelegramExporter(BaseExporter):
             return chunk, im, texts, images
 
     def split_to_messages(self, texts, images):
+        if self.rich_mode:
+            return self._split_to_messages_rich(texts, images)
         result = []
         while texts or images:
             chunk, im, texts, images = self.make_chunk(texts, images)
             if chunk or im:
                 result.append((chunk, im))
         return result
+
+    def _wrap_heading(self, text):
+        return f"<h3>{text}</h3>" if self.rich_mode else f"<b>{text}</b>"
+
+    @staticmethod
+    def _rich_br(text):
+        return text.replace("\n", "<br/>")
+
+    @staticmethod
+    def _rich_img_tags(paths, media_files):
+        """Append image paths to media_files, return placeholder <img> tags."""
+        tags = ""
+        for path in paths:
+            media_id = f"img{len(media_files)}"
+            media_files.append((media_id, path))
+            tags += f'<img src="tg://photo?id={media_id}"/>'
+        return tags
+
+    def _split_to_messages_rich(self, texts, images):
+        html_parts = []
+        for t in texts:
+            t = (t or "").strip()
+            if not t:
+                continue
+            if t.startswith("<h"):
+                html_parts.append(t)
+            else:
+                html_parts.append(f"<p>{self._rich_br(t)}</p>")
+        media_files = []
+        img_tags = self._rich_img_tags(images, media_files)
+        if img_tags:
+            html_parts.append(img_tags)
+        if not html_parts:
+            return []
+        return [({"html": "".join(html_parts), "media_files": media_files}, None)]
 
     def swrap(self, s_, t="both"):
         if not s_:
@@ -983,7 +1079,49 @@ class TelegramExporter(BaseExporter):
             "images_a": images_a,
         }
 
+    def tg_format_question_rich(self, q, number=None):
+        """Render a question as a single rich message.
+
+        Question text and handout images stay visible; answer, comment etc.
+        are collapsed in a <details> block, source/author go to a <footer>
+        (rendered smaller), answer-side images sit inside the details block.
+        """
+        parts = self._format_question_parts(q, number=number)
+        media_files = []
+        html_content = f"<p>{self._rich_br(parts['q'].strip())}</p>"
+        html_content += self._rich_img_tags(parts["images_q"], media_files)
+        hidden = [parts[k] for k in ("a", "z", "nz", "comm") if parts[k]]
+        body = ""
+        if hidden:
+            body += (
+                "<p>" + "<br/>".join(self._rich_br(x) for x in hidden) + "</p>"
+            )
+        body += self._rich_img_tags(parts["images_a"], media_files)
+        small = [parts[k] for k in ("s", "au") if parts[k]]
+        if small:
+            body += (
+                "<footer>"
+                + "<br/>".join(self._rich_br(x) for x in small)
+                + "</footer>"
+            )
+        if body:
+            if self.args.nospoilers:
+                html_content += body
+            else:
+                summary = self.labels["question_labels"]["answer"]
+                html_content += (
+                    f"<details><summary>{summary}</summary>{body}</details>"
+                )
+        if tg_len(html_content) > 32000:
+            self.logger.warning(
+                f"question {number}: rich message length {tg_len(html_content)} "
+                "may exceed the 32768-character Telegram limit"
+            )
+        return [({"html": html_content, "media_files": media_files}, None)]
+
     def tg_format_question(self, q, number=None):
+        if self.rich_mode:
+            return self.tg_format_question_rich(q, number=number)
         parts = self._format_question_parts(q, number=number)
         txt_q = parts["q"]
         txt_a = parts["a"]
