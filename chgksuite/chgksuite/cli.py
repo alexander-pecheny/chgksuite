@@ -804,13 +804,6 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdcompose_telegram,
-            "--rich",
-            action="store_true",
-            help="use rich messages (Bot API 10.1): collapsible answers, inline images, smaller sources.",
-            caption="Rich-сообщения (сворачиваемые ответы, картинки внутри сообщения)",
-        )
-        self.add_argument(
-            cmdcompose_telegram,
             "--skip_until",
             type=int,
             help="skip questions until N.",

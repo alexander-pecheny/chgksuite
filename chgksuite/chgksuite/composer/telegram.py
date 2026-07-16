@@ -65,6 +65,9 @@ def tg_len(html):
 # Telegram silently drops entities beyond this limit per message.
 _TG_MAX_ENTITIES = 100
 
+# Inline marker for an image embedded in rich message text.
+_TG_IMG_SENTINEL_RE = re.compile("\x00img:([^\x00]+)\x00")
+
 _TG_ENTITY_RE = re.compile(r"<(?:b|strong|i|em|u|s|a |code|pre)")
 
 
@@ -113,9 +116,7 @@ class TelegramExporter(BaseExporter):
         self.chat_auth_uuid = uuid.uuid4().hex[:8]
         self.session = requests.Session()
         self.si_mode = self.game in ("si", "troika")
-        self.rich_mode = getattr(self.args, "rich", False)
-        if self.rich_mode and self.si_mode:
-            raise Exception("--rich is not supported for si/troika games yet")
+        self.rich_mode = True
         self.init_telegram()
 
     def check_connectivity(self):
@@ -452,17 +453,20 @@ class TelegramExporter(BaseExporter):
                     imgfile = parsed_image["imgfile"]
                     if os.path.isfile(imgfile):
                         max_side = 800 if self.args.resize_images else None
-                        # Rich messages render photos at intrinsic size, so
-                        # cap the height to keep them modest.
-                        max_height = 200 if rich_mode else None
                         orig_size = Image.open(imgfile).size
-                        image = self.prepare_image_for_telegram(
-                            imgfile, max_side=max_side, max_height=max_height
+                        prepared = self.prepare_image_for_telegram(
+                            imgfile, max_side=max_side
                         )
                         if max_side and max(orig_size) > max_side:
                             self.logger.info(
                                 f"Resized image {imgfile}: {orig_size[0]}x{orig_size[1]} -> max {max_side}px"
                             )
+                        if rich_mode:
+                            # Inline sentinel; resolved to an <img> block with
+                            # display dimensions when the message is finalized.
+                            res += f"\x00img:{prepared}\x00"
+                        else:
+                            image = prepared
                     else:
                         raise Exception(f"image {run[1]} doesn't exist")
             else:
@@ -893,7 +897,7 @@ class TelegramExporter(BaseExporter):
             text, images = self.tg_element_layout(pair[1])
             if text:
                 formatted = f"<b>{field_label}:</b> {text}"
-                if self.buffer_texts:
+                if self.buffer_texts and not self.rich_mode:
                     self.buffer_texts[-1] += "\n" + formatted
                 else:
                     self.buffer_texts.append(formatted)
@@ -902,7 +906,7 @@ class TelegramExporter(BaseExporter):
         else:
             text, images = self.tg_element_layout(pair[1])
             if text:
-                if self.si_mode and self.buffer_texts:
+                if self.si_mode and self.buffer_texts and not self.rich_mode:
                     self.buffer_texts[-1] += "\n" + text
                 else:
                     self.buffer_texts.append(text)
@@ -985,15 +989,43 @@ class TelegramExporter(BaseExporter):
     def _rich_br(text):
         return text.replace("\n", "<br/>")
 
-    @staticmethod
-    def _rich_img_tags(paths, media_files):
-        """Append image paths to media_files, return placeholder <img> tags."""
-        tags = ""
-        for path in paths:
+    def _rich_render(self, text):
+        """Convert plain text with image sentinels into rich HTML blocks."""
+        parts = []
+        pos = 0
+        for m in _TG_IMG_SENTINEL_RE.finditer(text):
+            seg = text[pos : m.start()].strip()
+            if seg:
+                parts.append(f"<p>{self._rich_br(seg)}</p>")
+            parts.append(m.group(0))
+            pos = m.end()
+        seg = text[pos:].strip()
+        if seg:
+            parts.append(f"<p>{self._rich_br(seg)}</p>")
+        return "".join(parts)
+
+    # Rich messages render photos at intrinsic size, so pass explicit display
+    # dimensions while uploading the full-resolution file (crisp when zoomed).
+    RICH_IMG_DISPLAY_HEIGHT = 200
+
+    def _finalize_rich(self, html_content):
+        """Replace image sentinels with <img> blocks, collect media files."""
+        media_files = []
+
+        def repl(m):
+            path = m.group(1)
             media_id = f"img{len(media_files)}"
             media_files.append((media_id, path))
-            tags += f'<img src="tg://photo?id={media_id}"/>'
-        return tags
+            width, height = Image.open(path).size
+            if height > self.RICH_IMG_DISPLAY_HEIGHT:
+                width = round(width * self.RICH_IMG_DISPLAY_HEIGHT / height)
+                height = self.RICH_IMG_DISPLAY_HEIGHT
+            return (
+                f'<img src="tg://photo?id={media_id}" '
+                f'width="{width}" height="{height}"/>'
+            )
+
+        return _TG_IMG_SENTINEL_RE.sub(repl, html_content), media_files
 
     def _split_to_messages_rich(self, texts, images):
         html_parts = []
@@ -1001,17 +1033,23 @@ class TelegramExporter(BaseExporter):
             t = (t or "").strip()
             if not t:
                 continue
-            if t.startswith("<h"):
+            # Already-rendered fragments (headings, si questions) contain
+            # block tags; plain text never does (< and > are escaped).
+            if t.startswith("<h") or "</p>" in t or "<details>" in t:
                 html_parts.append(t)
             else:
-                html_parts.append(f"<p>{self._rich_br(t)}</p>")
-        media_files = []
-        img_tags = self._rich_img_tags(images, media_files)
-        if img_tags:
-            html_parts.append(img_tags)
+                html_parts.append(self._rich_render(t))
+        # Images normally arrive as inline sentinels; keep stragglers anyway.
+        html_parts.extend(f"\x00img:{path}\x00" for path in images)
         if not html_parts:
             return []
-        return [({"html": "".join(html_parts), "media_files": media_files}, None)]
+        html_content, media_files = self._finalize_rich("".join(html_parts))
+        if len(html_content) > 32000:
+            self.logger.warning(
+                f"rich message length {len(html_content)} may exceed "
+                "the 32768-character Telegram limit"
+            )
+        return [({"html": html_content, "media_files": media_files}, None)]
 
     def swrap(self, s_, t="both"):
         if not s_:
@@ -1095,36 +1133,33 @@ class TelegramExporter(BaseExporter):
         }
 
     def tg_format_question_rich(self, q, number=None):
-        """Render a question as a single rich message.
+        """Render a question as a single rich HTML fragment.
 
         Question text and handout images stay visible; answer, comment etc.
         are collapsed in a <details> block, source/author go to a <footer>
-        (rendered smaller), answer-side images sit inside the details block.
+        (rendered smaller). Images stay as inline sentinels; for si the raw
+        fragment is returned for buffering, otherwise it is finalized into
+        a single-message payload.
         """
         parts = self._format_question_parts(q, number=number)
-        media_files = []
-        # Images are embedded without a textual placeholder, which can leave
-        # an empty handout wrapper like "[Раздаточный материал: ]" behind.
+        # Unwrap "[Раздаточный материал: <img>]" — the image needs no wrapper
+        # now that it is embedded in the message.
         handout_label = self.labels["question_labels"]["handout"]
         txt_q = re.sub(
-            r"\[" + re.escape(handout_label) + r":\s*\]\s*", "", parts["q"]
+            r"\[" + re.escape(handout_label) + r":\s*(\x00img:[^\x00]+\x00)\s*\]",
+            r"\1",
+            parts["q"],
         )
-        html_content = f"<p>{self._rich_br(txt_q.strip())}</p>"
-        html_content += self._rich_img_tags(parts["images_q"], media_files)
-        hidden = [parts[k] for k in ("a", "z", "nz", "comm") if parts[k]]
-        body = ""
-        if hidden:
-            body += (
-                "<p>" + "<br/>".join(self._rich_br(x) for x in hidden) + "</p>"
-            )
-        body += self._rich_img_tags(parts["images_a"], media_files)
-        small = [parts[k] for k in ("s", "au") if parts[k]]
+        html_content = self._rich_render(txt_q.strip())
+        hidden = "\n".join(parts[k] for k in ("a", "z", "nz", "comm") if parts[k])
+        body = self._rich_render(hidden)
+        small = "\n".join(parts[k] for k in ("s", "au") if parts[k])
         if small:
-            body += (
-                "<footer>"
-                + "<br/>".join(self._rich_br(x) for x in small)
-                + "</footer>"
-            )
+            # <footer> holds only text; image blocks move after it
+            footer_imgs = _TG_IMG_SENTINEL_RE.findall(small)
+            small = _TG_IMG_SENTINEL_RE.sub("", small)
+            body += f"<footer>{self._rich_br(small.strip())}</footer>"
+            body += "".join(f"\x00img:{path}\x00" for path in footer_imgs)
         if body:
             if self.args.nospoilers:
                 html_content += body
@@ -1133,9 +1168,13 @@ class TelegramExporter(BaseExporter):
                 html_content += (
                     f"<details><summary>{summary}</summary>{body}</details>"
                 )
-        if tg_len(html_content) > 32000:
+        if self.si_mode:
+            # Buffered per theme; finalized later in _split_to_messages_rich.
+            return html_content, []
+        html_content, media_files = self._finalize_rich(html_content)
+        if len(html_content) > 32000:
             self.logger.warning(
-                f"question {number}: rich message length {tg_len(html_content)} "
+                f"question {number}: rich message length {len(html_content)} "
                 "may exceed the 32768-character Telegram limit"
             )
         return [({"html": html_content, "media_files": media_files}, None)]

@@ -1453,6 +1453,52 @@ def test_telegram_rich_buffer_and_headings():
     ]
 
 
+def test_telegram_rich_question_with_images():
+    exporter = _make_rich_telegram_exporter()
+    tmp_dir = tempfile.mkdtemp()
+    exporter.dir_kwargs = {"targetdir": tmp_dir, "tmp_dir": tmp_dir}
+    img_path = os.path.join(tmp_dir, "handout.jpg")
+    Image.new("RGB", (1000, 600), "gray").save(img_path)
+
+    q = {
+        "question": f"[Раздаточный материал: (img {img_path})]\nТекст вопроса.",
+        "answer": "Ответ",
+        "comment": f"(img {img_path})\nПояснение.",
+        "author": "Автор",
+    }
+    payload = exporter.tg_format_question(q, number=3)[0][0]
+
+    assert "см. изображение" not in payload["html"]
+    assert "Раздаточный материал" not in payload["html"]
+    # full-resolution upload, display size capped via width/height attrs
+    assert '<img src="tg://photo?id=img0" width="333" height="200"/>' in payload["html"]
+    assert [m for m, _ in payload["media_files"]] == ["img0", "img1"]
+    for _, path in payload["media_files"]:
+        assert Image.open(path).size == (1000, 600)
+    # comment image lands inside the details block
+    assert payload["html"].index("<details>") < payload["html"].index("img1")
+
+
+def test_telegram_rich_si_question_buffering():
+    exporter = _make_rich_telegram_exporter()
+    exporter.si_mode = True
+
+    q = {"question": "Вопрос темы.", "answer": "Ответ.", "author": "Автор"}
+    fragment, images = exporter.tg_format_question(q, number=1)
+
+    assert images == []
+    assert fragment.startswith("<p><b>1:</b> Вопрос темы.</p>")
+    assert "<details>" in fragment and "<footer>" in fragment
+
+    posts = exporter.split_to_messages(
+        [exporter._wrap_heading("Тема «Кино»"), fragment], []
+    )
+    assert len(posts) == 1
+    html = posts[0][0]["html"]
+    assert html.startswith("<h3>Тема «Кино»</h3><p><b>1:</b>")
+    assert html.count("<details>") == 1
+
+
 def test_long_handout():
     cwd = os.getcwd()
     with make_temp_directory(dir=".") as temp_dir:
