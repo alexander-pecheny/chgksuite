@@ -130,7 +130,10 @@ def process_file(filename, tmp_dir, targetdir, args=None, logger=None):
         exporter.export(outfilename)
 
     if args.filetype == "pdf":
-        outfilename = os.path.join(tmp_dir, make_filename(filename, "typ", args))
+        addsuffix = "_mobile" if getattr(args, "device", None) == "mobile" else ""
+        outfilename = os.path.join(
+            tmp_dir, make_filename(filename, "typ", args, addsuffix=addsuffix)
+        )
         exporter = TypstExporter(structure, args, dir_kwargs)
         exporter.export(outfilename)
 

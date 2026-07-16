@@ -544,6 +544,14 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdcompose_pdf,
+            "--device",
+            choices=["desktop", "mobile"],
+            default="desktop",
+            help="page size: desktop (A4) or mobile (phone-screen-sized).",
+            caption="Устройство",
+        )
+        self.add_argument(
+            cmdcompose_pdf,
             "--rawtypst",
             action="store_true",
             advanced=True,

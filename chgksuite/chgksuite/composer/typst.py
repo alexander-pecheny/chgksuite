@@ -15,6 +15,15 @@ from chgksuite.composer.composer_common import (
 # out like the docx export.
 MARGIN_V = "25.4mm"  # w:top / w:bottom = 1440tw
 MARGIN_H = "19.05mm"  # w:left / w:right = 1080tw
+# --device mobile: page = 1.5× the iPhone 17 Pro screen (6.3", 2622×1206 @
+# 460ppi), so zoom-to-fit shows the 12pt body at 8pt-scale — comfortable at
+# phone viewing distance (1× read too big, 2× too small)
+MOBILE_W_MM = 99.89
+MOBILE_H_MM = 217.17
+MOBILE_MARGIN_MM = 7.5
+# the page-number line box (~5.8mm) plus typst's 30% footer-descent must fit
+# inside the bottom margin, or the number sits flush with the page edge
+MOBILE_MARGIN_BOTTOM_MM = 12.0
 BODY_PT = 12.0  # Normal: sz 24 half-points
 H1_PT = 16.0  # Heading1: sz 32
 H2_PT = 14.0  # Heading2: sz 28
@@ -274,18 +283,39 @@ class TypstExporter(BaseExporter):
     # would overlap by a descender. Measuring the full ascender→descender line
     # box makes flush blocks sit flush; dropping leading to 0 keeps the line
     # advance where typst's default had it, i.e. Word's single spacing.
+    def mobile(self):
+        return getattr(self.args, "device", "desktop") == "mobile"
+
+    def text_width_inches(self):
+        if self.mobile():
+            return (MOBILE_W_MM - 2 * MOBILE_MARGIN_MM) / 25.4
+        return (210 - 2 * 19.05) / 25.4
+
     def preamble(self):
         lang = (self.args.language or "ru")[:2]
+        if self.mobile():
+            page = (
+                "width: {w}, height: {h}, margin: (top: {m}, left: {m}, "
+                "right: {m}, bottom: {b})".format(
+                    w=mm(MOBILE_W_MM),
+                    h=mm(MOBILE_H_MM),
+                    m=mm(MOBILE_MARGIN_MM),
+                    b=mm(MOBILE_MARGIN_BOTTOM_MM),
+                )
+            )
+        else:
+            page = (
+                'paper: "a4", margin: (top: {v}, bottom: {v}, left: {h}, '
+                "right: {h})".format(v=MARGIN_V, h=MARGIN_H)
+            )
         return (
-            '#set page(paper: "a4", margin: (top: {v}, bottom: {v}, left: {h}, '
-            "right: {h}), footer: context align(center, text(size: {body}, "
+            "#set page({page}, footer: context align(center, text(size: {body}, "
             "counter(page).display())))\n"
             "#set text(font: {font}, size: {body}, lang: {lang}, hyphenate: false, "
             'top-edge: "ascender", bottom-edge: "descender")\n'
             "#set par(spacing: 0pt, leading: 0pt, justify: false)\n"
         ).format(
-            v=MARGIN_V,
-            h=MARGIN_H,
+            page=page,
             body=pt(BODY_PT),
             font=typst_string(FONT_FAMILY),
             lang=typst_string(lang),
@@ -436,10 +466,14 @@ class TypstExporter(BaseExporter):
             )
             p.add(expr)
             return
+        width, height = parsed["width"], parsed["height"]
+        max_w = self.text_width_inches()
+        if width > max_w:
+            width, height = max_w, height * max_w / width
         expr = "box(image({}, width: {}, height: {}))".format(
             typst_string(imgfile),
-            mm(parsed["width"] * 25.4),
-            mm(parsed["height"] * 25.4),
+            mm(width * 25.4),
+            mm(height * 25.4),
         )
         p.add_break()
         p.add(expr)
