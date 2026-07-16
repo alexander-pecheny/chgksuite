@@ -16,6 +16,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches
 from docx.shared import Pt as DocxPt
+from docx.text.run import Run as DocxRun
 
 import chgksuite.typotools as typotools
 from chgksuite.common import (
@@ -415,6 +416,19 @@ def get_label_standalone(
 def remove_square_brackets_standalone(s, regexes):
     """Standalone version of remove_square_brackets"""
     return _remove_square_brackets_standalone(s, regexes)
+
+
+# Sources/authors are set 2pt below the 12pt body.
+SOURCE_FONT_SIZE = DocxPt(10)
+
+
+def _paragraph_run_elements(paragraph):
+    return paragraph._p.findall(".//" + qn("w:r"))
+
+
+def _apply_source_font_size(paragraph, start):
+    for r in _paragraph_run_elements(paragraph)[start:]:
+        DocxRun(r, paragraph).font.size = SOURCE_FONT_SIZE
 
 
 def set_docx_run_text(run, text):
@@ -876,6 +890,8 @@ def add_question_to_docx(
                 else:
                     p.add_run("\n")
 
+                small = field in ("source", "author")
+                small_start = len(_paragraph_run_elements(p)) if small else 0
                 field_label = get_label_standalone(q, field, labels, language)
                 p.add_run(f"{field_label}: ").bold = True
                 preserve_brackets = field == "zachet"
@@ -894,6 +910,8 @@ def add_question_to_docx(
                     replace_no_break_spaces=field != "source",
                     **kwargs,
                 )
+                if small:
+                    _apply_source_font_size(p, small_start)
 
     return qcount
 
