@@ -8,4 +8,4 @@
 
 Документация: https://chgksuite.pecheny.me
 
-Последняя версия в релизах: https://gitlab.com/peczony/chgksuite/-/releases
+Последняя версия в релизах: https://code.pecheny.me/pecheny/chgksuite/releases
