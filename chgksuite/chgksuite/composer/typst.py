@@ -4,17 +4,18 @@ import shutil
 import subprocess
 import sys
 
-from chgksuite.common import replace_escaped
+import toml
+
+from chgksuite.common import get_source_dirs, replace_escaped
 from chgksuite.composer.composer_common import (
     BaseExporter,
     backtick_replace,
     parseimg,
 )
 
-# Page setup, transcribed from template.docx (twips → mm/pt), so the PDF lays
-# out like the docx export.
-MARGIN_V = "25.4mm"  # w:top / w:bottom = 1440tw
-MARGIN_H = "19.05mm"  # w:left / w:right = 1080tw
+# Page setup, transcribed from template.docx (twips → mm/pt), so the PDF lays out
+# like the docx export. The desktop defaults below feed pdf_config.toml; changing
+# them there re-lays the PDF without touching this module.
 # --device mobile: page = 1.5× the iPhone 17 Pro screen (6.3", 2622×1206 @
 # 460ppi), so zoom-to-fit shows the 12pt body at 8pt-scale — comfortable at
 # phone viewing distance (1× read too big, 2× too small)
@@ -271,6 +272,29 @@ class TypstExporter(BaseExporter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.qcount = 0
+        config_path = getattr(self.args, "pdf_config", None) or os.path.join(
+            get_source_dirs()[1], "pdf_config.toml"
+        )
+        with open(config_path, encoding="utf8") as f:
+            self.config = toml.load(f)
+        lb = self.config.get("line_box", {})
+        self.top_edge = lb.get("top_edge", 1.07)
+        self.bottom_edge = lb.get("bottom_edge", -0.29)
+        self.leading_pt = lb.get("leading_pt", 0.0)
+        page = self.config.get("page", {})
+        self.margin_v_mm = page.get("margin_v_mm", 25.4)
+        self.margin_h_mm = page.get("margin_h_mm", 19.05)
+        font = self.config.get("font", {})
+        self.body_pt = font.get("body_pt", BODY_PT)
+        self.heading1_pt = font.get("heading1_pt", H1_PT)
+        self.heading2_pt = font.get("heading2_pt", H2_PT)
+        self.source_pt = font.get("source_pt", SRC_PT)
+        spacing = self.config.get("spacing", {})
+        self.heading_above = spacing.get("heading_above", HEADING_ABOVE)
+        self.heading_below = spacing.get("heading_below", HEADING_BELOW)
+        self.question_above = spacing.get("question_above", QUESTION_ABOVE)
+        self.answer_above = spacing.get("answer_above", ANSWER_ABOVE)
+        self.source_gap = spacing.get("source_gap", SRC_GAP_PT)
 
     # Word's paragraph-level "keep" flags map onto typst blocks
     # (keepLines → breakable: false, keepNext → sticky: true), so a question
@@ -280,9 +304,10 @@ class TypstExporter(BaseExporter):
     # typst measures a line box from cap-height to baseline, so a block's height
     # leaves out its descenders — fine when blocks are separated by par.spacing,
     # ruinous here, because Word's paragraphs are flush and consecutive blocks
-    # would overlap by a descender. Measuring the full ascender→descender line
-    # box makes flush blocks sit flush; dropping leading to 0 keeps the line
-    # advance where typst's default had it, i.e. Word's single spacing.
+    # would overlap by a descender. Fixed-em edges (see pdf_config.toml) make the
+    # line box, hence the advance, font-independent; resolving them to each font's
+    # own "ascender"/"descender" instead crammed any font whose typo metrics sum
+    # to ~1em (IBM Plex, STIX) while looking right only for Noto's tall metrics.
     def mobile(self):
         return getattr(self.args, "device", "desktop") == "mobile"
 
@@ -306,19 +331,22 @@ class TypstExporter(BaseExporter):
         else:
             page = (
                 'paper: "a4", margin: (top: {v}, bottom: {v}, left: {h}, '
-                "right: {h})".format(v=MARGIN_V, h=MARGIN_H)
+                "right: {h})".format(v=mm(self.margin_v_mm), h=mm(self.margin_h_mm))
             )
         return (
             "#set page({page}, footer: context align(center, text(size: {body}, "
             "counter(page).display())))\n"
             "#set text(font: {font}, size: {body}, lang: {lang}, hyphenate: false, "
-            'top-edge: "ascender", bottom-edge: "descender")\n'
-            "#set par(spacing: 0pt, leading: 0pt, justify: false)\n"
+            "top-edge: {top_edge}em, bottom-edge: {bottom_edge}em)\n"
+            "#set par(spacing: 0pt, leading: {leading}, justify: false)\n"
         ).format(
             page=page,
-            body=pt(BODY_PT),
+            body=pt(self.body_pt),
             font=typst_string(getattr(self.args, "font", None) or FONT_FAMILY),
             lang=typst_string(lang),
+            top_edge=self.top_edge,
+            bottom_edge=self.bottom_edge,
+            leading=pt(self.leading_pt),
         )
 
     def generate(self):
@@ -331,19 +359,21 @@ class TypstExporter(BaseExporter):
         for element in self.structure:
             etype = element[0]
             if etype == "meta":
-                p = Para(above=QUESTION_ABOVE if prev_type == "Question" else 0.0)
+                p = Para(above=self.question_above if prev_type == "Question" else 0.0)
                 self.add_value(p, element[1], True)
                 out.append(p.typ())
                 out.append(empty_line())
             elif etype in ("heading", "ljheading", "section", "editor", "date"):
-                p = Para(above=HEADING_ABOVE, below=HEADING_BELOW, sticky=True)
+                p = Para(
+                    above=self.heading_above, below=self.heading_below, sticky=True
+                )
                 if etype == "heading":
-                    p.size, p.bold = H1_PT, True
+                    p.size, p.bold = self.heading1_pt, True
                     if not first:
                         heading_pb = True
                     p.page_break = heading_pb
                 elif etype == "section":
-                    p.size, p.bold, p.italic = H2_PT, True, True
+                    p.size, p.bold, p.italic = self.heading2_pt, True, True
                     p.page_break = not first_section
                     first_section = False
                 self.add_value(p, element[1], True)
@@ -365,7 +395,7 @@ class TypstExporter(BaseExporter):
         number = q.get("number", self.qcount)
         out = []
 
-        p1 = Para(above=QUESTION_ABOVE, keep_lines=True)
+        p1 = Para(above=self.question_above, keep_lines=True)
         p1.add_styled(self.get_label(q, "question", number) + ". ", "bold")
         if "handout" in q:
             p1.add_styled("\n[" + self.get_label(q, "handout") + ": ")
@@ -375,7 +405,7 @@ class TypstExporter(BaseExporter):
         self.add_value(p1, q["question"], True)
         out.append(p1.typ())
 
-        p2 = Para(above=ANSWER_ABOVE, keep_lines=True)
+        p2 = Para(above=self.answer_above, keep_lines=True)
         p2.add_styled(self.get_label(q, "answer") + ": ", "bold")
         self.add_value(p2, q["answer"], True)
 
@@ -386,7 +416,9 @@ class TypstExporter(BaseExporter):
             nbsp = field != "source"
             if field in ("source", "author"):
                 if src is None:
-                    src = Para(keep_lines=True, run_size=SRC_PT, above=SRC_GAP_PT)
+                    src = Para(
+                        keep_lines=True, run_size=self.source_pt, above=self.source_gap
+                    )
                 else:
                     src.add_break()
                 src.add_styled(self.get_label(q, field) + ": ", "bold")

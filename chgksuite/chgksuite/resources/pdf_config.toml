@@ -1,0 +1,30 @@
+# PDF (typst) typography & layout. Copy this file and pass --pdf_config to override per project.
+
+[line_box]
+# The line-to-line advance is the font's ascender->descender box (leading stays 0).
+# Pinning the edges to fixed em values instead of each font's own typo metrics keeps
+# the line height constant across fonts. The defaults are Noto Sans's native metrics,
+# so its output is unchanged; fonts whose typo asc-desc sums to ~1em (IBM Plex, STIX,
+# most others) no longer cram their lines together.
+top_edge = 1.07
+bottom_edge = -0.29
+leading_pt = 0.0
+
+[page]
+# A4 margins, in mm (transcribed from the docx template).
+margin_v_mm = 25.4
+margin_h_mm = 19.05
+
+[font]
+body_pt = 12.0
+heading1_pt = 16.0
+heading2_pt = 14.0
+source_pt = 10.0
+
+[spacing]
+# Space above/below paragraphs in pt, matching the docx export's w:before/w:after.
+heading_above = 12.0
+heading_below = 3.0
+question_above = 18.0
+answer_above = 6.0
+source_gap = 2.72
