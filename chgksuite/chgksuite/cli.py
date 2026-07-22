@@ -563,6 +563,14 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdcompose_pdf,
+            "--pdf_config",
+            help="a pdf (typst) typography config file.",
+            advanced=True,
+            caption="Файл конфигурации",
+            argtype="filename",
+        )
+        self.add_argument(
+            cmdcompose_pdf,
             "--rawtypst",
             action="store_true",
             advanced=True,
@@ -1557,6 +1565,8 @@ def single_action(args, use_wrapper, resourcedir):
         args.docx_template = os.path.join(resourcedir, "template.docx")
     if not args.pptx_config:
         args.pptx_config = os.path.join(resourcedir, "pptx_config.toml")
+    if not getattr(args, "pdf_config", None):
+        args.pdf_config = os.path.join(resourcedir, "pdf_config.toml")
     if not getattr(args, "poll_config", None):
         args.poll_config = os.path.join(resourcedir, "poll_config.toml")
     if args.config:
