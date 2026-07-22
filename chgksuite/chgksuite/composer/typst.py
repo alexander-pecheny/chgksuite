@@ -317,7 +317,7 @@ class TypstExporter(BaseExporter):
         ).format(
             page=page,
             body=pt(BODY_PT),
-            font=typst_string(FONT_FAMILY),
+            font=typst_string(getattr(self.args, "font", None) or FONT_FAMILY),
             lang=typst_string(lang),
         )
 

@@ -552,6 +552,17 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdcompose_pdf,
+            "--font",
+            "--font_face",
+            dest="font",
+            default=default_overrides.get("font")
+            or default_overrides.get("font_face")
+            or None,
+            help="font family to use in the document.",
+            caption="Шрифт",
+        )
+        self.add_argument(
+            cmdcompose_pdf,
             "--rawtypst",
             action="store_true",
             advanced=True,
