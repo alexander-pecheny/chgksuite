@@ -481,8 +481,11 @@ class TelegramExporter(BaseExporter):
             res = res[:-1]
         return res, image
 
+    # 16:9 of this is 2560, the largest photo side Telegram stores.
+    PAD_MAX_HEIGHT = 1440
+
     @classmethod
-    def prepare_image_for_telegram(cls, imgfile, max_side=None, max_height=None):
+    def prepare_image_for_telegram(cls, imgfile, max_side=None, pad_to_aspect=None):
         """Prepare an image for uploading to Telegram (resize if needed)."""
         img = Image.open(imgfile)
         width, height = img.size
@@ -495,9 +498,16 @@ class TelegramExporter(BaseExporter):
             width, height = img.size
             modified = True
 
-        if max_height and height > max_height:
-            scale = max_height / height
-            img = img.resize((int(width * scale), max_height), Image.LANCZOS)
+        if pad_to_aspect and width < height * pad_to_aspect:
+            if height > cls.PAD_MAX_HEIGHT:
+                scale = cls.PAD_MAX_HEIGHT / height
+                img = img.resize(
+                    (round(width * scale), cls.PAD_MAX_HEIGHT), Image.LANCZOS
+                )
+                width, height = img.size
+            img = ImageOps.pad(
+                img, (round(height * pad_to_aspect), height), color="black"
+            )
             width, height = img.size
             modified = True
 
@@ -1008,8 +1018,8 @@ class TelegramExporter(BaseExporter):
         return "".join(parts)
 
     # Rich messages render photos at intrinsic size and ignore width/height
-    # attributes, so physically resize to keep images modest.
-    RICH_IMG_DISPLAY_HEIGHT = 200
+    # attributes, so pad tall images to 16:9 instead of shrinking them.
+    RICH_IMG_ASPECT = 16 / 9
 
     def _finalize_rich(self, html_content):
         """Replace image sentinels with <img> blocks, collect media files."""
@@ -1017,7 +1027,7 @@ class TelegramExporter(BaseExporter):
 
         def repl(m):
             path = self.prepare_image_for_telegram(
-                m.group(1), max_height=self.RICH_IMG_DISPLAY_HEIGHT
+                m.group(1), pad_to_aspect=self.RICH_IMG_ASPECT
             )
             media_id = f"img{len(media_files)}"
             media_files.append((media_id, path))

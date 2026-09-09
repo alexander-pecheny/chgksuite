@@ -1562,9 +1562,9 @@ def test_telegram_rich_question_with_images():
     assert "Раздаточный материал" not in payload["html"]
     assert '<img src="tg://photo?id=img0"/>' in payload["html"]
     assert [m for m, _ in payload["media_files"]] == ["img0", "img1"]
-    # resized to 200px display height (rich messages render intrinsic size)
+    # padded to 16:9 (rich messages render photos at intrinsic size)
     for _, path in payload["media_files"]:
-        assert Image.open(path).size == (333, 200)
+        assert Image.open(path).size == (1067, 600)
     # comment image lands inside the details block
     assert payload["html"].index("<details>") < payload["html"].index("img1")
 
