@@ -958,7 +958,19 @@ def all_q_block_text(
     handouts_per_team = parse_positive_int(
         block.meta.get("handouts_per_team"), "handouts_per_team", default=3
     )
-    updates = {"rows": str(valid_row_step(columns, handouts_per_team))}
+    # Exactly one team's worth of handouts: the widest divisor of
+    # handouts_per_team that still fits in the original columns, with
+    # max_width scaled down so the cell size matches the split version.
+    one_team_columns = max(
+        d for d in range(1, handouts_per_team + 1)
+        if handouts_per_team % d == 0 and d <= columns
+    )
+    updates = {"rows": str(handouts_per_team // one_team_columns)}
+    if one_team_columns != columns:
+        updates["columns"] = str(one_team_columns)
+        updates["max_width"] = format_float(
+            block_max_width(block) * one_team_columns / columns
+        )
     updates.update(updates_for_resize(block, resize_image))
     image_update = source_relative_image_update(block, source_dir, output_dir)
     if image_update is not None:
