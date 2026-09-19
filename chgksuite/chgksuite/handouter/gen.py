@@ -55,7 +55,15 @@ def generate_handouts_list(handouts, output_dir, base_name, parsed):
 
 def generate_handouts(args):
     _, resourcedir = get_source_dirs()
-    toml.loads(read_file(os.path.join(resourcedir, f"labels_{args.language}.toml")))
+    labels = toml.loads(
+        read_file(os.path.join(resourcedir, f"labels_{args.language}.toml"))
+    )
+    # A parsed .docx usually puts the label on a line of its own, «Раздаточный
+    # материал.» above the picture or the text, with no bracket around them.
+    label_re = re.compile(
+        "^" + re.escape(labels["question_labels"]["handout"]) + "[.:]?\\s*",
+        flags=re.IGNORECASE,
+    )
     with open(
         os.path.join(resourcedir, f"regexes_{args.language}.json"), encoding="utf8"
     ) as f:
@@ -83,32 +91,35 @@ def generate_handouts(args):
         srch = handout_re.search(question_text)
         if srch:
             text = postprocess(srch.group("handout_text"))
-            elems = _parse_4s_elem(text)
-            img = [el for el in elems if el[0] == "img"]
-            if img:
-                try:
-                    parsed_img = parseimg(img[0][1], targetdir=targetdir)
-                except Exception:
-                    logger.exception(
-                        f"Image file for question {q['number']} not found, add it by hand"
-                    )
-                    continue
-            else:
-                parsed_img = None
-            res = {"for_question": q["number"]}
-            if parsed_img:
-                res["image"] = parsed_img["imgfile"]
-            else:
-                res["text"] = text
-            handouts.append(res)
         elif (
             "раздат" in question_text_lower
             or "роздан" in question_text_lower
             or "(img" in question_text_lower
         ):
+            # The label goes, a picture below it is the handout, and otherwise
+            # the whole text is offered for the author to cut down.
             print(f"probably badly formatted handout for question {q['number']}")
-            res = {"for_question": q["number"], "text": postprocess(question_text)}
-            handouts.append(res)
+            text = postprocess(label_re.sub("", question_text).strip())
+        else:
+            continue
+        elems = _parse_4s_elem(text)
+        img = [el for el in elems if el[0] == "img"]
+        if img:
+            try:
+                parsed_img = parseimg(img[0][1], targetdir=targetdir)
+            except Exception:
+                logger.exception(
+                    f"Image file for question {q['number']} not found, add it by hand"
+                )
+                continue
+        else:
+            parsed_img = None
+        res = {"for_question": q["number"]}
+        if parsed_img:
+            res["image"] = parsed_img["imgfile"]
+        else:
+            res["text"] = text
+        handouts.append(res)
     result = []
     result_by_question = defaultdict(list)
     for handout in handouts:

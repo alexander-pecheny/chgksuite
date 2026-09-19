@@ -592,18 +592,19 @@ def parse_handouts(contents):
     blocks = split_blocks(contents)
     result = []
     for block_ in blocks:
-        block = block_.strip()
         block_dict = {}
         text = []
-        lines = block.split("\n")
-        for line in lines:
+        # A blank line inside the text stays: it is an empty line on the
+        # handout. Only the ones around it, and the one under the settings, go.
+        for line in block_.split("\n"):
             sp = line.split(":", 1)
             if sp[0] in RESERVED_WORDS:
                 block_dict[sp[0]] = wrap_val(sp[0], sp[1])
-            elif line.strip():
+            else:
                 text.append(line.strip())
+        text = "\n".join(text).strip()
         if text:
-            block_dict["text"] = "\n".join(text).strip()
+            block_dict["text"] = text
             if not block_dict.get("raw_tex"):
                 block_dict["text"] = escape_typst(block_dict["text"])
         result.append(block_dict)

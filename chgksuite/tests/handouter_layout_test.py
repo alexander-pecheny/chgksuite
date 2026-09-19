@@ -300,6 +300,19 @@ test"""
         result = parse_handouts(contents)
         assert "grouping" not in result[0]
 
+    def test_parse_keeps_blank_lines_inside_text(self):
+        """A blank line inside the text is an empty line on the handout; the
+        one under the settings and any around the text go."""
+        contents = """for_question: 1
+columns: 3
+
+first
+
+second
+"""
+        result = parse_handouts(contents)
+        assert result[0]["text"] == "first\\\n\\\nsecond"
+
     def test_parse_max_width(self):
         """Parse max_width as a floating-point metadata value."""
         contents = """columns: 3
