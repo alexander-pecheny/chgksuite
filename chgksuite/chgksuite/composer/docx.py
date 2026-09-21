@@ -21,7 +21,6 @@ from docx.text.run import Run as DocxRun
 from chgksuite import typotools
 from chgksuite.common import (
     HYPERLINK_SAFE_CHARS,
-    NO_BREAK_HYPHEN_REPLACEMENT,
     DummyLogger,
     log_wrap,
     optimize_ooxml_images,
@@ -459,9 +458,50 @@ def _apply_source_font_size(paragraph, start):
 
 
 def set_docx_run_text(run, text):
-    """Set run text with LibreOffice-safe non-breaking hyphens."""
-    text = str(text).replace("\u2011", NO_BREAK_HYPHEN_REPLACEMENT)
-    run.text = text
+    """Set run text, writing a non-breaking hyphen as OOXML's own element.
+
+    <w:noBreakHyphen/> is drawn with the font's ordinary hyphen glyph, so it
+    asks nothing of the font, which is why a plain hyphen used to be fenced
+    with word joiners here (NO_BREAK_HYPHEN_REPLACEMENT, still what the pptx
+    export does: DrawingML has no such element). That fence is only invisible
+    if the font gives U+2060 zero width, and Noto Sans gives it 0.6em, so every
+    glued hyphen came out with a gap on each side.
+
+    The run is filled the way python-docx fills it — tabs and newlines become
+    <w:tab/> and <w:br/>, and a <w:t> with outer whitespace is marked
+    xml:space="preserve" — since the hyphen ends the <w:t> it sits in.
+    """
+    text = str(text)
+    if "\u2011" not in text:
+        run.text = text
+        return run
+    run.text = ""
+    buf = []
+
+    def flush():
+        if not buf:
+            return
+        chunk = "".join(buf)
+        del buf[:]
+        elem = OxmlElement("w:t")
+        elem.text = chunk
+        if chunk.strip() != chunk:
+            elem.set(qn("xml:space"), "preserve")
+        run._r.append(elem)
+
+    for char in text:
+        if char == "\t":
+            flush()
+            run._r.append(OxmlElement("w:tab"))
+        elif char in "\n\r":
+            flush()
+            run._r.append(OxmlElement("w:br"))
+        elif char == "\u2011":
+            flush()
+            run._r.append(OxmlElement("w:noBreakHyphen"))
+        else:
+            buf.append(char)
+    flush()
     return run
 
 

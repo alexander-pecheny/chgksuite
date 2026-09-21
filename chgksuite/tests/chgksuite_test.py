@@ -1187,7 +1187,7 @@ def test_docx_hyperlink_targets_percent_encode_non_ascii_url(tmp_path):
     assert url in document
 
 
-def test_docx_non_breaking_hyphen_uses_word_joiners(tmp_path):
+def test_docx_non_breaking_hyphen_uses_ooxml_element(tmp_path):
     from docx import Document
 
     doc = Document()
@@ -1199,9 +1199,29 @@ def test_docx_non_breaking_hyphen_uses_word_joiners(tmp_path):
     with zipfile.ZipFile(filename) as docx_file:
         document = docx_file.read("word/document.xml").decode("utf-8")
 
-    assert "<w:noBreakHyphen/>" not in document
+    # Neither character that would need font coverage is written out: not
+    # U+2011 itself, and not the word joiners that used to fence the hyphen.
+    assert "<w:t>В 50</w:t><w:noBreakHyphen/><w:t>е годы</w:t>" in document
     assert "\u2011" not in document
-    assert "В 50\u2060-\u2060е годы" in document
+    assert "\u2060" not in document
+
+
+def test_docx_non_breaking_hyphen_keeps_tabs_breaks_and_spaces(tmp_path):
+    from docx import Document
+
+    doc = Document()
+    paragraph = doc.add_paragraph()
+    add_text_run_to_docx(paragraph, "Из\u2011за\tтого,\nчто ")
+    filename = tmp_path / "nbh-mixed.docx"
+    doc.save(filename)
+
+    with zipfile.ZipFile(filename) as docx_file:
+        document = docx_file.read("word/document.xml").decode("utf-8")
+
+    assert (
+        "<w:t>Из</w:t><w:noBreakHyphen/><w:t>за</w:t><w:tab/>"
+        '<w:t>того,</w:t><w:br/><w:t xml:space="preserve">что </w:t>'
+    ) in document
 
 
 def test_optimize_docx_images_recompresses_png_as_jpeg(tmp_path):
