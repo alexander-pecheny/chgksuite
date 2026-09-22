@@ -738,6 +738,52 @@ def test_chgk_parse_txt_keeps_url_underscores_unescaped(tmp_path):
     assert question["source"] == r"file\_name https://example.com/path_with_under"
 
 
+def _parse_one_question(tmp_path, text, name="sample.txt"):
+    filename = tmp_path / name
+    filename.write_text(text, encoding="utf-8")
+    parsed = chgk_parse_txt(str(filename), encoding="utf-8", args=DefaultArgs())
+    return next(element[1] for element in parsed if element[0] == "Question")
+
+
+# A Word document shows the team a picture above the question text without
+# anybody typing the handout label over it, and that picture is the handout
+# (dopesuite#80). The same rule is in xy's port of this parser.
+def test_leading_image_becomes_the_handout(tmp_path):
+    question = _parse_one_question(
+        tmp_path, "Вопрос 1.\n(img pic1.png)\nЧто изображено?\nОтвет: круг\n"
+    )
+
+    assert question["handout"] == "(img pic1.png)"
+    assert question["question"] == "Что изображено?"
+
+
+def test_every_leading_image_joins_the_handout(tmp_path):
+    question = _parse_one_question(
+        tmp_path, "Вопрос 1.\n(img a.png)\n(img b.png)\nЧто изображено?\nОтвет: круг\n"
+    )
+
+    assert question["handout"] == "(img a.png)\n(img b.png)"
+    assert question["question"] == "Что изображено?"
+
+
+def test_image_inside_the_question_stays_where_it_is(tmp_path):
+    question = _parse_one_question(
+        tmp_path, "Вопрос 1.\nЧто изображено?\n(img pic1.png)\nОтвет: круг\n"
+    )
+
+    assert "handout" not in question
+    assert "(img pic1.png)" in question["question"]
+
+
+def test_question_of_nothing_but_a_picture_keeps_it(tmp_path):
+    question = _parse_one_question(
+        tmp_path, "Вопрос 1.\n(img pic1.png)\nОтвет: круг\n"
+    )
+
+    assert "handout" not in question
+    assert question["question"] == "(img pic1.png)"
+
+
 def test_docx_to_text_pypandoc_keeps_url_underscores_unescaped(
     monkeypatch, tmp_path
 ):

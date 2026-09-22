@@ -476,6 +476,28 @@ class ChgkParser:
                 srch.group(0),
                 f"[{handout}:" + srch.group(1),
             )
+        self._lift_leading_images(question)
+
+    def _lift_leading_images(self, question):
+        """Make the handout out of the pictures a question opens with.
+
+        A picture on its own line above the question text is what the teams are
+        given to look at, and in a Word document nobody had to type the handout
+        label above it for that to be true. Without this the (img ...) stayed at
+        the head of the question's own text (dopesuite#80). A question that is
+        nothing but a picture is left alone: it would be left with no text.
+        """
+        if "handout" in question or not isinstance(question.get("question"), str):
+            return
+        srch = re.match(
+            r"((?:[ \t]*\(img [^)\n]*\)[ \t]*\n)+)(.*\S.*)\Z",
+            question["question"],
+            flags=re.DOTALL,
+        )
+        if not srch:
+            return
+        question["handout"] = srch.group(1).strip()
+        question["question"] = srch.group(2).strip()
 
     def get_single_number_lines(self):
         result = []
