@@ -258,14 +258,6 @@ class HandoutGenerator:
         else:
             body = img_expr or text_expr or wrap_text("")
 
-        label = self.inside_label(block)
-        if label:
-            centered = "false" if block.get("no_center") else "true"
-            return (
-                CELLLABEL.replace("<CENTERED>", centered)
-                .replace("<CELLLABEL>", label)
-                .replace("<BODY>", body)
-            )
         return body
 
     def generate_regular_block(self, block_):
@@ -307,10 +299,12 @@ class HandoutGenerator:
         strut = round(fs * self.STRUT_EM * 25.4 / 72, 3)  # em -> mm
         cellbody = self.build_cell_body(block)
         centered = "false" if block.get("no_center") else "true"
+        label = self.inside_label(block)
+        label = CELLLABEL.replace("<CELLLABEL>", label) if label else ""
         return (
             f"#handout({columns}, {num_rows}, {team_cols}, {team_rows}, "
             f"{gap}mm, {cellw}mm, {pad}mm, {strut}mm, "
-            f"{str(teamed).lower()}, {centered}, {cellbody})"
+            f"{str(teamed).lower()}, {centered}, {cellbody}{label})"
         )
 
 

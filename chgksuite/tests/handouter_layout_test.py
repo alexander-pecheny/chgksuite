@@ -383,17 +383,13 @@ class TestMaxWidthLayout:
 
         # The number rides inside every cut-out handout, not above the block.
         assert "#qlabel[" not in typst
-        assert "clabelled(true, [Вопрос 18], " in typst
-        assert typst.index("[Вопрос 18]") < typst.index("[test]")
+        assert "[test], label: [Вопрос 18])" in typst
         # Without a caption above it the block still keeps the caption's air.
         assert "#qgap()" in typst
         assert typst.index("#qgap()") < typst.index("#handout(")
-        # A centred block centres everything in its cells, and a centred
-        # «Вопрос N» reads as part of the раздатка rather than as its label.
-        assert (
-            "#let clabel(body) = block(width: 100%, "
-            "align(left, text(fill: gray, size: 9pt, body)))"
-        ) in typst
+        # The number is pinned to the cell's corner, not carried by its content,
+        # so it sits at the same height whatever the content does.
+        assert "place(top + left, lbl)" in typst
 
     def test_generate_keeps_question_label_without_handout_grid(self, generator):
         generator.args.filename = "handouts.hndt"
