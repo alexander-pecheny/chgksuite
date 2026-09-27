@@ -144,9 +144,7 @@ class HandoutGenerator:
         if block.get("question_label") != "inside" or not block.get("for_question"):
             return None
         question = self.labels["question_labels"]["question"]
-        return CELLLABEL.replace(
-            "<CELLLABEL>", f"{question} {block['for_question']}"
-        )
+        return f"{question} {block['for_question']}"
 
     def wrap_question_block(self, label, grid):
         """Join a question's grey label and its handout block.
@@ -262,7 +260,12 @@ class HandoutGenerator:
 
         label = self.inside_label(block)
         if label:
-            return f"stack(dir: ttb, spacing: 1mm, {label}, {body})"
+            centered = "false" if block.get("no_center") else "true"
+            return (
+                CELLLABEL.replace("<CENTERED>", centered)
+                .replace("<CELLLABEL>", label)
+                .replace("<BODY>", body)
+            )
         return body
 
     def generate_regular_block(self, block_):

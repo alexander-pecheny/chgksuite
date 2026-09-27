@@ -383,8 +383,8 @@ class TestMaxWidthLayout:
 
         # The number rides inside every cut-out handout, not above the block.
         assert "#qlabel[" not in typst
-        assert "clabel[Вопрос 18]" in typst
-        assert typst.index("clabel[") < typst.index("[test]")
+        assert "clabelled(true, [Вопрос 18], " in typst
+        assert typst.index("[Вопрос 18]") < typst.index("[test]")
         # Without a caption above it the block still keeps the caption's air.
         assert "#qgap()" in typst
         assert typst.index("#qgap()") < typst.index("#handout(")
