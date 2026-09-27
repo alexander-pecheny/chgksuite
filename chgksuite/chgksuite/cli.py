@@ -1112,8 +1112,7 @@ class ArgparseBuilder:
             cmdhandouts_run,
             "--font_size",
             type=int,
-            default=14,
-            help="font size",
+            help="font size (14 unless the preamble or the handout sets one)",
             caption="Размер шрифта",
         )
         self.add_argument(
@@ -1361,8 +1360,7 @@ class ArgparseBuilder:
             cmdhandouts_split_fit,
             "--font_size",
             type=int,
-            default=14,
-            help="font size",
+            help="font size (14 unless the preamble or the handout sets one)",
             caption="Размер шрифта",
         )
         self.add_argument(

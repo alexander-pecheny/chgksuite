@@ -30,6 +30,7 @@ from chgksuite.handouter.utils import (
     compress_pdf,
     optimize_raster_image_for_tex,
     parse_handouts,
+    preamble_ignore,
     read_file,
     replace_ext,
     write_file,
@@ -71,6 +72,7 @@ def rotate_image(image_path, direction):
 
 
 DEFAULT_FONT = "Noto Sans"
+DEFAULT_FONT_SIZE = 14
 
 
 class HandoutGenerator:
@@ -111,7 +113,7 @@ class HandoutGenerator:
             .replace("<MARGIN_TOP>", str(self.args.margin_top))
             .replace("<MARGIN_BOTTOM>", str(self.args.margin_bottom))
             .replace("<FONT>", self.args.font or DEFAULT_FONT)
-            .replace("<FONTSIZE>", str(self.args.font_size))
+            .replace("<FONTSIZE>", str(self.args.font_size or DEFAULT_FONT_SIZE))
             .replace("<LABEL_ABOVE>", str(self.LABEL_ABOVE))
             .replace("<LABEL_BELOW>", str(self.LABEL_BELOW))
         )
@@ -128,7 +130,7 @@ class HandoutGenerator:
 
     def parse_input(self, filepath):
         contents = read_file(filepath)
-        return parse_handouts(contents)
+        return parse_handouts(contents, preamble_ignore(self.args))
 
     def generate_for_question(self, question_num):
         handout_text = self.labels["general"]["handout_for_question"].format(
@@ -226,7 +228,7 @@ class HandoutGenerator:
         """Build the Typst content placed in every cell of a block: an optional
         image, an optional (possibly multi-line) text, and a centred caption
         beneath the image when both are present."""
-        fs = block.get("font_size") or self.args.font_size
+        fs = block.get("font_size") or self.args.font_size or DEFAULT_FONT_SIZE
 
         def wrap_text(s):
             if block.get("font_family"):
@@ -298,7 +300,7 @@ class HandoutGenerator:
             print(f"columns: {columns}, cellw: {cellw}, gap: {gap}")
 
         pad = self.effective_tikz_mm(block)
-        fs = block.get("font_size") or self.args.font_size
+        fs = block.get("font_size") or self.args.font_size or DEFAULT_FONT_SIZE
         strut = round(fs * self.STRUT_EM * 25.4 / 72, 3)  # em -> mm
         cellbody = self.build_cell_body(block)
         centered = "false" if block.get("no_center") else "true"

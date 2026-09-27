@@ -23,7 +23,7 @@ from chgksuite.handouter.runner import (
     typst_compile_command,
     typst_query_command,
 )
-from chgksuite.handouter.utils import compress_pdf
+from chgksuite.handouter.utils import apply_preamble, compress_pdf, preamble_ignore
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ RENDERER_DEFAULTS = {
     "compress_pdf": "off",
     "optimize_images": "on",
     "font": None,
-    "font_size": 14,
+    "font_size": None,
     "paperwidth": 210,
     "paperheight": 297,
     "margin_top": 5,
@@ -1050,7 +1050,7 @@ def run_split_fit(args) -> int:
     output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else source.parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    source_contents = source.read_text(encoding="utf8")
+    source_contents = apply_preamble(source.read_text(encoding="utf8"), preamble_ignore(args))
     blocks = parse_blocks(source_contents)
     if not blocks:
         print(f"No handouts found in {source}", file=sys.stderr)

@@ -588,8 +588,50 @@ def split_blocks(contents):
     return sp
 
 
-def parse_handouts(contents):
-    blocks = split_blocks(contents)
+PREAMBLE_MARKER = "///preamble"
+# How many columns and rows a grid has depends on the handout in it.
+PREAMBLE_EXCLUDED = {"for_question", "image", "columns", "rows"}
+
+
+def preamble_ignore(args):
+    """The preamble settings that an explicit command-line flag overrides."""
+    ignore = set()
+    if getattr(args, "font", None):
+        ignore.add("font_family")
+    if getattr(args, "font_size", None) is not None:
+        ignore.add("font_size")
+    return ignore
+
+
+def apply_preamble(contents, ignore=()):
+    """Drop the /// comment lines, and write the settings of a leading
+    ///preamble block into every handout that does not set them itself."""
+    if "///" not in contents:
+        return contents
+    blocks = [block.split("\n") for block in split_blocks(contents)]
+    preamble = {}
+    first = next((line.strip() for line in blocks[0] if line.strip()), "")
+    if first == PREAMBLE_MARKER:
+        for line in blocks.pop(0):
+            if not line.strip() or line.lstrip().startswith("///"):
+                continue
+            key, sep, value = line.partition(":")
+            if not sep or key not in RESERVED_WORDS or key in PREAMBLE_EXCLUDED:
+                raise ValueError(f"not a preamble setting: {line.strip()!r}")
+            if key not in ignore:
+                preamble[key] = value.strip()
+    result = []
+    for lines in blocks:
+        lines = [line for line in lines if not line.lstrip().startswith("///")]
+        if any(line.strip() for line in lines):
+            own = {line.split(":", 1)[0] for line in lines}
+            lines = [f"{k}: {v}" for k, v in preamble.items() if k not in own] + lines
+        result.append("\n".join(lines))
+    return "\n---\n".join(result)
+
+
+def parse_handouts(contents, ignore=()):
+    blocks = split_blocks(apply_preamble(contents, ignore))
     result = []
     for block_ in blocks:
         block_dict = {}
