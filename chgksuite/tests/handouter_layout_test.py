@@ -389,7 +389,7 @@ class TestMaxWidthLayout:
         assert typst.index("#qgap()") < typst.index("#handout(")
         # The number is pinned to the cell's corner, not carried by its content,
         # so it sits at the same height whatever the content does.
-        assert "place(top + left, lbl)" in typst
+        assert "place(top + left, dx: 0.5mm - pad, dy: 0.3mm - pad, lbl)" in typst
 
     def test_generate_keeps_question_label_without_handout_grid(self, generator):
         generator.args.filename = "handouts.hndt"

@@ -98,7 +98,7 @@ class HandoutGenerator:
     # The grey label's gaps (large above to separate questions, tiny below so it
     # hugs its grid), in millimetres.
     LABEL_ABOVE = 2.0
-    LABEL_BELOW = 0.6
+    LABEL_BELOW = 0.9
     # A short single line fills a cell of this height per em of font size (the
     # old TeX `\vphantom{Ayg}` strut + baseline skip), so cells line up.
     STRUT_EM = 1.2
