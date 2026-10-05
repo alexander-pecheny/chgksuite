@@ -114,6 +114,77 @@ def _process_outside_handout_square_brackets(s, regexes, process):
     return "".join(result)
 
 
+def _owns_line(s, start, end):
+    line_start = s.rfind("\n", 0, start) + 1
+    line_end = s.find("\n", end)
+    if line_end == -1:
+        line_end = len(s)
+    return not s[line_start:start].strip() and not s[end:line_end].strip()
+
+
+def split_handouts(s, regexes):
+    """Cut question text at the handouts that stand on lines of their own.
+
+    Returns a list of pieces, ("text", str) and ("handout", label, content),
+    in order. The exporters set such a handout apart from the question as a
+    captioned box; one in the middle of a sentence stays a part of the text,
+    and so does a handout bracket with nothing after its label. The text
+    pieces keep everything around the handouts except the line breaks that
+    separated them from it.
+    """
+    pieces = []
+    previous_end = 0
+    for start, end, body in _iter_square_bracket_spans(s):
+        if not _is_handout_square_bracket_body(body, regexes):
+            continue
+        if ":" not in body or not _owns_line(s, start, end):
+            continue
+        label, content = body.split(":", 1)
+        content = content.strip()
+        if not content:
+            continue
+        pieces.append(("text", s[previous_end:start]))
+        pieces.append(("handout", label.strip(), content))
+        previous_end = end
+    if not pieces:
+        return [("text", s)]
+    pieces.append(("text", s[previous_end:]))
+    result = []
+    for i, piece in enumerate(pieces):
+        if piece[0] == "text":
+            text = piece[1]
+            if i > 0:
+                text = re.sub(r"^[ \t]*\n", "", text)
+            if i < len(pieces) - 1:
+                text = re.sub(r"\n[ \t]*$", "", text)
+            if not text.strip():
+                continue
+            piece = ("text", text)
+        result.append(piece)
+    return result
+
+
+def question_pieces(q, regexes, handout_label):
+    """The question's text cut at its handouts, or None when it has none.
+
+    A handout of its own field (the "> " line, or a picture the parser lifted
+    off the top of the question) comes first, captioned handout_label; then
+    the handouts the question text holds on lines of their own
+    (split_handouts).
+    """
+    pieces = []
+    if "handout" in q:
+        pieces.append(("handout", handout_label, q["handout"]))
+    question = q.get("question")
+    if isinstance(question, str) and regexes:
+        pieces.extend(split_handouts(question, regexes))
+    elif question is not None:
+        pieces.append(("text", question))
+    if not any(piece[0] == "handout" for piece in pieces):
+        return None
+    return pieces
+
+
 def remove_accents_standalone(s, regexes):
     return _process_outside_handout_square_brackets(
         s, regexes, lambda text: text.replace("\u0301", "")

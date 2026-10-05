@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import urllib.parse
@@ -293,6 +294,7 @@ class _DocxTextConverter:
         self.links = getattr(args, "links", "unwrap") or "unwrap"
         self.numbering = _Numbering(self.document)
         self.list_counters = {}
+        self.handout_caption = handout_caption_regex(args)
 
     def convert(self):
         blocks = []
@@ -322,6 +324,9 @@ class _DocxTextConverter:
         return text
 
     def table_text(self, table):
+        handout = self._handout_table_text(table)
+        if handout is not None:
+            return handout
         rows = []
         for row in table.rows:
             row_data = []
@@ -331,6 +336,17 @@ class _DocxTextConverter:
             if row_data:
                 rows.append(row_data)
         return _markdown_table(rows)
+
+    def _handout_table_text(self, table):
+        """The handout bracket for a table the exporters set a handout in: two
+        rows of one cell each, the first holding nothing but the handout
+        caption. None for any other table."""
+        rows = table.rows
+        if len(rows) != 2 or any(len(row.cells) != 1 for row in rows):
+            return None
+        caption = " ".join(self._cell_text(rows[0].cells[0]).split())
+        content = self._cell_text(rows[1].cells[0]).strip()
+        return handout_bracket(caption, content, self.handout_caption)
 
     def _cell_text(self, cell):
         chunks = []
@@ -541,6 +557,25 @@ class _DocxTextConverter:
             _attr(num_id, "w:val") if num_id is not None else None,
             _attr(ilvl, "w:val") if ilvl is not None else None,
         )
+
+
+def handout_caption_regex(args):
+    """The handout caption the language's regexes recognise, anchored."""
+    path = getattr(args, "regexes", None)
+    if not path:
+        path = os.path.join(os.path.dirname(__file__), "resources", "regexes_ru.json")
+    with open(path, encoding="utf-8") as f:
+        return re.compile(json.load(f)["handout_short"])
+
+
+def handout_bracket(caption, content, caption_regex):
+    """The 4s for a handout table's two cells, or None when they are not one:
+    the caption must be the handout label alone (it may end in a colon) and
+    the box must hold something."""
+    caption = caption.strip().rstrip(":").rstrip()
+    if not content or not caption_regex.match(caption) or "[" in caption:
+        return None
+    return f"[{caption}:\n{content}\n]"
 
 
 def _markdown_table(rows):

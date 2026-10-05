@@ -41,7 +41,11 @@ from chgksuite.common import (
 from chgksuite.composer import gui_compose
 from chgksuite.composer.composer_common import game_to_ext, make_filename
 from chgksuite.parser_db import chgk_parse_db
-from chgksuite.parsing_engine import python_docx_to_text
+from chgksuite.parsing_engine import (
+    handout_bracket,
+    handout_caption_regex,
+    python_docx_to_text,
+)
 from chgksuite.typotools import escape_underscores_except_urls, re_url
 from chgksuite.typotools import remove_excessive_whitespace as rew
 
@@ -1750,6 +1754,19 @@ def troika_parse_text(text, args=None, logger=None):
     return TroikaParser(args=args, logger=logger).parse(text)
 
 
+def _html_handout_table_text(tag, caption_regex):
+    """parsing_engine's handout table check, on the HTML engines' table."""
+    rows = tag.find_all("tr")
+    if len(rows) != 2:
+        return None
+    cells = [row.find_all(["td", "th"]) for row in rows]
+    if any(len(row_cells) != 1 for row_cells in cells):
+        return None
+    caption = " ".join(cells[0][0].get_text().split())
+    content = cells[1][0].get_text().strip()
+    return handout_bracket(caption, content, caption_regex)
+
+
 def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False):
     """Convert a DOCX file to plain text preserving images, lists, and optional heading markers.
 
@@ -1912,7 +1929,13 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
         for tag, prefix in to_append:
             tag.insert(0, prefix)
             ensure_line_breaks(tag)
+        handout_caption = handout_caption_regex(args)
         for tag in bsoup.find_all("table"):
+            handout = _html_handout_table_text(tag, handout_caption)
+            if handout is not None:
+                tag.insert_before(handout)
+                tag.extract()
+                continue
             try:
                 table = html2md(str(tag))
                 tag.insert_before(table)

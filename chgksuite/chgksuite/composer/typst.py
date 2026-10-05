@@ -11,6 +11,7 @@ from chgksuite.composer.composer_common import (
     BaseExporter,
     backtick_replace,
     parseimg,
+    question_pieces,
 )
 
 # Page setup, transcribed from template.docx (twips → mm/pt), so the PDF lays out
@@ -36,6 +37,14 @@ SRC_PT = 10.0  # source/author runs: 2pt below body
 # the shrunk block starts one BODY line below: 2pt × Noto Sans's 1.362em line
 # box (asc 1.069 + desc 0.293)
 SRC_GAP_PT = 2.72
+# The handout box, as the docx export sets it: a caption close above a 1pt frame
+# around the handout, and the question text resuming a little below the frame.
+HANDOUT_CAPTION_PT = 10.0
+HANDOUT_CAPTION_ABOVE = 4.0
+HANDOUT_CAPTION_GAP = 1.0
+HANDOUT_STROKE = 1.0
+HANDOUT_INSET = 5.0
+HANDOUT_GAP = 6.0  # the question text after the box
 LINK_COLOR = "#0000ff"  # Hyperlink character style
 TAB_WIDTH = "36pt"  # Word's default tab stop (0.5in)
 FONT_FAMILY = "Noto Sans"
@@ -266,10 +275,38 @@ class Para:
         return "".join(out)
 
 
+class HandoutBox(Para):
+    """A handout set apart from its question: the caption, then the handout
+    framed. Fills like a Para; renders to two blocks, the caption kept with
+    the frame."""
+
+    def __init__(self, caption):
+        super().__init__()
+        self.caption = caption
+
+    def typ(self):
+        # The caption lines up with the text inside the frame.
+        caption = (
+            "#block(above: {}, below: 0pt, inset: (left: {}), breakable: false, "
+            "sticky: true, {})\n"
+        ).format(
+            pt(HANDOUT_CAPTION_ABOVE),
+            pt(HANDOUT_INSET + HANDOUT_STROKE),
+            wrap_text(self.caption, "size: " + pt(HANDOUT_CAPTION_PT)),
+        )
+        body = " + ".join(e for e in self.exprs if e != PB_MARKER) or "[]"
+        box = (
+            "#block(above: {}, below: 0pt, width: 100%, stroke: {}, inset: {}, {})\n"
+        ).format(pt(HANDOUT_CAPTION_GAP), pt(HANDOUT_STROKE), pt(HANDOUT_INSET), body)
+        return caption + box
+
+
 class TypstExporter(BaseExporter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.qcount = 0
+        # what a handout's frame takes off the text width while it is filled
+        self.inset_inches = 0.0
         config_path = getattr(self.args, "pdf_config", None) or os.path.join(
             get_source_dirs()[1], "pdf_config.toml"
         )
@@ -311,8 +348,8 @@ class TypstExporter(BaseExporter):
 
     def text_width_inches(self):
         if self.mobile():
-            return (MOBILE_W_MM - 2 * MOBILE_MARGIN_MM) / 25.4
-        return (210 - 2 * 19.05) / 25.4
+            return (MOBILE_W_MM - 2 * MOBILE_MARGIN_MM) / 25.4 - self.inset_inches
+        return (210 - 2 * 19.05) / 25.4 - self.inset_inches
 
     def preamble(self):
         lang = (self.args.language or "ru")[:2]
@@ -395,13 +432,13 @@ class TypstExporter(BaseExporter):
 
         p1 = Para(above=self.question_above, keep_lines=True)
         p1.add_styled(self.get_label(q, "question", number) + ". ", "bold")
-        if "handout" in q:
-            p1.add_styled("\n[" + self.get_label(q, "handout") + ": ")
-            self.add_value(p1, q["handout"], False)
-            p1.add_styled("\n]")
-        p1.add_break()
-        self.add_value(p1, q["question"], True)
-        out.append(p1.typ())
+        pieces = question_pieces(q, self.regexes, self.get_label(q, "handout"))
+        if pieces is None:
+            p1.add_break()
+            self.add_value(p1, q["question"], True)
+            out.append(p1.typ())
+        else:
+            out.extend(self.render_pieces(p1, pieces))
 
         p2 = Para(above=self.answer_above, keep_lines=True)
         p2.add_styled(self.get_label(q, "answer") + ": ", "bold")
@@ -429,6 +466,30 @@ class TypstExporter(BaseExporter):
         if src is not None:
             out.append(src.typ())
         return "".join(out)
+
+    def render_pieces(self, p, pieces):
+        """The question label paragraph p, then the question text with its
+        handouts boxed (composer_common.question_pieces)."""
+        out = []
+        if pieces[0][0] == "text":
+            p.add_break()
+        for piece in pieces:
+            if piece[0] == "handout":
+                p.sticky = True
+                out.append(p.typ())
+                box = HandoutBox(piece[1])
+                self.inset_inches = 2 * (HANDOUT_INSET + HANDOUT_STROKE) / 72
+                self.add_value(box, piece[2], False)
+                self.inset_inches = 0.0
+                out.append(box.typ())
+                p = None
+                continue
+            if p is None:
+                p = Para(above=HANDOUT_GAP, keep_lines=True)
+            self.add_value(p, piece[1], True)
+        if p is not None:
+            out.append(p.typ())
+        return out
 
     def add_value(self, p, v, nbsp):
         """Render a field value (string or list): the [preamble, [items…]] form

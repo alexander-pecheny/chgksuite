@@ -1682,3 +1682,91 @@ REPLACE_COUNTER_TEST_CASES = [
 @pytest.mark.parametrize("replace_input, replace_output", REPLACE_COUNTER_TEST_CASES)
 def test_replace_counters(replace_input, replace_output):
     assert replace_counters(replace_input) == replace_output
+
+
+HANDOUT_REGEXES = {"handout_short": "Р[Аа][Зз][Дд][Аа][Тт]"}
+
+
+def test_split_handouts_cuts_at_a_handout_on_its_own_lines():
+    from chgksuite.composer.composer_common import split_handouts
+
+    text = "[Ведущему: медленно]\n[Раздаточный материал:\nстрока\nещё строка\n]\nЧто это?"
+    assert split_handouts(text, HANDOUT_REGEXES) == [
+        ("text", "[Ведущему: медленно]"),
+        ("handout", "Раздаточный материал", "строка\nещё строка"),
+        ("text", "Что это?"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Взгляните на [Раздаточный материал: АБВ] и ответьте.",
+        "[Раздаточный материал]\nЧто это?",
+        "[Ведущему: не раздавать]\nЧто это?",
+    ],
+)
+def test_split_handouts_leaves_a_handout_inside_a_sentence_alone(text):
+    from chgksuite.composer.composer_common import split_handouts
+
+    assert split_handouts(text, HANDOUT_REGEXES) == [("text", text)]
+
+
+HANDOUT_4S = """? [Раздаточный материал:
+We believe that an attack on Yugoslavia in 1951 should be considered a serious possibility.
+]
+О какой стране идёт речь?
+! Югославия.
+
+? Сначала текст.
+[Раздаточный материал:
+строка один
+строка два
+]
+Потом ещё текст.
+! Ответ.
+
+? Взгляните на [Раздаточный материал: АБВ] и ответьте.
+! х.
+"""
+
+
+def _compose_handout_docx(tmp_path):
+    src = tmp_path / "handouts.4s"
+    src.write_text(HANDOUT_4S, encoding="utf-8")
+    subprocess.run(
+        [sys.executable, "-m", "chgksuite", "compose", "docx", str(src)],
+        cwd=parentdir,
+        check=True,
+        timeout=60,
+    )
+    return tmp_path / "handouts.docx"
+
+
+def test_docx_sets_a_handout_in_a_captioned_box(tmp_path):
+    from docx import Document
+    from docx.oxml.ns import qn
+
+    doc = Document(_compose_handout_docx(tmp_path))
+    assert len(doc.tables) == 2
+    caption, box = (row.cells[0] for row in doc.tables[0].rows)
+    assert caption.text == "Раздаточный материал"
+    assert box.text.startswith("We believe")
+    assert box._tc.tcPr.find(qn("w:tcBorders")) is not None
+    assert caption._tc.tcPr.find(qn("w:tcBorders")) is None
+    text = "\n".join(p.text for p in doc.paragraphs)
+    assert "[Раздаточный материал: АБВ]" in text, "a mid-sentence handout stays text"
+    assert "We believe" not in text
+
+
+def test_a_handout_box_parses_back_to_the_same_4s(tmp_path):
+    docx_path = _compose_handout_docx(tmp_path)
+    (tmp_path / "handouts.4s").unlink()
+    subprocess.run(
+        [sys.executable, "-m", "chgksuite", "parse", str(docx_path)],
+        cwd=parentdir,
+        check=True,
+        timeout=60,
+    )
+    back = (tmp_path / "handouts.4s").read_text(encoding="utf-8")
+    assert parse_4s(back.replace(" ", " ")) == parse_4s(HANDOUT_4S)

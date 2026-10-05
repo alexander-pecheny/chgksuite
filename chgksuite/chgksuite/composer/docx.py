@@ -31,6 +31,7 @@ from chgksuite.composer.composer_common import (
     _parse_4s_elem,
     backtick_replace,
     parseimg,
+    question_pieces,
     remove_accents_standalone,
 )
 from chgksuite.composer.composer_common import (
@@ -772,6 +773,61 @@ def format_docx_element(
                     r.style = "Whitened"
 
 
+# The handout box: its caption sits close above it, the box is drawn around the
+# handout itself, and the question text resumes a little below the box.
+HANDOUT_CAPTION_PT = 10
+HANDOUT_BORDER_EIGHTHS = 8  # 1pt, in the eighths of a point Word measures borders in
+HANDOUT_BOX_MARGIN_TWIPS = 100
+HANDOUT_CAPTION_MARGIN_TWIPS = 20
+HANDOUT_GAP_PT = 6
+FULL_WIDTH_PCT = 5000  # fiftieths of a percent
+
+
+def _set_cell_margins(cell, top, bottom):
+    tc_pr = cell._tc.get_or_add_tcPr()
+    mar = OxmlElement("w:tcMar")
+    for side, value in (("top", top), ("bottom", bottom)):
+        el = OxmlElement(f"w:{side}")
+        el.set(qn("w:w"), str(value))
+        el.set(qn("w:type"), "dxa")
+        mar.append(el)
+    tc_pr.append(mar)
+
+
+def _set_cell_borders(cell):
+    tc_pr = cell._tc.get_or_add_tcPr()
+    borders = OxmlElement("w:tcBorders")
+    for side in ("top", "left", "bottom", "right"):
+        el = OxmlElement(f"w:{side}")
+        el.set(qn("w:val"), "single")
+        el.set(qn("w:sz"), str(HANDOUT_BORDER_EIGHTHS))
+        el.set(qn("w:space"), "0")
+        el.set(qn("w:color"), "000000")
+        borders.append(el)
+    # CT_TcPr wants tcBorders right after tcW, which python-docx always writes.
+    tc_pr.find(qn("w:tcW")).addnext(borders)
+
+
+def add_handout_table(doc, label, content, add_content):
+    """Set a handout as a two-row table: the caption, borderless, and under it
+    the handout in a box. A parser reads the table back as the handout bracket
+    (parsing_engine), so the docx round-trips to the same 4s."""
+    table = doc.add_table(rows=2, cols=1)
+    tbl_pr = table._tbl.tblPr
+    tbl_w = tbl_pr.find(qn("w:tblW"))
+    tbl_w.set(qn("w:type"), "pct")
+    tbl_w.set(qn("w:w"), str(FULL_WIDTH_PCT))
+    caption_cell, box_cell = table.cell(0, 0), table.cell(1, 0)
+    _set_cell_margins(caption_cell, 0, HANDOUT_CAPTION_MARGIN_TWIPS)
+    caption = caption_cell.paragraphs[0]
+    caption.paragraph_format.keep_with_next = True
+    caption.add_run(label).font.size = DocxPt(HANDOUT_CAPTION_PT)
+    _set_cell_borders(box_cell)
+    _set_cell_margins(box_cell, HANDOUT_BOX_MARGIN_TWIPS, HANDOUT_BOX_MARGIN_TWIPS)
+    add_content(box_cell.paragraphs[0], content)
+    return table
+
+
 def add_question_to_docx(
     doc,
     question_data,
@@ -861,14 +917,28 @@ def add_question_to_docx(
             )
             p.add_run(f"{question_label}. ").bold = True
 
-    # Add handout if present
-    if "handout" in q:
-        handout_label = get_label_standalone(q, "handout", labels, language)
-        p.add_run(f"\n[{handout_label}: ")
+    def add_text(para, value):
         format_docx_element(
             doc,
-            q["handout"],
-            p,
+            value,
+            para,
+            False,
+            spoilers,
+            logger,
+            labels,
+            regexes,
+            language,
+            remove_accents=screen_mode,
+            remove_brackets=screen_mode,
+            replace_no_break_spaces=True,
+            **kwargs,
+        )
+
+    def add_handout(para, value):
+        format_docx_element(
+            doc,
+            value,
+            para,
             WHITEN["handout"],
             spoilers,
             logger,
@@ -879,27 +949,37 @@ def add_question_to_docx(
             remove_brackets=screen_mode,
             **kwargs,
         )
-        p.add_run("\n]")
 
-    if not si_mode and not noparagraph:
-        p.add_run("\n")
-
-    # Add question text
-    format_docx_element(
-        doc,
-        q["question"],
-        p,
-        False,
-        spoilers,
-        logger,
-        labels,
-        regexes,
-        language,
-        remove_accents=screen_mode,
-        remove_brackets=screen_mode,
-        replace_no_break_spaces=True,
-        **kwargs,
-    )
+    pieces = None
+    if external_para is None:
+        pieces = question_pieces(
+            q, regexes, get_label_standalone(q, "handout", labels, language)
+        )
+    if pieces is None:
+        # Inside a table cell (the screen-version columns) a handout stays a
+        # bracket in the text: a cell holds the whole question as one paragraph.
+        if "handout" in q:
+            handout_label = get_label_standalone(q, "handout", labels, language)
+            p.add_run(f"\n[{handout_label}: ")
+            add_handout(p, q["handout"])
+            p.add_run("\n]")
+        if not si_mode and not noparagraph:
+            p.add_run("\n")
+        add_text(p, q["question"])
+    else:
+        if pieces[0][0] == "text" and not si_mode and not noparagraph:
+            p.add_run("\n")
+        for piece in pieces:
+            if piece[0] == "handout":
+                p.paragraph_format.keep_with_next = True
+                add_handout_table(doc, piece[1], piece[2], add_handout)
+                p = None
+                continue
+            if p is None:
+                p = doc.add_paragraph()
+                p.paragraph_format.keep_together = True
+                p.paragraph_format.space_before = DocxPt(HANDOUT_GAP_PT)
+            add_text(p, piece[1])
 
     # Add answers and other fields if not disabled
     if not noanswers:
