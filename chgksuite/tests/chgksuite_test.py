@@ -1728,6 +1728,12 @@ We believe that an attack on Yugoslavia in 1951 should be considered a serious p
 
 ? Взгляните на [Раздаточный материал: АБВ] и ответьте.
 ! х.
+
+? [Раздаточный материал:
+[СЛОВО ПРОПУЩЕНО] голос за дверью.
+]
+Восстановите пропуск.
+! тихий.
 """
 
 
@@ -1748,7 +1754,7 @@ def test_docx_sets_a_handout_in_a_captioned_box(tmp_path):
     from docx.oxml.ns import qn
 
     doc = Document(_compose_handout_docx(tmp_path))
-    assert len(doc.tables) == 2
+    assert len(doc.tables) == 3
     caption, box = (row.cells[0] for row in doc.tables[0].rows)
     assert caption.text == "Раздаточный материал"
     assert box.text.startswith("We believe")

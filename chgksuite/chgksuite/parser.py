@@ -473,12 +473,16 @@ class ChgkParser:
                 self._try_extract_field(question, k)
         question_str = self._get_strings_joined(question["question"])
         handout = self.labels["question_labels"]["handout"]
-        srch = re.search(f"{handout}:([ \n]+)\\[", question_str, flags=re.DOTALL)
+        # A label that is already in a bracket is a handout whose text happens
+        # to open with one ("[СЛОВО ПРОПУЩЕНО] ..."), and is left alone.
+        srch = re.search(
+            f"(^|[^\\[]){handout}:([ \n]+)\\[", question_str, flags=re.DOTALL
+        )
         if srch:
             question["question"] = self._replace(
                 question["question"],
                 srch.group(0),
-                f"[{handout}:" + srch.group(1),
+                srch.group(1) + f"[{handout}:" + srch.group(2),
             )
         self._lift_leading_images(question)
 

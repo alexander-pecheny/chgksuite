@@ -156,7 +156,7 @@ def split_handouts(s, regexes):
             if i > 0:
                 text = re.sub(r"^[ \t]*\n", "", text)
             if i < len(pieces) - 1:
-                text = re.sub(r"\n[ \t]*$", "", text)
+                text = re.sub(r"\n[ \t]*\Z", "", text)
             if not text.strip():
                 continue
             piece = ("text", text)
