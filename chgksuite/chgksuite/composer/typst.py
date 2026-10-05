@@ -1,4 +1,5 @@
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -275,30 +276,51 @@ class Para:
         return "".join(out)
 
 
+TYPST_STRING_RE = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+
 class HandoutBox(Para):
-    """A handout set apart from its question: the caption, then the handout
-    framed. Fills like a Para; renders to two blocks, the caption kept with
-    the frame."""
+    """A handout set apart from its question: the caption, flush with the
+    frame's left edge, then the handout framed. Fills like a Para. A one-line
+    handout gets a frame only as wide as it or its caption, with the handout
+    centred; anything longer takes the page's width. The caption is the grid's
+    header, so it never ends a page without its frame."""
 
     def __init__(self, caption):
         super().__init__()
         self.caption = caption
 
     def typ(self):
-        # The caption lines up with the text inside the frame.
-        caption = (
-            "#block(above: {}, below: 0pt, inset: (left: {}), breakable: false, "
-            "sticky: true, {})\n"
+        exprs = [e for e in self.exprs if e != PB_MARKER]
+        # A block picture brings line breaks of its own on either side.
+        while exprs and exprs[0] == "linebreak()":
+            exprs.pop(0)
+        while exprs and exprs[-1] == "linebreak()":
+            exprs.pop()
+        body = " + ".join(exprs) or "[]"
+        # Text runs carry their line breaks inside them; the string literals
+        # are dropped first so that a handout's own text cannot look like one.
+        one_line = "linebreak()" not in TYPST_STRING_RE.sub('""', body)
+        if one_line:
+            columns, align = "(auto,)", "center"
+            body = f"box(align(left, {body}))"
+        else:
+            columns, align = "(1fr,)", "left"
+        caption = wrap_text(self.caption, "size: " + pt(HANDOUT_CAPTION_PT))
+        return (
+            "#block(above: {above}, below: 0pt, grid(columns: {columns}, "
+            "row-gutter: {gap}, grid.header(repeat: false, {caption}), "
+            "grid.cell(stroke: {stroke}, inset: {inset}, align: {align}, {body})))\n"
         ).format(
-            pt(HANDOUT_CAPTION_ABOVE),
-            pt(HANDOUT_INSET + HANDOUT_STROKE),
-            wrap_text(self.caption, "size: " + pt(HANDOUT_CAPTION_PT)),
+            above=pt(HANDOUT_CAPTION_ABOVE),
+            columns=columns,
+            gap=pt(HANDOUT_CAPTION_GAP),
+            caption=caption,
+            stroke=pt(HANDOUT_STROKE),
+            inset=pt(HANDOUT_INSET),
+            align=align,
+            body=body,
         )
-        body = " + ".join(e for e in self.exprs if e != PB_MARKER) or "[]"
-        box = (
-            "#block(above: {}, below: 0pt, width: 100%, stroke: {}, inset: {}, {})\n"
-        ).format(pt(HANDOUT_CAPTION_GAP), pt(HANDOUT_STROKE), pt(HANDOUT_INSET), body)
-        return caption + box
 
 
 class TypstExporter(BaseExporter):

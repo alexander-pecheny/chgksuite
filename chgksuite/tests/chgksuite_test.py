@@ -1776,3 +1776,23 @@ def test_a_handout_box_parses_back_to_the_same_4s(tmp_path):
     )
     back = (tmp_path / "handouts.4s").read_text(encoding="utf-8")
     assert parse_4s(back.replace(" ", " ")) == parse_4s(HANDOUT_4S)
+
+
+def test_a_one_line_handout_box_is_as_wide_as_it_or_its_caption():
+    from chgksuite.composer.docx import (
+        FULL_WIDTH_TWIPS,
+        handout_box_twips,
+        handout_line_width_pt,
+    )
+
+    caption = "Раздаточный материал"
+    short = handout_box_twips(caption, "AB")
+    longer = handout_box_twips(caption, "Короткая строка раздатки, но длиннее подписи")
+    assert short is not None and longer is not None
+    assert short < longer < FULL_WIDTH_TWIPS
+    assert handout_box_twips(caption, "AB") == handout_box_twips(caption, "ABC"), (
+        "a handout narrower than its caption gets the caption's width"
+    )
+    assert handout_box_twips(caption, "строка один\nстрока два") is None
+    assert handout_box_twips(caption, "слово " * 40) is None, "too long for one line"
+    assert handout_line_width_pt("AV") == handout_line_width_pt("A") + handout_line_width_pt("V")

@@ -1,3 +1,4 @@
+import math
 import os
 import re
 import shlex
@@ -13,15 +14,19 @@ import docx
 from docx import Document
 from docx.image.exceptions import UnrecognizedImageError
 from docx.oxml import OxmlElement
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
-from docx.shared import Inches
+from docx.shared import Inches, Twips
 from docx.shared import Pt as DocxPt
 from docx.text.run import Run as DocxRun
+from PIL import ImageFont
 
 from chgksuite import typotools
+
 from chgksuite.common import (
     HYPERLINK_SAFE_CHARS,
     DummyLogger,
+    get_source_dirs,
     log_wrap,
     optimize_ooxml_images,
     replace_escaped,
@@ -781,12 +786,27 @@ HANDOUT_BOX_MARGIN_TWIPS = 100
 HANDOUT_CAPTION_MARGIN_TWIPS = 20
 HANDOUT_GAP_PT = 6
 FULL_WIDTH_PCT = 5000  # fiftieths of a percent
+# The template's text width (A4 less its margins), and the cell margin its
+# TableNormal style sets on either side of a cell's text.
+FULL_WIDTH_TWIPS = 9746
+TABLE_CELL_MARGIN_TWIPS = 108
+TWIPS_PER_PT = 20
+BODY_PT = 12
+# Room for what a measurement cannot know: the frame itself, a bold run, a
+# face that is not quite Noto Sans.
+HANDOUT_SLACK_TWIPS = 120
+INLINE_IMAGE_HEIGHT_IN = 1 / 6
+NOTO_SANS_UNITS_PER_EM = 1000
+_NOTO_SANS = None
 
 
-def _set_cell_margins(cell, top, bottom):
+def _set_cell_margins(cell, top, bottom, left=None):
     tc_pr = cell._tc.get_or_add_tcPr()
     mar = OxmlElement("w:tcMar")
-    for side, value in (("top", top), ("bottom", bottom)):
+    sides = [("top", top), ("left", left), ("bottom", bottom)]
+    for side, value in sides:
+        if value is None:
+            continue
         el = OxmlElement(f"w:{side}")
         el.set(qn("w:w"), str(value))
         el.set(qn("w:type"), "dxa")
@@ -808,23 +828,103 @@ def _set_cell_borders(cell):
     tc_pr.find(qn("w:tcW")).addnext(borders)
 
 
-def add_handout_table(doc, label, content, add_content):
-    """Set a handout as a two-row table: the caption, borderless, and under it
-    the handout in a box. A parser reads the table back as the handout bracket
-    (parsing_engine), so the docx round-trips to the same 4s."""
+def _noto_sans_regular():
+    global _NOTO_SANS
+    if _NOTO_SANS is None:
+        path = os.path.join(get_source_dirs()[1], "fonts", "NotoSans-Regular.ttf")
+        # At one pixel per font unit, with no shaping, the advances are the
+        # font's own integers: what the Go port reads out of hmtx.
+        _NOTO_SANS = ImageFont.truetype(
+            path, NOTO_SANS_UNITS_PER_EM, layout_engine=ImageFont.Layout.BASIC
+        )
+    return _NOTO_SANS
+
+
+def _text_width_pt(text, size_pt):
+    return _noto_sans_regular().getlength(text) * size_pt / NOTO_SANS_UNITS_PER_EM
+
+
+def handout_line_width_pt(value, tmp_dir=None, targetdir=None):
+    """How wide a handout that is one line is set, or None when it is not one
+    line: a break, a list, a block picture with anything beside it, or a
+    picture that cannot be read. Measured in Noto Sans, the template's face."""
+    if not isinstance(value, str):
+        return None
+    blocks = 0
+    has_text = False
+    width = 0.0
+    for kind, content in _parse_4s_elem(backtick_replace(replace_escaped(value))):
+        if kind in ("linebreak", "pagebreak"):
+            return None
+        if kind == "img":
+            try:
+                img = parseimg(
+                    content, dimensions="inches", tmp_dir=tmp_dir, targetdir=targetdir
+                )
+            except Exception:
+                return None
+            if img["inline"]:
+                width += INLINE_IMAGE_HEIGHT_IN * img["width"] / img["height"] * 72
+            else:
+                blocks += 1
+                width += img["width"] * 72
+            continue
+        if kind == "screen":
+            content = content["for_print"]
+        if "\n" in content:
+            return None
+        has_text = has_text or bool(content.strip())
+        width += _text_width_pt(content, BODY_PT)
+    # A block picture sits on a line of its own, so it is one line only alone.
+    if blocks > 1 or (blocks and has_text):
+        return None
+    return width
+
+
+def handout_box_twips(label, value, tmp_dir=None, targetdir=None):
+    """The handout box's width, when the handout is one line and the box can be
+    narrower than the page: wide enough for that line or for the caption,
+    whichever is wider. None for a box the whole width of the page."""
+    line_pt = handout_line_width_pt(value, tmp_dir, targetdir)
+    if line_pt is None:
+        return None
+    content = math.ceil(line_pt * TWIPS_PER_PT) + 2 * TABLE_CELL_MARGIN_TWIPS
+    caption = math.ceil(_text_width_pt(label, HANDOUT_CAPTION_PT) * TWIPS_PER_PT)
+    width = max(content, caption) + HANDOUT_SLACK_TWIPS
+    if width >= FULL_WIDTH_TWIPS:
+        return None
+    return width
+
+
+def add_handout_table(doc, label, content, add_content, width=None):
+    """Set a handout as a two-row table: the caption, borderless and flush with
+    the box's left edge, and under it the handout in a box. A one-line handout
+    gets a box only as wide as it or its caption (width, in twips), with the
+    handout centred in it. A parser reads the table back as the handout
+    bracket (parsing_engine), so the docx round-trips to the same 4s."""
     table = doc.add_table(rows=2, cols=1)
     tbl_pr = table._tbl.tblPr
     tbl_w = tbl_pr.find(qn("w:tblW"))
-    tbl_w.set(qn("w:type"), "pct")
-    tbl_w.set(qn("w:w"), str(FULL_WIDTH_PCT))
     caption_cell, box_cell = table.cell(0, 0), table.cell(1, 0)
-    _set_cell_margins(caption_cell, 0, HANDOUT_CAPTION_MARGIN_TWIPS)
+    if width is None:
+        tbl_w.set(qn("w:type"), "pct")
+        tbl_w.set(qn("w:w"), str(FULL_WIDTH_PCT))
+    else:
+        tbl_w.set(qn("w:type"), "dxa")
+        tbl_w.set(qn("w:w"), str(width))
+        table.autofit = False
+        table.columns[0].width = Twips(width)
+        caption_cell.width = box_cell.width = Twips(width)
+    _set_cell_margins(caption_cell, 0, HANDOUT_CAPTION_MARGIN_TWIPS, left=0)
     caption = caption_cell.paragraphs[0]
     caption.paragraph_format.keep_with_next = True
     caption.add_run(label).font.size = DocxPt(HANDOUT_CAPTION_PT)
     _set_cell_borders(box_cell)
     _set_cell_margins(box_cell, HANDOUT_BOX_MARGIN_TWIPS, HANDOUT_BOX_MARGIN_TWIPS)
-    add_content(box_cell.paragraphs[0], content)
+    box = box_cell.paragraphs[0]
+    if width is not None:
+        box.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    add_content(box, content)
     return table
 
 
@@ -972,7 +1072,13 @@ def add_question_to_docx(
         for piece in pieces:
             if piece[0] == "handout":
                 p.paragraph_format.keep_with_next = True
-                add_handout_table(doc, piece[1], piece[2], add_handout)
+                width = handout_box_twips(
+                    piece[1],
+                    piece[2],
+                    kwargs.get("tmp_dir"),
+                    kwargs.get("targetdir"),
+                )
+                add_handout_table(doc, piece[1], piece[2], add_handout, width)
                 p = None
                 continue
             if p is None:
