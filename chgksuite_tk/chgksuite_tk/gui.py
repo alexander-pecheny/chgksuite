@@ -34,6 +34,19 @@ from chgksuite.version import __version__
 logger = logging.getLogger(__name__)
 
 
+if TKINTER:
+    _original_variable_del = tk.Variable.__del__
+
+    def _variable_del(self):
+        # The garbage collector may free a Variable in the worker thread, where
+        # Tcl calls fail with "main thread is not in main loop". Skip the
+        # cleanup there; leaking one Tcl variable is harmless.
+        if threading.current_thread() is threading.main_thread():
+            _original_variable_del(self)
+
+    tk.Variable.__del__ = _variable_del
+
+
 def is_app_translocated(path):
     """Check if the app is running from macOS App Translocation."""
     if sys.platform == "darwin" and path:
