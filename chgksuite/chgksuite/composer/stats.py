@@ -27,7 +27,7 @@ class StatsAdder(BaseExporter):
     @staticmethod
     def get_tournament_results(id_):
         req = requests.get(
-            "https://api.rating.chgk.net"
+            "https://api.rating.chgk.info"
             + f"/tournaments/{id_}/results.json"
             + "?includeMasksAndControversials=1"
         )
