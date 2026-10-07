@@ -324,8 +324,23 @@ def _replace_no_break_segment(s, spaces=True, hyphens=True):
     return s
 
 
+re_img_tag = re.compile(r"\(img [^)]*\)?")
+
+
+def _iter_verbatim_spans(s):
+    """URLs and (img ...) tags: their hyphens and spaces are part of a path."""
+    spans = sorted(iter_url_spans(s) + [m.span() for m in re_img_tag.finditer(s)])
+    merged = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
 def replace_no_break(s, spaces=True, hyphens=True):
-    spans = iter_url_spans(s)
+    spans = _iter_verbatim_spans(s)
     if not spans:
         return _replace_no_break_segment(s, spaces=spaces, hyphens=hyphens)
 

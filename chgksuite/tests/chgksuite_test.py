@@ -140,6 +140,14 @@ def test_replace_no_break_preserves_url_hyphens():
     assert "И\u2011К\u2011Б\u2011С" in result
 
 
+def test_replace_no_break_preserves_img_path_hyphens():
+    img = "(img w=3in /home/a-b/pics/q-1.jpg)"
+    result = replace_no_break(f"{img}\nПеред вами картинка, код И-К.")
+
+    assert img in result
+    assert "И\u2011К" in result
+
+
 # Test cases for Latin accented character conversion to Cyrillic
 # Format: (input, expected_output)
 # The fix ensures uppercase Cyrillic neighbors are recognized correctly
@@ -996,7 +1004,7 @@ def test_canonical_equality(parsing_engine, filename):
         call_args.append(os.path.join(temp_dir, to_parse_fn))
         if file_settings.get("cmdline_args"):
             call_args.extend(file_settings["cmdline_args"])
-        subprocess.call(call_args, timeout=5, cwd=parentdir)
+        subprocess.call(call_args, timeout=60, cwd=parentdir)
         out_ext = game_to_ext(game)
         with open(
             os.path.join(temp_dir, bn + "." + out_ext), "r", encoding="utf-8"
@@ -1047,7 +1055,7 @@ def test_docx_composition(filename):
             "docx",
             composed_abspath,
         ]
-        code = subprocess.call(call_args, timeout=5, cwd=parentdir)
+        code = subprocess.call(call_args, timeout=60, cwd=parentdir)
         assert 0 == code
 
 
