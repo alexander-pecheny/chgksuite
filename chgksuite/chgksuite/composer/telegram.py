@@ -123,6 +123,21 @@ def get_text(msg_data):
         return msg_data["message"]["text"]
 
 
+def structure_has_stats(structure):
+    """Whether any question carries the stats line `compose add_stats` writes."""
+    for element in structure:
+        if element[0] == "Question" and "Взятия:" in (element[1].get("comment") or ""):
+            return True
+    return False
+
+
+def stats_check_bypassed(args):
+    return bool(
+        getattr(args, "allow_no_stats", False)
+        or os.environ.get("CHGKSUITE_BYPASS_STATS_CHECK")
+    )
+
+
 class TelegramExporter(BaseExporter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -254,10 +269,7 @@ class TelegramExporter(BaseExporter):
             raise ChgksuiteError("Authentication failed")
 
     def structure_has_stats(self):
-        for element in self.structure:
-            if element[0] == "Question" and "Взятия:" in (element[1].get("comment") or ""):
-                return True
-        return False
+        return structure_has_stats(self.structure)
 
     def get_bot_token(self, tg):
         if self.args.tgaccount == "my_account":
@@ -296,7 +308,7 @@ class TelegramExporter(BaseExporter):
         if (
             settings.get("stop_if_no_stats")
             and not self.structure_has_stats()
-            and not os.environ.get("CHGKSUITE_BYPASS_STATS_CHECK")
+            and not stats_check_bypassed(self.args)
         ):
             raise ChgksuiteError("don't publish questions without stats")
 

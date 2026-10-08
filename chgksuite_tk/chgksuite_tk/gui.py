@@ -29,6 +29,7 @@ from chgksuite.common import (
     get_lastdir,
     get_source_dirs,
 )
+from chgksuite.composer import confirm_telegram_export
 from chgksuite.version import __version__
 
 logger = logging.getLogger(__name__)
@@ -300,9 +301,31 @@ class ParserWrapper:
         print(self.cmdline_call_display)
         return result
 
+    def confirm_publishing_without_stats(self):
+        """A Telegram export of a pack without stats goes ahead only on "yes"."""
+
+        def ask(title, question):
+            return messagebox.askyesno(
+                title,
+                question,
+                icon=messagebox.WARNING,
+                default=messagebox.NO,
+                parent=self.tk,
+            )
+
+        confirmed = confirm_telegram_export(
+            self.parser, self.cmdline_call, self.cmdline_call_display, ask
+        )
+        if confirmed is None:
+            return False
+        self.cmdline_call, self.cmdline_call_display = confirmed
+        return True
+
     def ok_button_press(self):
         self.cmdline_call = self.build_command_line_call()
         if not self.cmdline_call:
+            return
+        if not self.confirm_publishing_without_stats():
             return
 
         # Clear output and disable button

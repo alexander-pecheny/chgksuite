@@ -1,10 +1,12 @@
 import json
+import logging
 import os
 import shutil
 import sys
 
 from chgksuite.common import (
     DefaultArgs,
+    DefaultNamespace,
     get_chgksuite_dir,
     get_lastdir,
     get_source_dirs,
@@ -26,11 +28,77 @@ from chgksuite.composer.markdown import MarkdownExporter
 from chgksuite.composer.openquiz import OpenquizExporter
 from chgksuite.composer.pptx import PptxExporter
 from chgksuite.composer.stats import StatsAdder
-from chgksuite.composer.telegram import TelegramExporter
+from chgksuite.composer.telegram import (
+    TelegramExporter,
+    stats_check_bypassed,
+    structure_has_stats,
+)
 from chgksuite.composer.typst import TypstExporter
 
 
+def files_have_stats(filenames, args=None):
+    """Whether every file has the stats line; what `compose has_stats` prints."""
+    if isinstance(filenames, str):
+        filenames = [filenames]
+    args = DefaultNamespace(args) if args is not None else None
+    return all(
+        structure_has_stats(parse_filepath(os.path.abspath(fn), args=args))
+        for fn in filenames
+    )
+
+
+# The GUIs' question before a Telegram export of a pack without stats.
+NO_STATS_TITLE = "Нет статистики"
+NO_STATS_QUESTION = (
+    "В пакете нет статистики взятий. Всё равно опубликовать в телеграм?"
+)
+
+
+def telegram_export_needs_confirmation(args):
+    """Whether a GUI must ask before this run publishes a pack without stats.
+
+    The GUIs ask whatever `stop_if_no_stats` says; the answer "yes" comes back
+    as --allow_no_stats. A dry run publishes nothing, so it is not asked about.
+    """
+    if args.action != "compose" or args.filetype != "telegram":
+        return False
+    if getattr(args, "dry_run", False) or stats_check_bypassed(args):
+        return False
+    if not args.filename:
+        return False
+    return not files_have_stats(args.filename, args=args)
+
+
+def confirm_telegram_export(parser, cmdline_call, display, ask):
+    """The GUIs' check before a run: ask before publishing a pack without stats.
+
+    ``ask(title, question)`` shows the toolkit's yes/no dialog, defaulting to
+    no. Returns the command line and its display string to run, with
+    --allow_no_stats added on "yes", or None when the user says no. If the pack
+    cannot be checked, the user is asked as if it had no stats.
+    """
+    if cmdline_call[:2] != ["compose", "telegram"]:
+        return cmdline_call, display
+    try:
+        needed = telegram_export_needs_confirmation(parser.parse_args(cmdline_call))
+    except (Exception, SystemExit):
+        logging.getLogger(__name__).exception("Could not check the pack for stats")
+        needed = "--dry_run" not in cmdline_call
+    if not needed:
+        return cmdline_call, display
+    if not ask(NO_STATS_TITLE, NO_STATS_QUESTION):
+        return None
+    return cmdline_call + ["--allow_no_stats"], display + " --allow_no_stats"
+
+
 def gui_compose(args, logger=None):
+    if args.filetype == "has_stats":
+        if not args.filename:
+            print("No file specified.")
+            sys.exit(1)
+        print(json.dumps({"has_stats": files_have_stats(args.filename, args=args)}))
+        return
+
     sourcedir = get_source_dirs()[0]
 
     argsdict = vars(args)

@@ -1,11 +1,20 @@
+import argparse
 import json
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
 
 import chgksuite.composer.telegram as telegram_module
 import chgksuite.composer.telegram_db as telegram_db_module
-from chgksuite.common import DefaultArgs
+from chgksuite.common import ChgksuiteError, DefaultArgs, DefaultNamespace
+from chgksuite.cli import ArgparseBuilder
+from chgksuite.composer import (
+    confirm_telegram_export,
+    files_have_stats,
+    gui_compose,
+    telegram_export_needs_confirmation,
+)
 from chgksuite.composer.telegram import TelegramExporter
 from chgksuite.composer.telegram_db import (
     ROLE_COMMENT,
@@ -21,6 +30,7 @@ CHANNEL = "-1001111"
 CHAT = "-1002222"
 
 NO_STATS = "? Вопрос один\n! Ответ\n/ Комментарий\n"
+WITH_STATS = "? Вопрос один\n! Ответ\n/ Комментарий. Взятия: 3/10 (30%)\n"
 
 
 class FakeTelegram:
@@ -172,6 +182,63 @@ def test_dry_run_records_nothing(tmp_path, monkeypatch):
     assert exporter.send_api_request.calls == []
 
 
+def test_has_stats(tmp_path, capsys):
+    no, yes = tmp_path / "no.4s", tmp_path / "yes.4s"
+    no.write_text(NO_STATS, encoding="utf8")
+    yes.write_text(WITH_STATS, encoding="utf8")
+    assert not files_have_stats(str(no))
+    assert files_have_stats(str(yes))
+
+    gui_compose(
+        DefaultNamespace(action="compose", filetype="has_stats", filename=[str(no)])
+    )
+    assert json.loads(capsys.readouterr().out) == {"has_stats": False}
+    gui_compose(
+        DefaultNamespace(action="compose", filetype="has_stats", filename=[str(yes)])
+    )
+    assert json.loads(capsys.readouterr().out) == {"has_stats": True}
+
+
+def test_gui_asks_before_publishing_without_stats(tmp_path, monkeypatch):
+    monkeypatch.delenv("CHGKSUITE_BYPASS_STATS_CHECK", raising=False)
+    no, yes = tmp_path / "no.4s", tmp_path / "yes.4s"
+    no.write_text(NO_STATS, encoding="utf8")
+    yes.write_text(WITH_STATS, encoding="utf8")
+
+    def ask(filename, **kw):
+        args = DefaultNamespace(
+            action="compose", filetype="telegram", filename=[str(filename)], **kw
+        )
+        return telegram_export_needs_confirmation(args)
+
+    assert ask(no)
+    assert not ask(yes)
+    assert not ask(no, allow_no_stats=True)
+    assert not ask(no, dry_run=True)
+
+
+def test_allow_no_stats_overrides_the_setting(tmp_path, monkeypatch):
+    monkeypatch.delenv("CHGKSUITE_BYPASS_STATS_CHECK", raising=False)
+    monkeypatch.setattr(
+        telegram_module, "load_settings", lambda: {"stop_if_no_stats": True}
+    )
+    exporter = _exporter(
+        tmp_path,
+        monkeypatch,
+        structure=[["Question", {"question": "Текст", "answer": "Ответ"}]],
+    )
+    exporter.telegram_toml_path = str(tmp_path / "telegram.toml")
+    exporter.get_bot_token = lambda tg: "token"
+
+    with pytest.raises(ChgksuiteError):
+        exporter.get_api_credentials()
+    exporter.args = DefaultArgs(allow_no_stats=True)
+    assert exporter.get_api_credentials() == "token"
+    exporter.args = DefaultArgs()
+    monkeypatch.setenv("CHGKSUITE_BYPASS_STATS_CHECK", "1")
+    assert exporter.get_api_credentials() == "token"
+
+
 def test_inbox_queries_ignore_earlier_runs(tmp_path, monkeypatch):
     """A forward left by an earlier run must not answer this run's prompt."""
     exporter = _exporter(tmp_path, monkeypatch)
@@ -268,3 +335,37 @@ def test_si_buffer_with_one_question_keeps_its_number(tmp_path, monkeypatch):
         ("question", "30"),
         ("question", None),
     ]
+
+
+def _gui_parser():
+    parser = argparse.ArgumentParser(prog="chgksuite")
+    ArgparseBuilder(parser, False).build()
+    return parser
+
+
+def test_gui_asks_when_the_stats_check_fails(tmp_path, monkeypatch):
+    """A pack the check cannot read is asked about, never published silently."""
+    monkeypatch.delenv("CHGKSUITE_BYPASS_STATS_CHECK", raising=False)
+    call = ["compose", "telegram", str(tmp_path / "missing.4s")]
+    asked = []
+
+    def ask(title, question):
+        asked.append(question)
+        return False
+
+    assert confirm_telegram_export(_gui_parser(), call, "call", ask) is None
+    assert len(asked) == 1
+
+    confirmed = confirm_telegram_export(
+        _gui_parser(), call, "call", lambda title, question: True
+    )
+    assert confirmed == (call + ["--allow_no_stats"], "call --allow_no_stats")
+
+
+def test_gui_does_not_ask_about_other_exports(tmp_path):
+    call = ["compose", "docx", str(tmp_path / "missing.4s")]
+
+    def ask(title, question):
+        raise AssertionError("asked")
+
+    assert confirm_telegram_export(_gui_parser(), call, "call", ask) == (call, "call")

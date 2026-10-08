@@ -841,6 +841,27 @@ class ArgparseBuilder:
             help="disable asterisks processing.",
             caption="Не обрабатывать звёздочки",
         )
+        # The GUIs ask before publishing a pack without stats and pass this on
+        # "yes"; it also overrides the stop_if_no_stats setting.
+        self.add_argument(
+            cmdcompose_telegram,
+            "--allow_no_stats",
+            action="store_true",
+            help="publish even if the questions have no stats.",
+            hide=True,
+        )
+        if not self.use_wrapper:
+            # For GUIs in other processes; the Python GUIs check in-process.
+            cmdcompose_has_stats = cmdcompose_filetype.add_parser(
+                "has_stats",
+                help='print {"has_stats": true|false} for the file(s).',
+            )
+            self.add_argument(
+                cmdcompose_has_stats,
+                "filename",
+                nargs="*",
+                help="file(s) to check.",
+            )
         cmdcompose_add_stats = cmdcompose_filetype.add_parser("add_stats")
         self.add_argument(
             cmdcompose_add_stats,
