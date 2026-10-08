@@ -88,7 +88,12 @@ def make_merged_filename(filelist):
 
 
 def process_file(filename, tmp_dir, targetdir, args=None, logger=None):
-    dir_kwargs = {"tmp_dir": tmp_dir, "targetdir": targetdir}
+    names = filename if isinstance(filename, list) else [filename]
+    dir_kwargs = {
+        "tmp_dir": tmp_dir,
+        "targetdir": targetdir,
+        "source_paths": [os.path.join(targetdir, x) for x in names],
+    }
     logger = logger or init_logger("composer")
 
     if isinstance(filename, list):

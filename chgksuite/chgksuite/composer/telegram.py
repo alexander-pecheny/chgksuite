@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import html
 import json
 import logging
@@ -8,10 +9,10 @@ import os
 import random
 import re
 import sqlite3
-import tempfile
 import time
 import urllib.parse
 import uuid
+from datetime import timedelta
 
 import requests
 import toml
@@ -28,6 +29,31 @@ from chgksuite.common import (
 )
 from chgksuite.composer.composer_common import BaseExporter, parseimg
 from chgksuite.composer.telegram_bot import run_bot_in_thread
+from chgksuite.composer.telegram_db import (
+    CONTENT_PHOTO,
+    CONTENT_POLL,
+    CONTENT_TEXT,
+    HTML_PARSE_MODE,
+    RICH_PARSE_MODE,
+    ROLE_ANSWER,
+    ROLE_COMMENT,
+    ROLE_HANDOUT,
+    ROLE_HEADING,
+    ROLE_NAVIGATION,
+    ROLE_OTHER,
+    ROLE_POLL,
+    ROLE_QUESTION,
+    ExportRecord,
+    PostKind,
+    SentPost,
+    prune_inbox,
+    sources_digest,
+    telegram_db_path,
+    utc_ago,
+    utc_now,
+)
+from chgksuite.composer.telegram_db import connect as connect_telegram_db
+from chgksuite.version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -110,9 +136,10 @@ class TelegramExporter(BaseExporter):
         self.created_at = None
         self.telegram_toml_path = os.path.join(self.chgksuite_dir, "telegram.toml")
         self.resolve_db_path = os.path.join(self.chgksuite_dir, "resolve.db")
-        self.temp_db_path = os.path.join(
-            tempfile.gettempdir(), f"telegram_sidecar_{uuid.uuid4().hex}.db"
-        )
+        self.db_path = telegram_db_path()
+        # The inbox outlives the run, so only rows from this run are ours.
+        self.run_started_at = utc_now()
+        self.record = None
         self.bot_token = None
         self.bot = None
         self.bot_thread = None
@@ -124,6 +151,7 @@ class TelegramExporter(BaseExporter):
         self.session = requests.Session()
         self.si_mode = self.game in ("si", "troika")
         self.rich_mode = True
+        self._init_run_state()
         self.init_telegram()
 
     def check_connectivity(self):
@@ -132,49 +160,30 @@ class TelegramExporter(BaseExporter):
             print(f"connection successful! {result}")
         self.bot_id = result["id"]
 
-    def init_temp_db(self):
-        self.db_conn = sqlite3.connect(self.temp_db_path)
-        self.db_conn.row_factory = sqlite3.Row
-
-        cursor = self.db_conn.cursor()
-
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            raw_data TEXT,
-            chat_id TEXT,
-            created_at TEXT
-        )
-        """)
-
-        cursor.execute("""
-        CREATE TABLE IF NOT EXISTS bot_status (
-            raw_data TEXT,
-            created_at TEXT
-        )
-        """)
-
-        self.db_conn.commit()
+    def init_db(self):
+        self.db_conn = connect_telegram_db(self.db_path)
+        prune_inbox(self.db_conn)
 
     def init_telegram(self):
         """Initialize Telegram API connection and start sidecar bot."""
         self.bot_token = self.get_api_credentials()
         assert self.bot_token is not None
 
-        self.init_temp_db()
+        self.init_db()
         self.init_resolve_db()
         self.check_connectivity()
 
         # Start the sidecar bot as a daemon thread
         if self.args.debug:
-            print(f"Starting sidecar bot with DB at {self.temp_db_path}")
-        self.bot_thread, self.bot = run_bot_in_thread(
-            self.bot_token, self.temp_db_path
-        )
+            print(f"Starting sidecar bot with DB at {self.db_path}")
+        self.bot_thread, self.bot = run_bot_in_thread(self.bot_token, self.db_path)
         cur = self.db_conn.cursor()
         while True:
             time.sleep(2)
             messages = cur.execute(
-                "select raw_data, created_at from bot_status"
+                "SELECT raw_data FROM bot_status WHERE created_at >= ?"
+                " ORDER BY created_at DESC LIMIT 1",
+                (self.run_started_at,),
             ).fetchall()
             if messages and json.loads(messages[0][0])["status"] == "ok":
                 break
@@ -195,6 +204,11 @@ class TelegramExporter(BaseExporter):
         if self.bot_thread is not None:
             self.bot_thread.join(timeout=30)
             self.bot_thread = None
+        for name in ("db_conn", "resolve_db_conn"):
+            conn = getattr(self, name, None)
+            if conn is not None:
+                conn.close()
+                setattr(self, name, None)
 
     def authenticate_user(self):
         print("\n" + "=" * 50)
@@ -211,7 +225,9 @@ class TelegramExporter(BaseExporter):
             time.sleep(2)
             cursor = self.db_conn.cursor()
             cursor.execute(
-                f"SELECT * FROM messages m WHERE m.raw_data like '%{self.auth_uuid}%' ORDER BY m.created_at DESC LIMIT 1",
+                "SELECT * FROM messages m WHERE m.raw_data LIKE '%' || ? || '%'"
+                " AND m.created_at >= ? ORDER BY m.created_at DESC LIMIT 1",
+                (self.auth_uuid, self.run_started_at),
             )
             result = cursor.fetchone()
 
@@ -589,7 +605,14 @@ class TelegramExporter(BaseExporter):
             res = "\n".join(result)
         return res, images
 
-    def _post_rich(self, chat_id, payload, reply_to_message_id=None):
+    def _record_post(self, post):
+        """Add a sent message to this run's record; a dry run has none."""
+        if self.record is None:
+            return None
+        link = self.get_message_link(post.chat_id, post.message_id)
+        return self.record.add_post(dataclasses.replace(post, link=link))
+
+    def _post_rich(self, chat_id, payload, reply_to_message_id=None, kind=None):
         """Send a rich message (Bot API 10.1 sendRichMessage).
 
         ``payload`` is a dict with ``html`` and ``media_files``
@@ -633,13 +656,28 @@ class TelegramExporter(BaseExporter):
                 if reply_to_message_id:
                     data["reply_parameters"] = {"message_id": reply_to_message_id}
                 result = self.send_api_request("sendRichMessage", data)
+        self._record_post(
+            SentPost(
+                chat_id=chat_id,
+                message_id=result["message_id"],
+                content_type=CONTENT_TEXT,
+                kind=kind or PostKind(),
+                text=html_content,
+                parse_mode=RICH_PARSE_MODE,
+                reply_to_message_id=reply_to_message_id,
+            )
+        )
         return {"message_id": result["message_id"], "chat": {"id": chat_id}}
 
-    def _post(self, chat_id, text, photo, reply_to_message_id=None):
-        """Send a message to Telegram using API requests."""
+    def _post(self, chat_id, text, photo, reply_to_message_id=None, kind=None):
+        """Send a message to Telegram using API requests.
+
+        ``kind`` says what the message is, for the export record.
+        """
+        kind = kind or PostKind()
         if isinstance(text, dict):
             return self._post_rich(
-                chat_id, text, reply_to_message_id=reply_to_message_id
+                chat_id, text, reply_to_message_id=reply_to_message_id, kind=kind
             )
         self.logger.info(f"Posting message: {text[:50]}...")
 
@@ -662,6 +700,17 @@ class TelegramExporter(BaseExporter):
 
                     result = self.send_api_request("sendPhoto", data, files)
                     msg_id = result["message_id"]
+                    post_id = self._record_post(
+                        SentPost(
+                            chat_id=chat_id,
+                            message_id=msg_id,
+                            content_type=CONTENT_PHOTO,
+                            kind=kind,
+                            text=caption,
+                            parse_mode=HTML_PARSE_MODE,
+                            reply_to_message_id=reply_to_message_id,
+                        )
+                    )
 
                 # Step 2: Edit the message if needed to add full text
                 if text and text != "---":
@@ -674,6 +723,8 @@ class TelegramExporter(BaseExporter):
                         "disable_web_page_preview": True,
                     }
                     result = self.send_api_request("editMessageCaption", edit_data)
+                    if post_id is not None:
+                        self.record.set_post_text(post_id, text)
 
                 return {"message_id": msg_id, "chat": {"id": chat_id}}
             else:
@@ -690,14 +741,29 @@ class TelegramExporter(BaseExporter):
                     data["reply_to_message_id"] = reply_to_message_id
 
                 result = self.send_api_request("sendMessage", data)
+                self._record_post(
+                    SentPost(
+                        chat_id=chat_id,
+                        message_id=result["message_id"],
+                        content_type=CONTENT_TEXT,
+                        kind=kind,
+                        text=text,
+                        parse_mode=HTML_PARSE_MODE,
+                        reply_to_message_id=reply_to_message_id,
+                    )
+                )
                 return {"message_id": result["message_id"], "chat": {"id": chat_id}}
 
         except Exception as e:
             self.logger.error(f"Error posting message: {e!s}")
             raise
 
-    def post(self, posts):
-        """Post a series of messages, handling the channel and discussion group."""
+    def post(self, posts, kinds=None):
+        """Post a series of messages, handling the channel and discussion group.
+
+        ``kinds`` runs parallel to ``posts``: what each message is, for the
+        export record.
+        """
         if self.args.dry_run:
             self.logger.info("Skipping posting due to dry run")
             for post in posts:
@@ -706,6 +772,7 @@ class TelegramExporter(BaseExporter):
             return [{"message_id": self._dry_run_msg_counter, "chat": {"id": 0}}]
 
         messages = []
+        kinds = list(kinds or [PostKind()] * len(posts))
         text, im = posts[0]
         is_qqq = isinstance(text, str) and text.startswith("QQQ")
 
@@ -716,13 +783,17 @@ class TelegramExporter(BaseExporter):
             if is_qqq
             else text,
             im,
+            kind=kinds[0],
         )
 
         # Handle special case for questions with images
         if len(posts) >= 2 and is_qqq and im and posts[1][0]:
             prev_root_msg = root_msg
-            root_msg = self._post(self.channel_id, posts[1][0], posts[1][1])
+            root_msg = self._post(
+                self.channel_id, posts[1][0], posts[1][1], kind=kinds[1]
+            )
             posts = posts[1:]
+            kinds = kinds[1:]
             messages.append(root_msg)
             messages.append(prev_root_msg)
 
@@ -761,13 +832,13 @@ class TelegramExporter(BaseExporter):
         messages.append(root_msg_in_discussion)
 
         # Step 3: Post replies in the discussion group
-        for post in posts[1:]:
-            text, im = post
+        for (text, im), kind in zip(posts[1:], kinds[1:]):
             reply_msg = self._post(
                 self.chat_id,
                 text,
                 im,
                 reply_to_message_id=root_msg_in_discussion_id,
+                kind=kind,
             )
             self.logger.info(
                 f"Replied to message {root_msg_in_discussion_link} with reply message"
@@ -777,9 +848,9 @@ class TelegramExporter(BaseExporter):
 
         return messages
 
-    def post_wrapper(self, posts):
+    def post_wrapper(self, posts, kinds=None):
         """Wrapper for post() that handles section links and tour tracking."""
-        messages = self.post(posts)
+        messages = self.post(posts, kinds)
         if messages:
             link = self.get_message_link(self.channel_id, messages[0]["message_id"])
             if self.si_mode and self._si_pending_group is not None:
@@ -809,6 +880,30 @@ class TelegramExporter(BaseExporter):
             return m.group(1)
         return section_text
 
+    def _flush_buffer(self):
+        if self.buffer_texts or self.buffer_images:
+            posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
+            role = self._buffer_role or ROLE_OTHER
+            number = None
+            if role == ROLE_QUESTION and len(self._buffer_questions) == 1:
+                number = self._buffer_questions[0]
+            self.post_wrapper(posts, [PostKind(role, number)] * len(posts))
+            self.buffer_texts = []
+            self.buffer_images = []
+        self._buffer_role = None
+        self._buffer_questions = []
+
+    # A buffered post is named after its main part: questions, then headings.
+    _BUFFER_ROLE_RANK = (ROLE_OTHER, ROLE_HEADING, ROLE_QUESTION)
+
+    def _raise_buffer_role(self, role):
+        """Raise the buffered post's role to ``role`` if that outranks it."""
+        rank = self._BUFFER_ROLE_RANK
+        if self._buffer_role is None or rank.index(role) > rank.index(
+            self._buffer_role
+        ):
+            self._buffer_role = role
+
     def tg_process_element(self, pair):
         if pair[0] == "Question":
             q = pair[1]
@@ -827,14 +922,12 @@ class TelegramExporter(BaseExporter):
                 text, images = self.tg_format_question(pair[1], number=number)
                 self.buffer_texts.append(text)
                 self.buffer_images.extend(images)
+                self._raise_buffer_role(ROLE_QUESTION)
+                self._buffer_questions.append(number)
             else:
-                if self.buffer_texts or self.buffer_images:
-                    posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
-                    self.post_wrapper(posts)
-                    self.buffer_texts = []
-                    self.buffer_images = []
-                posts = self.tg_format_question(pair[1], number=number)
-                self.post_wrapper(posts)
+                self._flush_buffer()
+                posts, roles = self._format_question(pair[1], number=number)
+                self.post_wrapper(posts, [PostKind(r, number) for r in roles])
                 if self._polls_enabled:
                     self._post_question_poll(number)
         elif self.args.skip_until and (
@@ -847,13 +940,10 @@ class TelegramExporter(BaseExporter):
             if not self.tg_heading:
                 self.tg_heading = text
             self.buffer_texts.append(self._wrap_heading(text))
+            self._raise_buffer_role(ROLE_HEADING)
             self.buffer_images.extend(images)
         elif pair[0] == "section":
-            if self.buffer_texts or self.buffer_images:
-                posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
-                self.post_wrapper(posts)
-                self.buffer_texts = []
-                self.buffer_images = []
+            self._flush_buffer()
             # Post tour poll for the previous tour before starting a new one
             if self._polls_enabled:
                 self._post_tour_poll()
@@ -861,27 +951,21 @@ class TelegramExporter(BaseExporter):
             self._tour_number = self._extract_tour_number(text)
             self._tour_seq += 1
             self.buffer_texts.append(self._wrap_heading(text))
+            self._raise_buffer_role(ROLE_HEADING)
             self.buffer_images.extend(images)
             if self.si_mode:
                 self._si_pending_group = text
             else:
                 self.section = True
         elif pair[0] == "battle":
-            if self.buffer_texts or self.buffer_images:
-                posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
-                self.post_wrapper(posts)
-                self.buffer_texts = []
-                self.buffer_images = []
+            self._flush_buffer()
             text, images = self.tg_element_layout(pair[1])
             self.buffer_texts.append(self._wrap_heading(text))
+            self._raise_buffer_role(ROLE_HEADING)
             self.buffer_images.extend(images)
             self._si_pending_group = text
         elif pair[0] == "theme":
-            if self.buffer_texts or self.buffer_images:
-                posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
-                self.post_wrapper(posts)
-                self.buffer_texts = []
-                self.buffer_images = []
+            self._flush_buffer()
             if self._polls_enabled:
                 self._post_tour_poll()
             self._si_current_theme_name = pair[1]["name"]
@@ -891,16 +975,14 @@ class TelegramExporter(BaseExporter):
             self._tour_number = str(pair[1]["number"])
             self._tour_seq += 1
             self.buffer_texts.append(self._wrap_heading(text))
+            self._raise_buffer_role(ROLE_HEADING)
             self.buffer_images.extend(images)
             self.section = True
         elif pair[0] == "round":
-            if self.buffer_texts or self.buffer_images:
-                posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
-                self.post_wrapper(posts)
-                self.buffer_texts = []
-                self.buffer_images = []
+            self._flush_buffer()
             text, images = self.tg_element_layout(pair[1])
             self.buffer_texts.append(self._wrap_heading(text))
+            self._raise_buffer_role(ROLE_HEADING)
             self.buffer_images.extend(images)
             self._si_pending_group = text
         elif pair[0] in ("comment", "author") and self.si_mode:
@@ -916,8 +998,12 @@ class TelegramExporter(BaseExporter):
                     self.buffer_texts.append(formatted)
             if images:
                 self.buffer_images.extend(images)
+            if text or images:
+                self._raise_buffer_role(ROLE_OTHER)
         else:
             text, images = self.tg_element_layout(pair[1])
+            if text or images:
+                self._raise_buffer_role(ROLE_OTHER)
             if text:
                 if self.si_mode and self.buffer_texts and not self.rich_mode:
                     self.buffer_texts[-1] += "\n" + text
@@ -1188,8 +1274,19 @@ class TelegramExporter(BaseExporter):
         return [({"html": html_content, "media_files": media_files}, None)]
 
     def tg_format_question(self, q, number=None):
+        """A question's posts; in si mode, its buffered text and images."""
+        result = self._format_question(q, number=number)
+        return result if self.si_mode else result[0]
+
+    def _format_question(self, q, number=None):
+        """A question's posts and the role of each, outside si mode.
+
+        In si mode the question is one part of a buffered post, so this returns
+        its text and images instead.
+        """
         if self.rich_mode:
-            return self.tg_format_question_rich(q, number=number)
+            res = self.tg_format_question_rich(q, number=number)
+            return res if self.si_mode else (res, [ROLE_QUESTION])
         parts = self._format_question_parts(q, number=number)
         txt_q = parts["q"]
         txt_a = parts["a"]
@@ -1232,7 +1329,7 @@ class TelegramExporter(BaseExporter):
             res = [(full_question, images_q[0] if images_q else None)]
             for i in images_a:
                 res.append(("", i))
-            return res
+            return res, [ROLE_QUESTION] + [ROLE_COMMENT] * len(images_a)
         elif images_q and tg_len(full_question) <= 4096:
             full_question = re.sub(
                 "\\[" + self.labels["question_labels"]["handout"] + ": +?\\]\n",
@@ -1242,7 +1339,7 @@ class TelegramExporter(BaseExporter):
             res = [(f"QQQ{number}", images_q[0]), (full_question, None)]
             for i in images_a:
                 res.append(("", i))
-            return res
+            return res, [ROLE_HANDOUT, ROLE_QUESTION] + [ROLE_COMMENT] * len(images_a)
         q_without_s = self.assemble(
             [
                 txt_q,
@@ -1260,7 +1357,7 @@ class TelegramExporter(BaseExporter):
                     self.lwrap([self.swrap(txt_s), txt_au]), images_a
                 )
             )
-            return res
+            return res, [ROLE_QUESTION] + [ROLE_COMMENT] * (len(res) - 1)
         q_a_only = self.assemble([txt_q, self.swrap(txt_a)], lb_after_first=True)
         if tg_len(q_a_only) <= q_threshold:
             res = [(q_a_only, images_q[0] if images_q else None)]
@@ -1278,8 +1375,9 @@ class TelegramExporter(BaseExporter):
                     images_a,
                 )
             )
-            return res
-        return self.split_to_messages(
+            return res, [ROLE_QUESTION] + [ROLE_COMMENT] * (len(res) - 1)
+        # The question alone is too long: the answer follows in the replies.
+        res = self.split_to_messages(
             self.lwrap(
                 [
                     txt_q,
@@ -1294,6 +1392,7 @@ class TelegramExporter(BaseExporter):
             ),
             (images_q or []) + (images_a or []),
         )
+        return res, [ROLE_QUESTION] + [ROLE_ANSWER] * (len(res) - 1)
 
     @staticmethod
     def is_valid_tg_identifier(str_):
@@ -1312,7 +1411,9 @@ class TelegramExporter(BaseExporter):
             if key in cfg:
                 self.poll_config[key] = cfg[key]
 
-    def _post_poll(self, chat_id, poll_cfg, substitutions, reply_to_message_id=None):
+    def _post_poll(
+        self, chat_id, poll_cfg, substitutions, reply_to_message_id=None, kind=None
+    ):
         """Post a poll to Telegram.
 
         Args:
@@ -1358,6 +1459,16 @@ class TelegramExporter(BaseExporter):
 
         try:
             result = self.send_api_request("sendPoll", data)
+            self._record_post(
+                SentPost(
+                    chat_id=chat_id,
+                    message_id=result["message_id"],
+                    content_type=CONTENT_POLL,
+                    kind=kind or PostKind(ROLE_POLL),
+                    text=question_text,
+                    reply_to_message_id=reply_to_message_id,
+                )
+            )
             self.logger.info(f"Posted poll: {question_text}")
             time.sleep(random.randint(2, 4))
             return result
@@ -1392,9 +1503,12 @@ class TelegramExporter(BaseExporter):
                 cfg,
                 {"NUMBER": number},
                 reply_to_message_id=self._last_discussion_msg_id,
+                kind=PostKind(ROLE_POLL, number),
             )
         else:
-            self._post_poll(self.channel_id, cfg, {"NUMBER": number})
+            self._post_poll(
+                self.channel_id, cfg, {"NUMBER": number}, kind=PostKind(ROLE_POLL, number)
+            )
 
     def _post_tour_poll(self):
         """Post a tour poll for the current tour if configured."""
@@ -1429,8 +1543,8 @@ class TelegramExporter(BaseExporter):
         else:
             self._post_poll(self.channel_id, cfg, {"TITLE": title})
 
-    def export(self):
-        """Main export function to send the structure to Telegram."""
+    def _init_run_state(self):
+        """What one export tracks while it posts; reset at the start of each."""
         self.section_links = []
         self.buffer_texts = []
         self.buffer_images = []
@@ -1446,6 +1560,12 @@ class TelegramExporter(BaseExporter):
         self._polls_enabled = getattr(self.args, "add_polls", False)
         self.poll_config = {}
         self.poll_mode = "comment"
+        self._buffer_role = None
+        self._buffer_questions = []
+
+    def export(self):
+        """Main export function to send the structure to Telegram."""
+        self._init_run_state()
 
         if not self.args.tgchannel or not self.args.tgchat:
             raise ChgksuiteError("Please provide channel and chat links or IDs.")
@@ -1561,16 +1681,15 @@ class TelegramExporter(BaseExporter):
             self._load_poll_config()
             self._disable_reactions(self.channel_id)
 
+        if not self.args.dry_run:
+            self._start_record()
+
         # Process all elements
         for pair in self.structure:
             self.tg_process_element(pair)
 
         # Handle any remaining buffer
-        if self.buffer_texts or self.buffer_images:
-            posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
-            self.post_wrapper(posts)
-            self.buffer_texts = []
-            self.buffer_images = []
+        self._flush_buffer()
 
         # Post tour poll for the last tour (not triggered by a next section)
         if self._polls_enabled:
@@ -1655,7 +1774,10 @@ class TelegramExporter(BaseExporter):
             # Post the navigation message
             if not self.args.dry_run:
                 message = self._post(
-                    self.channel_id, navigation_posts[0][0].strip(), None
+                    self.channel_id,
+                    navigation_posts[0][0].strip(),
+                    None,
+                    kind=PostKind(ROLE_NAVIGATION),
                 )
 
                 # Post detail navigation with themes in discussion thread
@@ -1674,6 +1796,7 @@ class TelegramExporter(BaseExporter):
                             post[0],
                             post[1],
                             reply_to_message_id=nav_discussion_msg_id,
+                            kind=PostKind(ROLE_NAVIGATION),
                         )
                         time.sleep(random.randint(2, 4))
 
@@ -1697,17 +1820,39 @@ class TelegramExporter(BaseExporter):
                     )
                 except Exception:
                     self.logger.exception("Failed to pin message")
+        if self.record is not None:
+            self.record.finish()
         return True
+
+    def _start_record(self):
+        """Open this run's row in telegram.db; every post sent is added to it."""
+        paths = self.dir_kwargs.get("source_paths") or []
+        if paths:
+            source_path, source_sha256 = sources_digest(paths)
+        else:
+            source_path, source_sha256 = "", ""
+        tgaccount = self.args.tgaccount
+        self.record = ExportRecord.start(
+            self.db_conn,
+            tool="chgksuite",
+            tool_version=__version__,
+            source_path=source_path,
+            source_sha256=source_sha256,
+            tgaccount="" if tgaccount in (None, "my_account") else tgaccount,
+            bot_id=getattr(self, "bot_id", None),
+            channel_id=self.channel_id,
+            chat_id=self.chat_id,
+        )
 
     def init_resolve_db(self):
         if not os.path.exists(self.resolve_db_path):
-            self.resolve_db_conn = sqlite3.connect(self.resolve_db_path)
+            self.resolve_db_conn = sqlite3.connect(self.resolve_db_path, timeout=5)
             self.resolve_db_conn.execute(
                 "CREATE TABLE IF NOT EXISTS resolve (username TEXT PRIMARY KEY, id INTEGER)"
             )
             self.resolve_db_conn.commit()
         else:
-            self.resolve_db_conn = sqlite3.connect(self.resolve_db_path)
+            self.resolve_db_conn = sqlite3.connect(self.resolve_db_path, timeout=5)
 
     def resolve_username_to_id(self, username):
         assert username is not None
@@ -1723,7 +1868,10 @@ class TelegramExporter(BaseExporter):
         assert id_ is not None
         self.logger.info(f"Saving username {username} as ID {id_}")
         cur = self.resolve_db_conn.cursor()
-        cur.execute("INSERT INTO resolve (username, id) VALUES (?, ?)", (username, id_))
+        cur.execute(
+            "INSERT OR REPLACE INTO resolve (username, id) VALUES (?, ?)",
+            (username, id_),
+        )
         self.resolve_db_conn.commit()
 
     def get_discussion_message(self, channel_id, message_id):
@@ -1754,11 +1902,11 @@ class TelegramExporter(BaseExporter):
                 """
                 SELECT raw_data
                 FROM messages
-                WHERE chat_id = ? AND created_at > datetime('now', '-5 minutes')
+                WHERE chat_id = ? AND created_at > ?
                 ORDER BY created_at DESC
                 LIMIT 20
             """,
-                (self.chat_id,),
+                (str(self.chat_id), utc_ago(timedelta(minutes=5))),
             )
 
             messages = cursor.fetchall()
@@ -1861,16 +2009,19 @@ class TelegramExporter(BaseExporter):
             # Look for a forwarded message in recent messages
             cursor = self.db_conn.cursor()
             if self.created_at:
-                threshold = "'" + self.created_at + "'"
+                threshold = self.created_at
             else:
-                threshold = "datetime('now', '-2 minutes')"
+                threshold = max(
+                    self.run_started_at, utc_ago(timedelta(minutes=2))
+                )
             cursor.execute(
-                f"""
+                """
                 SELECT raw_data, created_at
                 FROM messages
-                WHERE created_at > {threshold}
+                WHERE created_at > ?
                 ORDER BY created_at DESC
-            """
+            """,
+                (threshold,),
             )
 
             messages = cursor.fetchall()

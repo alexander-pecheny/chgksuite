@@ -1,9 +1,7 @@
 import asyncio
 import json
 import os
-import sqlite3
 import threading
-from datetime import datetime
 
 import requests
 import toml
@@ -11,6 +9,7 @@ from telegram import Update
 from telegram.ext import Application, ContextTypes, MessageHandler, filters
 
 from chgksuite.common import ChgksuiteError, get_chgksuite_dir
+from chgksuite.composer.telegram_db import connect, utc_now
 
 
 class TelegramSidecarBot:
@@ -25,7 +24,7 @@ class TelegramSidecarBot:
     @property
     def conn(self):
         if not hasattr(self._local, "connection"):
-            self._local.connection = sqlite3.connect(self.db_path)
+            self._local.connection = connect(self.db_path)
         return self._local.connection
 
     async def handle_message(self, update: Update, _: ContextTypes.DEFAULT_TYPE):
@@ -36,7 +35,7 @@ class TelegramSidecarBot:
         raw_data = json.dumps(update.to_dict(), ensure_ascii=False)
         cursor.execute(
             "INSERT INTO messages (raw_data, chat_id, created_at) VALUES (?, ?, ?)",
-            (raw_data, message.chat.id, datetime.now().astimezone().isoformat()),
+            (raw_data, message.chat.id, utc_now()),
         )
         self.conn.commit()
 
@@ -50,7 +49,7 @@ class TelegramSidecarBot:
         if req.status_code == 200 and "ok" in req.json():
             cursor.execute(
                 "INSERT INTO bot_status (raw_data, created_at) VALUES (?, ?)",
-                (json.dumps({"status": "ok"}), datetime.now().astimezone().isoformat()),
+                (json.dumps({"status": "ok"}), utc_now()),
             )
             self.conn.commit()
         else:
@@ -65,7 +64,7 @@ class TelegramSidecarBot:
                             "status_code": req.status_code,
                         }
                     ),
-                    datetime.now().astimezone().isoformat(),
+                    utc_now(),
                 ),
             )
             self.conn.commit()
