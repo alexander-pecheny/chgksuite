@@ -273,10 +273,6 @@ jobs:
           </dict>
           </plist>
           EOF
-            # Ad-hoc sign the app bundle to prevent "damaged" error
-            codesign --force --deep --sign - "artifacts/chgkq.app"
-            # Zip the .app bundle
-            cd artifacts && zip -r "chgkq-${{ matrix.platform }}.zip" chgkq.app && rm -rf chgkq.app && cd ..
           fi
 
           # Create Tk .app bundle
@@ -311,11 +307,54 @@ jobs:
           </dict>
           </plist>
           EOF
-            # Ad-hoc sign the app bundle to prevent "damaged" error
-            codesign --force --deep --sign - "artifacts/chgkt.app"
-            # Zip the .app bundle
-            cd artifacts && zip -r "chgkt-${{ matrix.platform }}.zip" chgkt.app && rm -rf chgkt.app && cd ..
           fi
+
+      - name: Sign, notarise and zip macOS app bundles
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KC_PASS="$(openssl rand -base64 24)"
+          security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+          echo "$P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KC_PASS" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+
+          cd artifacts
+          APPS=$(ls -d *.app)
+          for app in $APPS; do
+            codesign --force --options runtime --timestamp --keychain "$KEYCHAIN" \
+              --sign "Developer ID Application" "$app"
+            codesign --verify --strict --verbose=2 "$app"
+          done
+
+          echo "$ASC_KEY_P8" > "$RUNNER_TEMP/key.p8"
+          ditto -c -k --sequesterRsrc . "$RUNNER_TEMP/notarise.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarise.zip" --key "$RUNNER_TEMP/key.p8" \
+            --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait --timeout 30m
+          rm "$RUNNER_TEMP/key.p8" "$RUNNER_TEMP/notarise.zip"
+
+          for app in $APPS; do
+            xcrun stapler staple "$app"
+            spctl --assess --type execute --verbose=2 "$app"
+            ditto -c -k --keepParent "$app" "${app%.app}-${{ matrix.platform }}.zip"
+            rm -rf "$app"
+          done
+
+      - name: Remove the signing keychain
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true
 
       - name: List artifacts
         shell: bash
