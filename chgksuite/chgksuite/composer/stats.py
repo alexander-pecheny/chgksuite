@@ -4,7 +4,12 @@ from collections import Counter, defaultdict
 
 import requests
 
-from chgksuite.common import compose_4s, custom_csv_to_results, xlsx_to_results
+from chgksuite.common import (
+    compose_4s,
+    custom_csv_to_results,
+    load_settings,
+    xlsx_to_results,
+)
 from chgksuite.composer.composer_common import BaseExporter
 
 
@@ -26,8 +31,9 @@ class StatsAdder(BaseExporter):
 
     @staticmethod
     def get_tournament_results(id_):
+        api_url = load_settings().get("rating_api_url", "https://api.rating.chgk.info")
         req = requests.get(
-            "https://api.rating.chgk.info"
+            api_url.rstrip("/")
             + f"/tournaments/{id_}/results.json"
             + "?includeMasksAndControversials=1"
         )
