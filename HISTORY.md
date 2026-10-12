@@ -1,5 +1,9 @@
 # What's new
 
+## v1.3.1 (2026-10-12)
+
+- Команда `add_stats` теперь берёт результаты турниров с api.rating.chgk.info, потому что api.rating.chgk.net перестал работать. Адрес API можно поменять параметром `rating_api_url` в `~/.chgksuite/settings.toml`
+
 ## v1.3.0 (2026-07-17)
 
 - Генерация раздаток (`handouts`) переведена с TeX/tectonic на [Typst](https://typst.app). Стало значительно быстрее. Дефолтный шрифт для раздаток теперь Noto Sans (одинаковый на всех операционных системах и встроенный в chgksuite)
