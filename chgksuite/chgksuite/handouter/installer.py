@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import tarfile
+import tempfile
 import zipfile
 
 import requests
@@ -120,9 +121,9 @@ def parse_typst_archive_name(archive_name):
 
 
 # download_file function taken from https://stackoverflow.com/a/39217788
-def download_file(url):
+def download_file(url, dest_dir):
     print(f"downloading from {url}...")
-    local_filename = url.split("/")[-1]
+    local_filename = os.path.join(dest_dir, url.split("/")[-1].split("?")[0])
     with requests.get(url, stream=True) as resp:
         resp.raw.read = functools.partial(resp.raw.read, decode_content=True)
         with open(local_filename, "wb") as f:
@@ -213,43 +214,30 @@ def install_typst(args):
         archive_url = archive_url_from_regex(assets, regex)
     else:
         archive_url = guess_archive_url(assets)
-    downloaded = download_file(archive_url)
-    dirname = "typst_folder"
-    extract_archive(downloaded, dirname=dirname)
     filename = "typst.exe" if system == "Windows" else "typst"
-    # The binary lives inside a per-target subfolder (e.g. typst-<triple>/typst).
-    extracted_binary = _find_binary(dirname, filename)
     target_path = os.path.join(get_utils_dir(), filename)
-    shutil.move(extracted_binary, target_path)
+    # The working directory of an app started from Finder is the read-only "/".
+    with tempfile.TemporaryDirectory() as tmp:
+        dirname = os.path.join(tmp, "typst_folder")
+        extract_archive(download_file(archive_url, tmp), dirname=dirname)
+        # The binary lives inside a per-target subfolder (e.g. typst-<triple>/typst).
+        shutil.move(_find_binary(dirname, filename), target_path)
     if not os.access(target_path, os.X_OK):
         os.chmod(target_path, 0o755)
-    shutil.rmtree(dirname)
     return target_path
 
 
 def install_font(url):
     fn = url.split("/")[-1].split("?")[0]
     bn, ext = os.path.splitext(fn)
-    if "." in bn:
-        new_fn = bn.replace(".", "_") + ext
-    else:
-        new_fn = fn
-    dir_name = new_fn[:-4]
-    dir_name_base = dir_name.split(os.pathsep)[-1]
     fonts_dir = os.path.join(get_utils_dir(), "fonts")
-    if not os.path.exists(fonts_dir):
-        os.makedirs(fonts_dir)
-    target_dir = os.path.join(fonts_dir, dir_name_base)
+    os.makedirs(fonts_dir, exist_ok=True)
+    target_dir = os.path.join(fonts_dir, bn.replace(".", "_"))
     if os.path.isdir(target_dir):
         print(f"{target_dir} already exists")
         return
-    download_file(url)
-    if fn != new_fn:
-        os.rename(fn, new_fn)
-    extract_archive(new_fn, dirname=dir_name)
-    if not os.path.isdir(target_dir):
-        shutil.copytree(dir_name, target_dir)
-    shutil.rmtree(dir_name)
+    with tempfile.TemporaryDirectory() as tmp:
+        extract_archive(download_file(url, tmp), dirname=target_dir)
 
 
 def find_font(file_name, root_dir=None):
