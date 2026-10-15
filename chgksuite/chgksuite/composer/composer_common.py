@@ -230,6 +230,15 @@ def unquote(bytestring):
     return urllib.parse.unquote(bytestring.decode("utf8")).encode("utf8")
 
 
+ANSWER_FIELDS = ("answer", "zachet", "nezachet", "comment", "source", "author")
+COMMENT_FIRST_FIELDS = ("comment", "answer", "zachet", "nezachet", "source", "author")
+
+
+def answer_fields(comment_first=False):
+    """The fields written after the question text, in the order they appear."""
+    return COMMENT_FIRST_FIELDS if comment_first else ANSWER_FIELDS
+
+
 GAME_EXTENSIONS = {"si": "si4s", "brain": "br4s", "troika": "tr4s"}
 _EXT_TO_GAME = {v: k for k, v in GAME_EXTENSIONS.items()}
 

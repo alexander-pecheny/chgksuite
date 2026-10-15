@@ -26,6 +26,7 @@ from chgksuite.common import (
 )
 from chgksuite.composer.composer_common import (
     BaseExporter,
+    answer_fields,
     backtick_replace,
     parseimg,
     remove_accents_standalone,
@@ -1584,23 +1585,25 @@ class PptxExporter(BaseExporter):
             result.append(f"{self.get_label(q, field)}: {self._text_for_grid(value)}")
         return "\n".join(result)
 
+    def _answer_slide_fields(self, q):
+        shown = {
+            "answer": True,
+            "zachet": bool(q.get("zachet") and self.c.get("add_zachet")),
+            "nezachet": bool(q.get("nezachet") and self.c.get("add_zachet")),
+            "comment": bool(self.c["add_comment"] and "comment" in q),
+            "source": bool(self.c.get("add_source") and "source" in q),
+            "author": bool(self.c.get("add_author") and "author" in q),
+        }
+        comment_first = getattr(self.args, "comment_first", False)
+        return [field for field in answer_fields(comment_first) if shown[field]]
+
     def add_answer_slide(self, q):
         slide = self.prs.slides.add_slide(self.ANSWER_SLIDE)
         if self.c.get("override_answer_caption"):
             self.set_question_number(slide, self.c["override_answer_caption"])
         else:
             self.set_question_number(slide, self.number)
-        fields = ["answer"]
-        if q.get("zachet") and self.c.get("add_zachet"):
-            fields.append("zachet")
-        if q.get("nezachet") and self.c.get("add_zachet"):
-            fields.append("nezachet")
-        if self.c["add_comment"] and "comment" in q:
-            fields.append("comment")
-        if self.c.get("add_source") and "source" in q:
-            fields.append("source")
-        if self.c.get("add_author") and "author" in q:
-            fields.append("author")
+        fields = self._answer_slide_fields(q)
         answer_size = self._get_font_size_for_text(
             "answer", self._get_answer_grid_text(q, fields), "answer_size", 32
         )
@@ -1621,36 +1624,14 @@ class PptxExporter(BaseExporter):
             size=answer_size,
             line_spacing_key="answer",
         )
-        r = self.add_run(p, f"{self.get_label(q, 'answer')}: ")
-        r.font.bold = True
-        self.pptx_format(
-            self.pptx_process_text(q["answer"], strip_brackets=False), p, tf, slide
-        )
-        if q.get("zachet") and self.c.get("add_zachet"):
-            zachet_text = self.pptx_process_text(q["zachet"], strip_brackets=False)
-            r = self.add_run(p, f"\n{self.get_label(q, 'zachet')}: ")
+        for i, field in enumerate(fields):
+            text = self.pptx_process_text(
+                q[field], strip_brackets=field not in ("answer", "zachet")
+            )
+            separator = "\n" if i else ""
+            r = self.add_run(p, f"{separator}{self.get_label(q, field)}: ")
             r.font.bold = True
-            self.pptx_format(zachet_text, p, tf, slide)
-        if q.get("nezachet") and self.c.get("add_zachet"):
-            nezachet_text = self.pptx_process_text(q["nezachet"])
-            r = self.add_run(p, f"\n{self.get_label(q, 'nezachet')}: ")
-            r.font.bold = True
-            self.pptx_format(nezachet_text, p, tf, slide)
-        if self.c["add_comment"] and "comment" in q:
-            comment_text = self.pptx_process_text(q["comment"])
-            r = self.add_run(p, f"\n{self.get_label(q, 'comment')}: ")
-            r.font.bold = True
-            self.pptx_format(comment_text, p, tf, slide)
-        if self.c.get("add_source") and "source" in q:
-            source_text = self.pptx_process_text(q["source"])
-            r = self.add_run(p, f"\n{self.get_label(q, 'source')}: ")
-            r.font.bold = True
-            self.pptx_format(source_text, p, tf, slide)
-        if self.c.get("add_author") and "author" in q:
-            author_text = self.pptx_process_text(q["author"])
-            r = self.add_run(p, f"\n{self.get_label(q, 'author')}: ")
-            r.font.bold = True
-            self.pptx_format(author_text, p, tf, slide)
+            self.pptx_format(text, p, tf, slide)
         self._custom_shrink_textbox(textbox)
         self._place_inline_images(textbox, slide)
 

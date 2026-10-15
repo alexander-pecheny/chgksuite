@@ -34,6 +34,7 @@ from chgksuite.common import (
 from chgksuite.composer.composer_common import (
     BaseExporter,
     _parse_4s_elem,
+    answer_fields,
     backtick_replace,
     parseimg,
     question_pieces,
@@ -45,6 +46,7 @@ from chgksuite.composer.composer_common import (
 
 WHITEN = {
     "handout": False,
+    "answer": True,
     "zachet": True,
     "nezachet": True,
     "comment": True,
@@ -946,6 +948,7 @@ def add_question_to_docx(
     logger=None,
     game=None,
     smaller_source_and_author=True,
+    comment_first=False,
     **kwargs,
 ):
     """
@@ -1111,62 +1114,44 @@ def add_question_to_docx(
         p.paragraph_format.keep_together = True
         p.paragraph_format.space_before = DocxPt(6)
 
-        # Add answer
-        answer_label = get_label_standalone(q, "answer", labels, language)
-        p.add_run(f"{answer_label}: ").bold = True
-        format_docx_element(
-            doc,
-            q["answer"],
-            p,
-            True,
-            spoilers,
-            logger,
-            labels,
-            regexes,
-            language,
-            remove_accents=screen_mode,
-            replace_no_break_spaces=True,
-            **kwargs,
-        )
-
-        # Add other fields. Source and author share one paragraph; with
-        # smaller_source_and_author it is set 2pt smaller and spaced to start one
-        # body line below (an author without a source opens it too).
+        # Source and author share one paragraph; with smaller_source_and_author
+        # it is set 2pt smaller and spaced to start one body line below (an
+        # author without a source opens it too).
         source_para = None
-        for field in ["zachet", "nezachet", "comment", "source", "author"]:
-            if field in q:
-                small = smaller_source_and_author and field in ("source", "author")
-                starts_para = field == "source" or (small and source_para is None)
-                if starts_para and external_para is None:
-                    p = doc.add_paragraph()
-                    p.paragraph_format.keep_together = True
-                    if small:
-                        p.paragraph_format.space_before = SOURCE_SPACE_BEFORE
-                    source_para = p
-                else:
-                    p.add_run("\n")
-
-                small_start = len(_paragraph_run_elements(p)) if small else 0
-                field_label = get_label_standalone(q, field, labels, language)
-                p.add_run(f"{field_label}: ").bold = True
-                preserve_brackets = field == "zachet"
-                format_docx_element(
-                    doc,
-                    q[field],
-                    p,
-                    WHITEN[field],
-                    spoilers,
-                    logger,
-                    labels,
-                    regexes,
-                    language,
-                    remove_accents=screen_mode,
-                    remove_brackets=screen_mode and not preserve_brackets,
-                    replace_no_break_spaces=field != "source",
-                    **kwargs,
-                )
+        present = [field for field in answer_fields(comment_first) if field in q]
+        for i, field in enumerate(present):
+            small = smaller_source_and_author and field in ("source", "author")
+            starts_para = field == "source" or (small and source_para is None)
+            if i > 0 and starts_para and external_para is None:
+                p = doc.add_paragraph()
+                p.paragraph_format.keep_together = True
                 if small:
-                    _apply_source_font_size(p, small_start)
+                    p.paragraph_format.space_before = SOURCE_SPACE_BEFORE
+                source_para = p
+            elif i > 0:
+                p.add_run("\n")
+
+            small_start = len(_paragraph_run_elements(p)) if small else 0
+            field_label = get_label_standalone(q, field, labels, language)
+            p.add_run(f"{field_label}: ").bold = True
+            preserve_brackets = field in ("answer", "zachet")
+            format_docx_element(
+                doc,
+                q[field],
+                p,
+                WHITEN[field],
+                spoilers,
+                logger,
+                labels,
+                regexes,
+                language,
+                remove_accents=screen_mode,
+                remove_brackets=screen_mode and not preserve_brackets,
+                replace_no_break_spaces=field != "source",
+                **kwargs,
+            )
+            if small:
+                _apply_source_font_size(p, small_start)
 
     return qcount
 
@@ -1247,6 +1232,7 @@ class DocxExporter(BaseExporter):
             game=self.game,
             logger=self.logger,
             smaller_source_and_author=_smaller_source_and_author_enabled(self.args),
+            comment_first=getattr(self.args, "comment_first", False),
             **extra_kwargs,
         )
 

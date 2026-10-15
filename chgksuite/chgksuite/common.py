@@ -39,6 +39,28 @@ QUESTION_LABELS = [
     "setcounter",
 ]
 SEP = "\n"
+FOURS_MARKERS = {
+    "#": "meta",
+    "##": "section",
+    "###": "heading",
+    "###LJ": "ljheading",
+    "#B": "battle",
+    "#R": "round",
+    "#T": "theme",
+    "#EDITOR": "editor",
+    "#DATE": "date",
+    "?": "question",
+    "№": "number",
+    "№№": "setcounter",
+    "!": "answer",
+    "=": "zachet",
+    "!=": "nezachet",
+    "^": "source",
+    "/": "comment",
+    "@": "author",
+    ">": "handout",
+}
+MARKER_ESCAPE = "\\"
 try:
     ENC = sys.stdout.encoding or "utf8"
 except AttributeError:
@@ -696,6 +718,29 @@ def replace_escaped(s):
     return s.replace("\\[", "[").replace("\\]", "]")
 
 
+def unescape_marker_line(line):
+    """Return the line without its escape if it starts with an escaped marker
+    such as ``\\>``, otherwise None."""
+    parts = line.split()
+    if not parts:
+        return None
+    token = parts[0]
+    if token.startswith(MARKER_ESCAPE) and token.lstrip(MARKER_ESCAPE) in FOURS_MARKERS:
+        return line.replace(MARKER_ESCAPE, "", 1)
+    return None
+
+
+def escape_markers(value):
+    """Escape every line after the first that would otherwise parse as a marker."""
+    lines = value.split(SEP)
+    for i, line in enumerate(lines[1:], start=1):
+        parts = line.split()
+        if parts and parts[0].lstrip(MARKER_ESCAPE) in FOURS_MARKERS:
+            indent = len(line) - len(line.lstrip())
+            lines[i] = line[:indent] + MARKER_ESCAPE + line[indent:]
+    return SEP.join(lines)
+
+
 def compose_4s(structure, args=None):
     types_mapping = {
         "meta": "# ",
@@ -720,26 +765,25 @@ def compose_4s(structure, args=None):
         "Question": None,
     }
 
+    def clean(z):
+        return escape_markers(remove_double_separators(z))
+
     def format_element(z):
         if isinstance(z, str):
-            return remove_double_separators(z)
+            return clean(z)
         elif isinstance(z, list):
             if isinstance(z[1], list):
                 return (
-                    remove_double_separators(z[0])
+                    clean(z[0])
                     + SEP
                     + "- "
-                    + (f"{SEP}- ").join(
-                        [remove_double_separators(x) for x in z[1]]
-                    )
+                    + (f"{SEP}- ").join([clean(x) for x in z[1]])
                 )
             else:
                 return (
                     SEP
                     + "- "
-                    + (f"{SEP}- ").join(
-                        [remove_double_separators(x) for x in z]
-                    )
+                    + (f"{SEP}- ").join([clean(x) for x in z])
                 )
 
     def is_zero(s):

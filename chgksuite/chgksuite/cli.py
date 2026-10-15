@@ -841,6 +841,23 @@ class ArgparseBuilder:
             help="disable asterisks processing.",
             caption="Не обрабатывать звёздочки",
         )
+        for cmdcompose_ordered in (
+            cmdcompose_docx,
+            cmdcompose_pdf,
+            cmdcompose_lj,
+            cmdcompose_redditmd,
+            cmdcompose_markdown,
+            cmdcompose_pptx,
+            cmdcompose_telegram,
+        ):
+            self.add_argument(
+                cmdcompose_ordered,
+                "--comment_first",
+                action="store_true",
+                help="put the comment before the answer.",
+                caption="Комментарий перед ответом",
+                advanced=True,
+            )
         cmdcompose_add_stats = cmdcompose_filetype.add_parser("add_stats")
         self.add_argument(
             cmdcompose_add_stats,

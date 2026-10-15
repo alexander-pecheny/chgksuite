@@ -4,8 +4,17 @@ from chgksuite.composer.composer_common import (
     IMGUR_CLIENT_ID,
     BaseExporter,
     Imgur,
+    answer_fields,
     parseimg,
 )
+
+MARKDOWN_LABELS = {
+    "answer": "Ответ",
+    "zachet": "Зачёт",
+    "nezachet": "Незачёт",
+    "comment": "Комментарий",
+    "source": "Источник",
+}
 
 
 class MarkdownExporter(BaseExporter):
@@ -90,17 +99,14 @@ class MarkdownExporter(BaseExporter):
             self.qcount += 1
         spoiler_start = ">!" if self.args.filetype == "redditmd" else ""
         spoiler_end = "!<" if self.args.filetype == "redditmd" else ""
-        res += "__Ответ:__ {}{}  \n".format(
-            spoiler_start, self.markdownyapper(q["answer"])
-        )
-        if "zachet" in q:
-            res += "__Зачёт:__ {}  \n".format(self.markdownyapper(q["zachet"]))
-        if "nezachet" in q:
-            res += "__Незачёт:__ {}  \n".format(self.markdownyapper(q["nezachet"]))
-        if "comment" in q:
-            res += "__Комментарий:__ {}  \n".format(self.markdownyapper(q["comment"]))
-        if "source" in q:
-            res += "__Источник:__ {}  \n".format(self.markdownyapper(q["source"]))
+        fields = answer_fields(getattr(self.args, "comment_first", False))
+        present = [f for f in fields if f in q and f != "author"]
+        for i, field in enumerate(present):
+            res += "__{}:__ {}{}  \n".format(
+                MARKDOWN_LABELS[field],
+                spoiler_start if i == 0 else "",
+                self.markdownyapper(q[field]),
+            )
         if "author" in q:
             res += "{}\n__Автор:__ {}  \n".format(
                 spoiler_end, self.markdownyapper(q["author"])

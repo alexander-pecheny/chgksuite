@@ -10,6 +10,7 @@ import toml
 from chgksuite.common import ChgksuiteError, get_source_dirs, replace_escaped
 from chgksuite.composer.composer_common import (
     BaseExporter,
+    answer_fields,
     backtick_replace,
     parseimg,
     question_pieces,
@@ -463,11 +464,9 @@ class TypstExporter(BaseExporter):
             out.extend(self.render_pieces(p1, pieces))
 
         p2 = Para(above=self.answer_above, keep_lines=True)
-        p2.add_styled(self.get_label(q, "answer") + ": ", "bold")
-        self.add_value(p2, q["answer"], True)
-
+        p2_empty = True
         src = None
-        for field in ("zachet", "nezachet", "comment", "source", "author"):
+        for field in answer_fields(getattr(self.args, "comment_first", False)):
             if field not in q:
                 continue
             nbsp = field != "source"
@@ -481,7 +480,9 @@ class TypstExporter(BaseExporter):
                 src.add_styled(self.get_label(q, field) + ": ", "bold")
                 self.add_value(src, q[field], nbsp)
                 continue
-            p2.add_break()
+            if not p2_empty:
+                p2.add_break()
+            p2_empty = False
             p2.add_styled(self.get_label(q, field) + ": ", "bold")
             self.add_value(p2, q[field], nbsp)
         out.append(p2.typ())

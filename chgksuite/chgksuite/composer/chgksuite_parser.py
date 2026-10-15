@@ -4,11 +4,13 @@ import re
 from collections import defaultdict
 
 from chgksuite.common import (
+    FOURS_MARKERS,
     QUESTION_LABELS,
     check_question,
     get_chgksuite_dir,
     init_logger,
     log_wrap,
+    unescape_marker_line,
 )
 from chgksuite.typotools import remove_excessive_whitespace as rew
 
@@ -100,27 +102,7 @@ def parse_4s(
     logger = logger or init_logger("composer")
     if required_fields is None and game in ("si", "troika"):
         required_fields = {"question", "answer"}
-    mapping = {
-        "#": "meta",
-        "##": "section",
-        "###": "heading",
-        "###LJ": "ljheading",
-        "#B": "battle",
-        "#R": "round",
-        "#T": "theme",
-        "#EDITOR": "editor",
-        "#DATE": "date",
-        "?": "question",
-        "№": "number",
-        "№№": "setcounter",
-        "!": "answer",
-        "=": "zachet",
-        "!=": "nezachet",
-        "^": "source",
-        "/": "comment",
-        "@": "author",
-        ">": "handout",
-    }
+    mapping = FOURS_MARKERS
 
     structure = []
 
@@ -144,9 +126,9 @@ def parse_4s(
                 structure.append(
                     [mapping[line_parts[0]], rew(line[len(line_parts[0]) :])]
                 )
-            else:
-                if len(structure) >= 1:
-                    structure[len(structure) - 1][1] += "\n" + line
+            elif len(structure) >= 1:
+                unescaped = unescape_marker_line(line)
+                structure[-1][1] += "\n" + (line if unescaped is None else unescaped)
 
     final_structure = []
     current_question = {}

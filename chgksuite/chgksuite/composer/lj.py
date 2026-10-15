@@ -12,6 +12,7 @@ from chgksuite.composer.composer_common import (
     IMGUR_CLIENT_ID,
     BaseExporter,
     Imgur,
+    answer_fields,
     md5,
     parseimg,
 )
@@ -271,7 +272,7 @@ class LjExporter(BaseExporter):
         )
         if "number" not in q:
             self.counter += 1
-        for field in ("answer", "zachet", "nezachet", "comment", "source", "author"):
+        for field in answer_fields(getattr(self.args, "comment_first", False)):
             if field in q:
                 res += "\n<strong>{field}: </strong>{content}".format(
                     field=self.get_label(q, field),

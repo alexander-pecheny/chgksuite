@@ -1128,6 +1128,8 @@ class TelegramExporter(BaseExporter):
             txt_au, images_ = self.tgyapper(q["author"])
             images_a.extend(images_)
             txt_au = f"<b>{self.get_label(q, 'author')}:</b> {txt_au}"
+        if txt_comm and getattr(self.args, "comment_first", False):
+            txt_a, txt_comm = f"{txt_comm}\n{txt_a}", ""
         return {
             "q": txt_q,
             "a": txt_a,

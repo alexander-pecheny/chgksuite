@@ -1514,3 +1514,25 @@ def test_legacy_pptx_config_sizes_and_disabled_autolayout_do_not_overlap(tmp_pat
         if run.text.strip()
     } == {20.0}
     assert 'lnSpcReduction="0"' not in answer_shape.element.txBody.xml
+
+
+def test_comment_first_puts_the_comment_before_the_answer(tmp_path):
+    structure = [
+        ("heading", "Тестовый пакет"),
+        ("Question", {"question": "Вопрос.", "answer": "Ответ.", "comment": "Пояснение."}),
+    ]
+    args = _pptx_args(tmp_path, config_updates={"add_comment": True})
+    args.comment_first = True
+    outfilename = tmp_path / "out.pptx"
+    PptxExporter(
+        structure, args, {"tmp_dir": str(tmp_path), "targetdir": str(tmp_path)}
+    ).export(str(outfilename))
+
+    answer_text = next(
+        shape.text
+        for slide in Presentation(str(outfilename)).slides
+        for shape in slide.shapes
+        if hasattr(shape, "text_frame") and "Пояснение." in shape.text
+    )
+    answer_text = _soft_breaks_as_newlines(answer_text)
+    assert answer_text.index("Пояснение.") < answer_text.index("Ответ.")
