@@ -1,4 +1,13 @@
+import os
+import runpy
+
 import pytest
+
+NONET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "nonet")
+os.environ["PYTHONPATH"] = os.pathsep.join(
+    filter(None, [NONET_DIR, os.environ.get("PYTHONPATH")])
+)
+runpy.run_path(os.path.join(NONET_DIR, "sitecustomize.py"))
 
 
 def pytest_addoption(parser):
