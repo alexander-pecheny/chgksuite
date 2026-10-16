@@ -50,6 +50,7 @@ from chgksuite.typotools import escape_underscores_except_urls, re_url
 from chgksuite.typotools import remove_excessive_whitespace as rew
 
 SEP = "\n"
+DEBUG_JSON_INDENT = 4
 PANDOC_NOT_FOUND_MESSAGE = "pandoc not found, installing..."
 EDITORS = {
     "win32": "notepad",
@@ -119,7 +120,8 @@ def search_for_date(str_):
 
 
 class ChgkParser:
-    BADNEXTFIELDS: ClassVar[set] = {"question", "answer"}
+    BADNEXTFIELDS: ClassVar[set] = {"question", "answer", "leadcomment"}
+    ANSWER_SIDE = frozenset({"answer", "zachet", "nezachet"})
     RE_NUM = re.compile("^([0-9]+)\\.?$")
     RE_NUM_START = re.compile("^([0-9]+)\\.")
     ZERO_PREFIXES = ("Нулевой вопрос", "Разминочный вопрос")
@@ -327,6 +329,7 @@ class ChgkParser:
                 while (
                     i + 1 < len(self.structure)
                     and self.structure[i + 1][0] != y
+                    and self.structure[i + 1][0] != "leadcomment"
                     and self.structure[i + 1][0] not in self.HARD_BOUNDARIES
                 ):
                     self.merge_to_previous(i + 1)
@@ -341,6 +344,35 @@ class ChgkParser:
                     and self.structure[i + 1][0] == ""
                     and self.find_next_fieldname(i) not in self.BADNEXTFIELDS
                 ):
+                    self.merge_to_previous(i + 1)
+            i += 1
+
+    def mark_leading_comments(self):
+        """Recognise a package that puts the comment before the answer: there,
+        more comments stand right before an answer than after one. Each comment
+        that leads to an answer takes the unlabelled lines up to it and becomes
+        a "leadcomment", which the merges look past to find the question."""
+        before = after = 0
+        for i, element in enumerate(self.structure):
+            if element[0] != "comment":
+                continue
+            if i + 1 < len(self.structure) and self.structure[i + 1][0] == "answer":
+                before += 1
+            j = i - 1
+            while j >= 0 and self.structure[j][0] == "":
+                j -= 1
+            if j >= 0 and self.structure[j][0] in self.ANSWER_SIDE:
+                after += 1
+        if before <= after:
+            return
+        i = 0
+        while i < len(self.structure):
+            if (
+                self.structure[i][0] == "comment"
+                and self.find_next_fieldname(i) == "answer"
+            ):
+                self.structure[i][0] = "leadcomment"
+                while self.structure[i + 1][0] == "":
                     self.merge_to_previous(i + 1)
             i += 1
 
@@ -642,7 +674,7 @@ class ChgkParser:
 
         if debug:
             with open("debug_1.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
+                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
 
         self.process_single_number_lines()
 
@@ -656,9 +688,11 @@ class ChgkParser:
             ):
                 element[0] = "question"
 
+        self.mark_leading_comments()
+
         if debug:
             with open("debug_1a.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
+                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
 
         # 2.
 
@@ -668,18 +702,19 @@ class ChgkParser:
 
         if debug:
             with open("debug_2.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
+                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
 
         # 3.
 
         i = 0
         while i < len(self.structure):
-            if self.structure[i][0] == "answer" and self.structure[i - 1][0] not in (
-                "question",
-                "newquestion",
-            ):
-                self.structure.insert(i, ["newquestion", ""])
-                i = 0
+            if self.structure[i][0] == "answer":
+                j = i
+                if i > 0 and self.structure[i - 1][0] == "leadcomment":
+                    j = i - 1
+                if self.structure[j - 1][0] not in ("question", "newquestion"):
+                    self.structure.insert(j, ["newquestion", ""])
+                    i = 0
             i += 1
 
         i = 0
@@ -711,6 +746,8 @@ class ChgkParser:
         for element in self.structure:
             if element[0] == "newquestion":
                 element[0] = "question"
+            elif element[0] == "leadcomment":
+                element[0] = "comment"
 
         self.dirty_merge_to_x_until_nextfield("source")
 
@@ -729,7 +766,7 @@ class ChgkParser:
 
         if debug:
             with open("debug_3.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
+                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
 
         # 4.
 
@@ -744,7 +781,7 @@ class ChgkParser:
             with open("debug_3a.json", "w", encoding="utf-8") as f:
                 f.write(
                     json.dumps(
-                        list(enumerate(self.structure)), ensure_ascii=False, indent=4
+                        list(enumerate(self.structure)), ensure_ascii=False, indent=DEBUG_JSON_INDENT
                     )
                 )
 
@@ -800,7 +837,7 @@ class ChgkParser:
 
         if debug:
             with open("debug_4.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
+                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
 
         # 5.
 
@@ -885,7 +922,7 @@ class ChgkParser:
 
         if debug:
             with open("debug_5.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=4))
+                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
 
         # 6.
 
@@ -938,7 +975,7 @@ class ChgkParser:
 
         if debug:
             with open("debug_6.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(final_structure, ensure_ascii=False, indent=4))
+                f.write(json.dumps(final_structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
 
         # 7.
         try:
@@ -992,7 +1029,7 @@ class ChgkParser:
 
         if debug:
             with open("debug_final.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(final_structure, ensure_ascii=False, indent=4))
+                f.write(json.dumps(final_structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
         return final_structure
 
 
