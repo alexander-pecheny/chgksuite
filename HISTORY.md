@@ -1,5 +1,9 @@
 # What's new
 
+## v1.3.2 (2026-10-15)
+
+- Исправлена ошибка `[Errno 30] Read-only file system` при установке Typst и шрифтов для раздаток в приложении на macOS
+
 ## v1.3.1 (2026-10-12)
 
 - Команда `add_stats` теперь берёт результаты турниров с api.rating.chgk.info, потому что api.rating.chgk.net перестал работать. Адрес API можно поменять параметром `rating_api_url` в `~/.chgksuite/settings.toml`
