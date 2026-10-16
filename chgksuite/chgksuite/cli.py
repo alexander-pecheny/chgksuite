@@ -18,7 +18,7 @@ from chgksuite.handouter.runner import gui_handouter
 from chgksuite.parser import gui_parse
 from chgksuite.version import __version__
 
-LANGS = ["az", "by", "by_tar", "en", "kz_cyr", "ru", "sr", "ua", "uz", "uz_cyr"] + [
+LANGS = ["az", "by", "by_tar", "en", "kz_cyr", "ro", "ru", "sr", "ua", "uz", "uz_cyr"] + [
     "custom"
 ]
 HANDOUT_LANGS = [lang for lang in LANGS if lang != "custom"]

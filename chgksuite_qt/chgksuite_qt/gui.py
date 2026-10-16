@@ -167,7 +167,7 @@ class UpdateChecker(QObject):
         self.finished.emit(has_update, details, error, target_versions)
 
 
-LANGS = ["by", "by_tar", "en", "kz_cyr", "ru", "sr", "ua", "uz", "uz_cyr"] + ["custom"]
+LANGS = ["by", "by_tar", "en", "kz_cyr", "ro", "ru", "sr", "ua", "uz", "uz_cyr"] + ["custom"]
 
 debug = False
 ROW_SPACING_OBJECT_NAME = "rowSpacing"
