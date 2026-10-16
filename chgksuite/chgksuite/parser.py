@@ -93,6 +93,33 @@ def load_regexes(regexfile):
     return {k: re.compile(v) for k, v in regexes.items()}
 
 
+# The fields a translated package may still label in Russian, which every
+# other language reads as well as its own.
+RUSSIAN_FALLBACK = (
+    "handout",
+    "answer",
+    "zachet",
+    "nezachet",
+    "comment",
+    "author",
+    "source",
+    "editor",
+)
+
+
+def with_russian(regexes, regexfile):
+    russian_file = os.path.join(os.path.dirname(regexfile), "regexes_ru.json")
+    russian = load_regexes(russian_file)
+    for name in RUSSIAN_FALLBACK:
+        if name in regexes:
+            regexes[name] = re.compile(
+                f"(?:{regexes[name].pattern})|(?:{russian[name].pattern})"
+            )
+        else:
+            regexes[name] = russian[name]
+    return regexes
+
+
 DATE_RE1 = re.compile("[0-9]{2}\\.[0-9]{2}\\.[0-9]{4}")
 DATE_RE2 = re.compile("[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
@@ -142,6 +169,8 @@ class ChgkParser:
         self.defaultauthor = defaultauthor
         args = args or DefaultNamespace()
         self.regexes = load_regexes(args.regexes)
+        if args.language not in (None, "ru", "custom"):
+            self.regexes = with_russian(self.regexes, args.regexes)
         self.logger = logger or init_logger("parser")
         self.args = args
         with open(self.args.labels_file, encoding="utf8") as f:
