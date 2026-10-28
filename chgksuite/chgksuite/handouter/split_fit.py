@@ -318,7 +318,7 @@ def measure_handout(hndt_path: Path, args) -> ProbeResult:
         )
 
     proc = subprocess.run(
-        typst_query_command(typst_path, typ_path.name, MEASURE_LABEL),
+        typst_query_command(typst_path, file_dir, typ_path.name, MEASURE_LABEL),
         cwd=file_dir,
         text=True,
         capture_output=True,
@@ -418,7 +418,7 @@ def render_handout_pdf(
         )
 
     proc = subprocess.run(
-        typst_compile_command(typst_path, typ_path.name, pdf_path.name),
+        typst_compile_command(typst_path, file_dir, typ_path.name, pdf_path.name),
         cwd=file_dir,
         text=True,
         capture_output=True,

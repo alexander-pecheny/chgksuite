@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Tests for handouter layout detection algorithm."""
 
+import ntpath
 import os
 import random
 import subprocess
@@ -554,10 +555,14 @@ def test_handout_generator_uses_optimized_image_path(generator, tmp_path):
             os.remove(path)
 
 
-def test_handout_generator_normalizes_windows_temp_image_path(generator, monkeypatch):
+def test_handout_generator_drops_windows_drive_from_image_path(
+    generator, monkeypatch
+):
     windows_temp_path = (
         "C:\\Users\\USER~1\\AppData\\Local\\Temp\\2\\tmpigabk_hf.jpg"
     )
+    monkeypatch.setattr(os, "path", ntpath)
+    generator.input_dir = "C:\\Users\\me\\razd"
 
     def fake_optimize_raster_image_for_tex(path, quality=80):
         return windows_temp_path
@@ -570,7 +575,7 @@ def test_handout_generator_normalizes_windows_temp_image_path(generator, monkeyp
     typst = generator.generate_regular_block({"image": "handout.png", "columns": 1})
 
     assert (
-        'image("C:/Users/USER~1/AppData/Local/Temp/2/tmpigabk_hf.jpg", width: 100.0%)'
+        'image("/Users/USER~1/AppData/Local/Temp/2/tmpigabk_hf.jpg", width: 100.0%)'
         in typst
     )
     assert windows_temp_path not in typst
