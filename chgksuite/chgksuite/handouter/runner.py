@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -37,8 +38,8 @@ from chgksuite.handouter.utils import (
 )
 
 
-def tex_image_path(image_path):
-    return str(image_path).replace("\\", "/")
+def drive_of(path):
+    return os.path.splitdrive(os.path.abspath(path))[0].lower()
 
 
 def rotate_image(image_path, direction):
@@ -178,6 +179,19 @@ class HandoutGenerator:
             return optimized_path
         return image_path
 
+    def typst_image_path(self, image_path):
+        # typst reads "/x" from --root (the input's drive) and rejects "C:/x"
+        path = os.path.abspath(self.resolve_image_path(image_path))
+        if drive_of(path) != drive_of(self.input_dir):
+            fd, copy = tempfile.mkstemp(
+                suffix=os.path.splitext(path)[1], dir=self.input_dir
+            )
+            os.close(fd)
+            shutil.copyfile(path, copy)
+            self._temp_files.append(copy)
+            path = copy
+        return os.path.splitdrive(path)[1].replace("\\", "/")
+
     def get_cut_direction(
         self, columns, num_rows, handouts_per_team, grouping="horizontal"
     ):
@@ -244,9 +258,9 @@ class HandoutGenerator:
             image_path = self.prepare_image(image_path)
             img_qwidth = block.get("resize_image") or 1.0
             imgwidth = IMGWIDTH.replace("<QWIDTH>", f"{img_qwidth * 100}%")
-            img_expr = IMG.replace("<IMGPATH>", tex_image_path(image_path)).replace(
-                "<IMGWIDTH>", imgwidth
-            )
+            img_expr = IMG.replace(
+                "<IMGPATH>", self.typst_image_path(image_path)
+            ).replace("<IMGWIDTH>", imgwidth)
 
         text_expr = wrap_text(block["text"]) if block.get("text") else None
 
@@ -345,20 +359,20 @@ def get_num_teams(filepath):
     return None
 
 
-def typst_root():
-    """Root passed to ``typst compile`` so absolute image paths (including
-    optimized temp files outside the project dir) remain readable."""
-    return os.path.abspath(os.sep)
+def typst_root(file_dir):
+    """Root passed to typst: the whole drive of the input file, so absolute
+    image paths (including optimized temp files) remain readable."""
+    return os.path.splitdrive(os.path.abspath(file_dir))[0] + os.sep
 
 
-def typst_compile_command(typst_path, typ_basename, pdf_basename):
+def typst_compile_command(typst_path, file_dir, typ_basename, pdf_basename):
     """Build the ``typst compile`` argv, pointing the font search at the
     bundled fonts (Noto Sans) while still allowing system fonts."""
     return [
         typst_path,
         "compile",
         "--root",
-        typst_root(),
+        typst_root(file_dir),
         "--font-path",
         get_bundled_fonts_dir(),
         typ_basename,
@@ -366,7 +380,7 @@ def typst_compile_command(typst_path, typ_basename, pdf_basename):
     ]
 
 
-def typst_query_command(typst_path, typ_basename, label):
+def typst_query_command(typst_path, file_dir, typ_basename, label):
     """Build the ``typst query`` argv used to measure a handout: typst paginates
     the document itself and we read back a single ``<label>`` metadata element
     (its ``value`` field as JSON) instead of rendering and parsing a PDF."""
@@ -374,7 +388,7 @@ def typst_query_command(typst_path, typ_basename, label):
         typst_path,
         "query",
         "--root",
-        typst_root(),
+        typst_root(file_dir),
         "--font-path",
         get_bundled_fonts_dir(),
         typ_basename,
@@ -415,7 +429,10 @@ def process_file(args, file_dir, bn):
     output_file = replace_ext(typ_path, "pdf")
     proc = subprocess.run(
         typst_compile_command(
-            typst_path, os.path.basename(typ_path), os.path.basename(output_file)
+            typst_path,
+            file_dir,
+            os.path.basename(typ_path),
+            os.path.basename(output_file),
         ),
         check=False,
         cwd=file_dir,
