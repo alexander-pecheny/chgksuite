@@ -571,7 +571,15 @@ def test_troika_multifora_bare_numbered_questions_and_reserve_pool():
     questions = [element[1] for element in parsed if element[0] == "Question"]
     assert len(questions) == 9
     assert [q["number"] for q in questions] == [
-        "1", "2", "3", "1", "2", "3", "1", "2", "3",
+        "1",
+        "2",
+        "3",
+        "1",
+        "2",
+        "3",
+        "1",
+        "2",
+        "3",
     ]
 
     # Bare "N.M." markers are consumed, not left in the question text.
@@ -679,9 +687,7 @@ def test_docx_to_text_python_docx_preserves_needed_docx_attributes(
     formatted.add_run("подчеркнутый").underline = True
 
     linked = doc.add_paragraph("Ссылка: ")
-    add_hyperlink_to_docx(
-        doc, linked, "пример", "https://example.com/path_with_under"
-    )
+    add_hyperlink_to_docx(doc, linked, "пример", "https://example.com/path_with_under")
     linked_url = doc.add_paragraph("Прямая ссылка: ")
     add_hyperlink_to_docx(
         doc,
@@ -776,17 +782,13 @@ def test_image_inside_the_question_stays_where_it_is(tmp_path):
 
 
 def test_question_of_nothing_but_a_picture_keeps_it(tmp_path):
-    question = _parse_one_question(
-        tmp_path, "Вопрос 1.\n(img pic1.png)\nОтвет: круг\n"
-    )
+    question = _parse_one_question(tmp_path, "Вопрос 1.\n(img pic1.png)\nОтвет: круг\n")
 
     assert "handout" not in question
     assert question["question"] == "(img pic1.png)"
 
 
-def test_docx_to_text_pypandoc_keeps_url_underscores_unescaped(
-    monkeypatch, tmp_path
-):
+def test_docx_to_text_pypandoc_keeps_url_underscores_unescaped(monkeypatch, tmp_path):
     def fake_convert_file(*args, **kwargs):
         return "Text snake_case https://example.com/path_with_under"
 
@@ -800,9 +802,7 @@ def test_docx_to_text_pypandoc_keeps_url_underscores_unescaped(
     assert text == r"Text snake\_case https://example.com/path_with_under"
 
 
-def test_docx_to_text_html_keeps_href_url_underscores_unescaped(
-    monkeypatch, tmp_path
-):
+def test_docx_to_text_html_keeps_href_url_underscores_unescaped(monkeypatch, tmp_path):
     def fake_convert_file(*args, **kwargs):
         return (
             '<p>Text snake_case <a href="https://example.com/path_with_under">'
@@ -1182,9 +1182,13 @@ def test_docx_export_omits_hidden_comment(tmp_path):
 
     output_path = tmp_path / "hidden.docx"
     args = DefaultArgs(
-        docx_template=os.path.join(parentdir, "chgksuite", "resources", "template.docx"),
+        docx_template=os.path.join(
+            parentdir, "chgksuite", "resources", "template.docx"
+        ),
         game="chgk",
-        regexes_file=os.path.join(parentdir, "chgksuite", "resources", "regexes_ru.json"),
+        regexes_file=os.path.join(
+            parentdir, "chgksuite", "resources", "regexes_ru.json"
+        ),
         optimize_size="off",
         spoilers="off",
         screen_mode="off",
@@ -1363,10 +1367,14 @@ def test_optimize_raster_image_data_preserves_transparent_png():
 def test_docx_exporter_uses_font_argument(tmp_path):
     output_path = tmp_path / "exported.docx"
     args = DefaultArgs(
-        docx_template=os.path.join(parentdir, "chgksuite", "resources", "template.docx"),
+        docx_template=os.path.join(
+            parentdir, "chgksuite", "resources", "template.docx"
+        ),
         font="Test Embed",
         game="chgk",
-        regexes_file=os.path.join(parentdir, "chgksuite", "resources", "regexes_ru.json"),
+        regexes_file=os.path.join(
+            parentdir, "chgksuite", "resources", "regexes_ru.json"
+        ),
         optimize_size="off",
         spoilers="off",
         screen_mode="off",
@@ -1391,9 +1399,13 @@ def test_docx_screen_mode_preserves_zachet_brackets(tmp_path):
 
     output_path = tmp_path / "screen.docx"
     args = DefaultArgs(
-        docx_template=os.path.join(parentdir, "chgksuite", "resources", "template.docx"),
+        docx_template=os.path.join(
+            parentdir, "chgksuite", "resources", "template.docx"
+        ),
         game="chgk",
-        regexes_file=os.path.join(parentdir, "chgksuite", "resources", "regexes_ru.json"),
+        regexes_file=os.path.join(
+            parentdir, "chgksuite", "resources", "regexes_ru.json"
+        ),
         optimize_size="off",
         spoilers="off",
         screen_mode="replace_all",
@@ -1433,9 +1445,13 @@ def test_docx_block_images_clear_question_space_before(tmp_path):
     Image.new("RGB", (800, 200), "white").save(image_path)
     output_path = tmp_path / "images.docx"
     args = DefaultArgs(
-        docx_template=os.path.join(parentdir, "chgksuite", "resources", "template.docx"),
+        docx_template=os.path.join(
+            parentdir, "chgksuite", "resources", "template.docx"
+        ),
         game="chgk",
-        regexes_file=os.path.join(parentdir, "chgksuite", "resources", "regexes_ru.json"),
+        regexes_file=os.path.join(
+            parentdir, "chgksuite", "resources", "regexes_ru.json"
+        ),
         optimize_size="off",
         spoilers="off",
         screen_mode="off",
@@ -1481,7 +1497,9 @@ def test_docx_block_images_clear_question_space_before(tmp_path):
         if paragraph_text(paragraph).startswith("Вопрос 1. Plain question")
     )
     image_question = next(
-        paragraph for paragraph in paragraphs if paragraph.find(f".//{w}drawing") is not None
+        paragraph
+        for paragraph in paragraphs
+        if paragraph.find(f".//{w}drawing") is not None
     )
     image_answer = next(
         paragraph
@@ -1581,7 +1599,9 @@ def test_telegram_rich_question_formatting():
     assert image is None
     html = payload["html"]
     assert payload["media_files"] == []
-    assert html.startswith("<p><b>Вопрос 5:</b> Текст вопроса &amp; вторая строка.<br/>")
+    assert html.startswith(
+        "<p><b>Вопрос 5:</b> Текст вопроса &amp; вторая строка.<br/>"
+    )
     assert "<details><summary>Ответ</summary>" in html
     assert "<footer>" in html
     # source/author are in the footer, inside the details block
@@ -1689,7 +1709,9 @@ HANDOUT_REGEXES = {"handout_short": "Р[Аа][Зз][Дд][Аа][Тт]"}
 def test_split_handouts_cuts_at_a_handout_on_its_own_lines():
     from chgksuite.composer.composer_common import split_handouts
 
-    text = "[Ведущему: медленно]\n[Раздаточный материал:\nстрока\nещё строка\n]\nЧто это?"
+    text = (
+        "[Ведущему: медленно]\n[Раздаточный материал:\nстрока\nещё строка\n]\nЧто это?"
+    )
     assert split_handouts(text, HANDOUT_REGEXES) == [
         ("text", "[Ведущему: медленно]"),
         ("handout", "Раздаточный материал", "строка\nещё строка"),
@@ -1794,4 +1816,6 @@ def test_a_one_line_handout_box_is_as_wide_as_it_or_its_caption():
     )
     assert handout_box_twips(caption, "строка один\nстрока два") is None
     assert handout_box_twips(caption, "слово " * 40) is None, "too long for one line"
-    assert handout_line_width_pt("AV") == handout_line_width_pt("A") + handout_line_width_pt("V")
+    assert handout_line_width_pt("AV") == handout_line_width_pt(
+        "A"
+    ) + handout_line_width_pt("V")

@@ -191,15 +191,21 @@ class LjExporter(BaseExporter):
 
         while i < len(structure) and structure[i][0] != "Question":
             if structure[i][0] == "heading":
-                final_structure[0]["content"] += f"<center>{yapper(structure[i][1])}</center>"
+                final_structure[0]["content"] += (
+                    f"<center>{yapper(structure[i][1])}</center>"
+                )
                 heading = yapper(structure[i][1])
             if structure[i][0] == "ljheading":
                 # final_structure[0]['header'] = structure[i][1]
                 ljheading = yapper(structure[i][1])
             if structure[i][0] == "date":
-                final_structure[0]["content"] += f"\n<center>{yapper(structure[i][1])}</center>"
+                final_structure[0]["content"] += (
+                    f"\n<center>{yapper(structure[i][1])}</center>"
+                )
             if structure[i][0] == "editor":
-                final_structure[0]["content"] += f"\n<center>{yapper(structure[i][1])}</center>"
+                final_structure[0]["content"] += (
+                    f"\n<center>{yapper(structure[i][1])}</center>"
+                )
             if structure[i][0] == "meta":
                 final_structure[0]["content"] += f"\n{yapper(structure[i][1])}"
             i += 1
@@ -296,10 +302,11 @@ class LjExporter(BaseExporter):
                     r"\s", zz[zz.index("`") + 2]
                 ):
                     zz = zz[: zz.index("`") + 2] + "" + zz[zz.index("`") + 2 :]
-                if zz.index("`") + 1 < len(zz) and re_lowercase.search(
-                    zz[zz.index("`") + 1]
-                ) or zz.index("`") + 1 < len(zz) and re_uppercase.search(
-                    zz[zz.index("`") + 1]
+                if (
+                    zz.index("`") + 1 < len(zz)
+                    and re_lowercase.search(zz[zz.index("`") + 1])
+                    or zz.index("`") + 1 < len(zz)
+                    and re_uppercase.search(zz[zz.index("`") + 1])
                 ):
                     zz = (
                         zz[: zz.index("`") + 1]
@@ -363,9 +370,7 @@ class LjExporter(BaseExporter):
             inner = []
             for j in range(len(urls)):
                 inner.append(
-                    titles[j]
-                    if j == i
-                    else f'<a href="{urls[j]}">{titles[j]}</a>'
+                    titles[j] if j == i else f'<a href="{urls[j]}">{titles[j]}</a>'
                 )
             result.append(" | ".join(inner))
         return result

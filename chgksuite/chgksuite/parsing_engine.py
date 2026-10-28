@@ -39,9 +39,7 @@ _IMAGE_EXTENSIONS = {
 
 def _generate_imgname(target_dir, ext, prefix=""):
     imgcounter = 1
-    while os.path.isfile(
-        os.path.join(target_dir, f"{prefix}{imgcounter:03}.{ext}")
-    ):
+    while os.path.isfile(os.path.join(target_dir, f"{prefix}{imgcounter:03}.{ext}")):
         imgcounter += 1
     return f"{prefix}{imgcounter:03}.{ext}"
 
@@ -175,9 +173,7 @@ class _Numbering:
                     "fmt": _attr(fmt, "w:val", "decimal")
                     if fmt is not None
                     else "decimal",
-                    "text": _attr(text, "w:val", "%1.")
-                    if text is not None
-                    else "%1.",
+                    "text": _attr(text, "w:val", "%1.") if text is not None else "%1.",
                     "start": int(_attr(start, "w:val", "1"))
                     if start is not None
                     else 1,
@@ -403,8 +399,7 @@ class _DocxTextConverter:
         if (
             href.startswith("http")
             and plain.strip() not in href
-            and urllib.parse.unquote(plain.strip())
-            not in urllib.parse.unquote(href)
+            and urllib.parse.unquote(plain.strip()) not in urllib.parse.unquote(href)
         ):
             return f"{rendered} ({href})"
         return rendered
@@ -585,9 +580,7 @@ def _markdown_table(rows):
     for row in rows:
         while len(row) < max_cols:
             row.append("")
-    widths = [
-        max(max(len(row[col]) for row in rows) + 2, 3) for col in range(max_cols)
-    ]
+    widths = [max(max(len(row[col]) for row in rows) + 2, 3) for col in range(max_cols)]
     lines = [
         "|"
         + "|".join(_center_cell(cell, widths[i]) for i, cell in enumerate(rows[0]))

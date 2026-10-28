@@ -150,9 +150,7 @@ class PptxExporter(BaseExporter):
         )
 
     def _get_font_size_for_text(self, role, text, key, fallback):
-        return self._get_grid_font_size(
-            role, text, self._get_font_size(key, fallback)
-        )
+        return self._get_grid_font_size(role, text, self._get_font_size(key, fallback))
 
     def _apply_font_size_to_text_frame(self, text_frame, size, line_spacing_key=None):
         size = PptxPt(size)
@@ -334,8 +332,7 @@ class PptxExporter(BaseExporter):
 
         for key in ("intro", "between_tours", "final"):
             self._service_slide_templates[key] = [
-                self.prs.slides[index]
-                for index in self._slide_indices_from_config(key)
+                self.prs.slides[index] for index in self._slide_indices_from_config(key)
             ]
         self._service_slide_templates["numbered_tours_stubs"] = [
             self.prs.slides[index] for index in self._numbered_tour_stub_indices()
@@ -408,9 +405,7 @@ class PptxExporter(BaseExporter):
         paragraph.font.name = self.c["font"]["name"]
         font_size = PptxPt(size or self._get_font_size("default_size", 32))
         paragraph.font.size = font_size
-        self._set_line_spacing(
-            paragraph, font_size, line_spacing_key=line_spacing_key
-        )
+        self._set_line_spacing(paragraph, font_size, line_spacing_key=line_spacing_key)
         self._set_paragraph_alignment(paragraph, align)
         return paragraph
 
@@ -540,9 +535,7 @@ class PptxExporter(BaseExporter):
     def _text_width_px(self, text, size, bold=False, italic=False):
         if not text:
             return 0
-        font_path = self._get_measurement_font_path_for_style(
-            bold=bold, italic=italic
-        )
+        font_path = self._get_measurement_font_path_for_style(bold=bold, italic=italic)
         if not font_path:
             return None
         return self._measure_text_width_px(font_path, text, size)
@@ -560,7 +553,9 @@ class PptxExporter(BaseExporter):
         width = self._token_width_px(paragraph, [(run, text)])
         if width is not None:
             return width
-        return len(text) * self._pt_to_px(self._effective_run_size(run, paragraph)) * 0.35
+        return (
+            len(text) * self._pt_to_px(self._effective_run_size(run, paragraph)) * 0.35
+        )
 
     def _run_can_break_like_url(self, run, text):
         hyperlink = getattr(run, "hyperlink", None)
@@ -723,7 +718,8 @@ class PptxExporter(BaseExporter):
             return
         min_size = min_size or self.c.get("text_size_grid", {}).get("smallest", 14)
         max_delta = max(
-            0, math.ceil(max(original_size for _font, original_size in items) - min_size)
+            0,
+            math.ceil(max(original_size for _font, original_size in items) - min_size),
         )
         for delta in range(max_delta + 1):
             self._set_textbox_font_delta(items, delta, min_size)
@@ -834,9 +830,7 @@ class PptxExporter(BaseExporter):
 
     def _place_inline_images(self, textbox, slide):
         entries = [
-            entry
-            for entry in self._pending_inline_images
-            if entry["slide"] is slide
+            entry for entry in self._pending_inline_images if entry["slide"] is slide
         ]
         if not entries:
             return
@@ -994,9 +988,7 @@ class PptxExporter(BaseExporter):
                     slide,
                     blank_lines_between_items=blank_lines_between_items,
                 )
-                blank_line = self.c.get("list", {}).get(
-                    "blank_line_before_items", True
-                )
+                blank_line = self.c.get("list", {}).get("blank_line_before_items", True)
                 for licount, li in enumerate(el[1], start=1):
                     if blank_line and (licount == 1 or blank_lines_between_items):
                         prefix = "\n\n"
@@ -1012,9 +1004,7 @@ class PptxExporter(BaseExporter):
                         blank_lines_between_items=blank_lines_between_items,
                     )
             else:
-                blank_line = self.c.get("list", {}).get(
-                    "blank_line_before_items", True
-                )
+                blank_line = self.c.get("list", {}).get("blank_line_before_items", True)
                 for licount, li in enumerate(el, start=1):
                     if blank_line and blank_lines_between_items and licount > 1:
                         prefix = "\n\n"
@@ -1140,12 +1130,8 @@ class PptxExporter(BaseExporter):
             )
             title.left = self._get_title_textbox_dimension("left", default_left)
             title.width = self._get_title_textbox_dimension("width", default_width)
-            title.top = self._get_title_textbox_dimension(
-                "top", PptxInches(0.8)
-            )
-            title.height = self._get_title_textbox_dimension(
-                "height", PptxInches(6.1)
-            )
+            title.top = self._get_title_textbox_dimension("top", PptxInches(0.8))
+            title.height = self._get_title_textbox_dimension("height", PptxInches(6.1))
             tf.margin_top = 0
             tf.margin_bottom = 0
             tf.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
@@ -1286,9 +1272,7 @@ class PptxExporter(BaseExporter):
         if number_font_size is not None:
             number_font_size = PptxPt(number_font_size)
             qtf_r.font.size = number_font_size
-            self._set_line_spacing(
-                qtf_p, number_font_size, line_spacing_key="number"
-            )
+            self._set_line_spacing(qtf_p, number_font_size, line_spacing_key="number")
 
     def _get_handout_from_4s(self, text):
         if isinstance(text, list):
@@ -1500,9 +1484,7 @@ class PptxExporter(BaseExporter):
         )
         if handout:
             handout_cfg = self.c.get("handout", {})
-            handout_text = self.pptx_process_text(
-                handout, do_not_remove_accents=True
-            )
+            handout_text = self.pptx_process_text(handout, do_not_remove_accents=True)
             handout_p = self.init_paragraph(
                 tf,
                 size=self._get_handout_font_size_for_text(

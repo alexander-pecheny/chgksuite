@@ -132,7 +132,9 @@ def check_date(match, parse_string):
             .date()
         )
         today = datetime.datetime.now().astimezone().date()
-        return bool(parsed.year >= 1980 and (parsed < today or (parsed - today).days <= 365))
+        return bool(
+            parsed.year >= 1980 and (parsed < today or (parsed - today).days <= 365)
+        )
     except (TypeError, ValueError):
         return False
 
@@ -703,7 +705,11 @@ class ChgkParser:
 
         if debug:
             with open("debug_1.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
+                f.write(
+                    json.dumps(
+                        self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT
+                    )
+                )
 
         self.process_single_number_lines()
 
@@ -721,7 +727,11 @@ class ChgkParser:
 
         if debug:
             with open("debug_1a.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
+                f.write(
+                    json.dumps(
+                        self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT
+                    )
+                )
 
         # 2.
 
@@ -731,7 +741,11 @@ class ChgkParser:
 
         if debug:
             with open("debug_2.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
+                f.write(
+                    json.dumps(
+                        self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT
+                    )
+                )
 
         # 3.
 
@@ -795,7 +809,11 @@ class ChgkParser:
 
         if debug:
             with open("debug_3.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
+                f.write(
+                    json.dumps(
+                        self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT
+                    )
+                )
 
         # 4.
 
@@ -810,7 +828,9 @@ class ChgkParser:
             with open("debug_3a.json", "w", encoding="utf-8") as f:
                 f.write(
                     json.dumps(
-                        list(enumerate(self.structure)), ensure_ascii=False, indent=DEBUG_JSON_INDENT
+                        list(enumerate(self.structure)),
+                        ensure_ascii=False,
+                        indent=DEBUG_JSON_INDENT,
                     )
                 )
 
@@ -866,7 +886,11 @@ class ChgkParser:
 
         if debug:
             with open("debug_4.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
+                f.write(
+                    json.dumps(
+                        self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT
+                    )
+                )
 
         # 5.
 
@@ -884,7 +908,10 @@ class ChgkParser:
 
             # detect inner lists
             mo = {
-                m for m in re.finditer(r"(\s+|^)(\d+)[\.\)]\s*(?!\d)", element[1], re.UNICODE)
+                m
+                for m in re.finditer(
+                    r"(\s+|^)(\d+)[\.\)]\s*(?!\d)", element[1], re.UNICODE
+                )
             }
             if len(mo) > 1:
                 sorted_up = sorted(mo, key=lambda m: int(m.group(2)))
@@ -951,7 +978,11 @@ class ChgkParser:
 
         if debug:
             with open("debug_5.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
+                f.write(
+                    json.dumps(
+                        self.structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT
+                    )
+                )
 
         # 6.
 
@@ -1004,7 +1035,11 @@ class ChgkParser:
 
         if debug:
             with open("debug_6.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(final_structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
+                f.write(
+                    json.dumps(
+                        final_structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT
+                    )
+                )
 
         # 7.
         try:
@@ -1018,6 +1053,7 @@ class ChgkParser:
                 headingdefined = True
             if not headingdefined and final_structure[0][0] == "meta":
                 final_structure[0][0] = "heading"
+
             def make_date(i):
                 # a heading stays a heading; the date it contains becomes its
                 # own element (pre-existing behaviour, previously via the
@@ -1058,7 +1094,11 @@ class ChgkParser:
 
         if debug:
             with open("debug_final.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(final_structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT))
+                f.write(
+                    json.dumps(
+                        final_structure, ensure_ascii=False, indent=DEBUG_JSON_INDENT
+                    )
+                )
         return final_structure
 
 
@@ -1106,9 +1146,7 @@ def chgk_parse_txt(txtfile, encoding=None, defaultauthor="", args=None, logger=N
 
 def generate_imgname(target_dir, ext, prefix=""):
     imgcounter = 1
-    while os.path.isfile(
-        os.path.join(target_dir, f"{prefix}{imgcounter:03}.{ext}")
-    ):
+    while os.path.isfile(os.path.join(target_dir, f"{prefix}{imgcounter:03}.{ext}")):
         imgcounter += 1
     return f"{prefix}{imgcounter:03}.{ext}"
 
@@ -1176,9 +1214,7 @@ _TROIKA_RE_REDUNDANT_THEME_PREFIX = re.compile(r"(?i)^ТЕМА[\.:]\s*")
 _TROIKA_RE_THEME_NUMBER_BEFORE_REDUNDANT_PREFIX = re.compile(
     r"(?i)^ТЕМА\s+\d+(?:\s*\([^)]+\))?[\.:]\s*(?=ТЕМА[\.:])"
 )
-_TROIKA_RE_THEME = re.compile(
-    r"(?i)^ТЕМА(?:\s+\d+(?:\s*\([^)]+\))?)?[\.:]\s*.+"
-)
+_TROIKA_RE_THEME = re.compile(r"(?i)^ТЕМА(?:\s+\d+(?:\s*\([^)]+\))?)?[\.:]\s*.+")
 _TROIKA_RE_SECTION = re.compile(r"(?i)^ГРУППОВОЙ\s+ЭТАП\s+\d+\s*$")
 # "Темы за N балл(а/ов)" — point-value section header separating theme blocks.
 _TROIKA_RE_POINTS_SECTION = re.compile(r"(?i)^ТЕМЫ\s+ЗА\s+\d+\s+балл\S*\s*$")
@@ -1206,9 +1242,7 @@ _TROIKA_RE_NUMBERED_THEME = re.compile(r"^\d+\.\s+\S")
 _TROIKA_RE_RESERVE_SECTION = re.compile(r"(?i)^ЗАПАС\s*$")
 _TROIKA_RE_RESERVE_THEME = re.compile(r"(?i)^ЗАПАС\s*-\s*\d+\s*\.\s*.+")
 _TROIKA_RE_SOURCE_ITEM = re.compile(r"^(\d+)[\.\)]\s+")
-_TROIKA_RE_HOST_NOTE = re.compile(
-    r"(?i)^\[?(?:Ведущему\b|Комментарий\s+ведущему\b)"
-)
+_TROIKA_RE_HOST_NOTE = re.compile(r"(?i)^\[?(?:Ведущему\b|Комментарий\s+ведущему\b)")
 
 
 def _normalize_troika_theme_text(text):
@@ -1291,11 +1325,15 @@ class SiParser:
         if ("«" in text or "»" in text) and self.args.typography_quotes == "smart":
             self.typography_quotes = "smart_disable"
         else:
-            self.typography_quotes = getattr(self.args, "typography_quotes", "on") or "on"
+            self.typography_quotes = (
+                getattr(self.args, "typography_quotes", "on") or "on"
+            )
         if "\u0301" in text and self.args.typography_accents == "smart":
             self.typography_accents = "smart_disable"
         else:
-            self.typography_accents = getattr(self.args, "typography_accents", "on") or "on"
+            self.typography_accents = (
+                getattr(self.args, "typography_accents", "on") or "on"
+            )
 
     def _apply_typo(self, s):
         return typotools.recursive_typography(
@@ -1328,7 +1366,7 @@ class SiParser:
             self.last_theme_heading = None
             return
         num_str = m_qnum.group(1)
-        q_text = self.last_theme_heading[m_qnum.end():].strip()
+        q_text = self.last_theme_heading[m_qnum.end() :].strip()
         self.structure[-1:] = [
             ["number", num_str],
             ["question", self._apply_typo(q_text)],
@@ -1395,7 +1433,9 @@ class SiParser:
             self.structure.append(["battle", self._apply_typo(stripped)])
             return
 
-        if self.re_battle_numbered.search(stripped) and not self.re_theme.search(stripped):
+        if self.re_battle_numbered.search(stripped) and not self.re_theme.search(
+            stripped
+        ):
             self._flush()
             self.structure.append(["battle", self._apply_typo(stripped)])
             return
@@ -1486,9 +1526,8 @@ class SiParser:
         return True
 
     def _dispatch_author_gratitude_meta(self, stripped):
-        if (
-            self.current_field != "author"
-            or not self._RE_AUTHOR_GRATITUDE_META.search(stripped)
+        if self.current_field != "author" or not self._RE_AUTHOR_GRATITUDE_META.search(
+            stripped
         ):
             return False
         self._flush()
@@ -1503,7 +1542,7 @@ class SiParser:
         if num in _SI_QUESTION_NUMBERS:
             self._flush()
             self.structure.append(["number", str(num)])
-            question_text = stripped[m.end():].strip()
+            question_text = stripped[m.end() :].strip()
             if question_text:
                 self.current_field = "question"
                 self.current_content = question_text
@@ -1673,7 +1712,7 @@ class TroikaParser(SiParser):
                 self._flush()
                 self.structure.append(["number", m_mf.group(1)])
                 self.current_field = "question"
-                self.current_content = stripped[m_mf.end():].strip()
+                self.current_content = stripped[m_mf.end() :].strip()
                 self.after_theme = False
                 self.last_line_blank = False
                 return
@@ -1779,9 +1818,7 @@ class TroikaParser(SiParser):
             return True
         if current_item:
             prev_items = list(
-                re.finditer(
-                    r"(?m)^\s*(\d+)[\.\)]\s+(.+)$", self.current_content
-                )
+                re.finditer(r"(?m)^\s*(\d+)[\.\)]\s+(.+)$", self.current_content)
             )
             if (
                 prev_items
@@ -1802,7 +1839,7 @@ class TroikaParser(SiParser):
             return False
         self._flush()
         self.structure.append(["number", str(num)])
-        question_text = stripped[m.end():].strip()
+        question_text = stripped[m.end() :].strip()
         if question_text:
             self.current_field = "question"
             self.current_content = question_text
@@ -1909,10 +1946,7 @@ def docx_to_text(docxfile, args=None, logger=None, inject_heading_markers=False)
                 os.path.join(target_dir, "debugdebug.pydocx"), "w", encoding="utf-8"
             ) as dbg:
                 dbg.write(html)
-        input_docx = (
-            html.replace("</strong><strong>", "")
-            .replace("</em><em>", "")
-        )
+        input_docx = html.replace("</strong><strong>", "").replace("</em><em>", "")
         bsoup = BeautifulSoup(input_docx, "html.parser")
 
         if args.debug:
@@ -2159,9 +2193,7 @@ def parse_wrapper(path, args, logger=None):
             if game == "si":
                 final_structure = si_parse_docx(abspath, args=args, logger=logger)
             else:
-                final_structure = troika_parse_docx(
-                    abspath, args=args, logger=logger
-                )
+                final_structure = troika_parse_docx(abspath, args=args, logger=logger)
         elif ext_in == ".txt":
             from chgksuite.common import read_text_file
 
@@ -2222,9 +2254,7 @@ def gui_parse(args):
                         args,
                         logger=logger,
                     )
-                    logger.info(
-                        f"{filename} -> {os.path.basename(outfilename)}"
-                    )
+                    logger.info(f"{filename} -> {os.path.basename(outfilename)}")
 
         else:
             print("No directory specified.")

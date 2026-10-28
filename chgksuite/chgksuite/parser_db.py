@@ -403,9 +403,7 @@ def replace_handouts(match_handout, target_dir):
         try:
             urlretrieve(handout_url, handout_path)
         except Exception:
-            logger.exception(
-                "Can't get file from %s to %s", handout_url, handout_path
-            )
+            logger.exception("Can't get file from %s to %s", handout_url, handout_path)
     return f"({handout_type} {handout_name})"
 
 

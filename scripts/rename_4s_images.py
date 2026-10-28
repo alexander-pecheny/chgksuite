@@ -120,9 +120,7 @@ def _iter_img_tags(line: str, base_offset: int, line_number: int):
             continue
         end = find_matching_closing_paren(line, start)
         if end is None:
-            raise Rename4sImagesError(
-                f"Unclosed (img ...) tag on line {line_number}."
-            )
+            raise Rename4sImagesError(f"Unclosed (img ...) tag on line {line_number}.")
         inner = line[after_marker:end].strip()
         image_ref = _parse_img_ref(inner, line_number)
         yield ImageOccurrence(
@@ -164,7 +162,9 @@ def _parse_int(text: str | None, context: str) -> int | None:
     try:
         return int(text.strip())
     except ValueError as exc:
-        raise Rename4sImagesError(f"Cannot use non-numeric {context}: {text!r}.") from exc
+        raise Rename4sImagesError(
+            f"Cannot use non-numeric {context}: {text!r}."
+        ) from exc
 
 
 def _scan_4s(text: str) -> tuple[list[QuestionBlock], list[ImageOccurrence]]:
@@ -311,7 +311,10 @@ def _build_plan(
         extension = _extension_for(source_path)
         existing_item = source_to_item.get(source_path)
         if existing_item is None:
-            source_to_context[source_path] = (occurrence.question_number, occurrence.side)
+            source_to_context[source_path] = (
+                occurrence.question_number,
+                occurrence.side,
+            )
             key = (occurrence.question_number, occurrence.side, extension)
             sequence_by_key[key] = sequence_by_key.get(key, 0) + 1
             stem = _target_stem(
@@ -320,7 +323,8 @@ def _build_plan(
                 sequence_by_key[key],
             )
             target_name = (
-                _apply_width_to_stem(stem, occurrence.question_number, width) + extension
+                _apply_width_to_stem(stem, occurrence.question_number, width)
+                + extension
             )
             target_path = source_path.with_name(target_name).resolve()
             new_ref = _new_ref_for_path(target_path, file_dir)
@@ -388,7 +392,9 @@ def _render_text(text: str, occurrences: list[ImageOccurrence]) -> str:
 
 def _rename_files(items: list[RenamePlanItem]) -> None:
     renames = [
-        item for item in items if item.source_path.resolve() != item.target_path.resolve()
+        item
+        for item in items
+        if item.source_path.resolve() != item.target_path.resolve()
     ]
     if not renames:
         return

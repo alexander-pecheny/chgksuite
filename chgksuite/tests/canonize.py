@@ -42,7 +42,10 @@ def remove_added_images(before_images):
 def workaround_chgk_parse(filename, game=None, **kwargs):
     args = DefaultArgs(**kwargs)
     if game in ("si", "troika"):
-        if not getattr(args, "numbers_handling", None) or args.numbers_handling == "default":
+        if (
+            not getattr(args, "numbers_handling", None)
+            or args.numbers_handling == "default"
+        ):
             args.numbers_handling = "all"
         if filename.endswith(".docx"):
             if game == "si":

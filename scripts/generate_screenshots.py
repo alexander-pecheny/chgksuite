@@ -29,9 +29,7 @@ import time
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
-IMAGES_DIR = os.path.join(
-    PROJECT_ROOT, "chgksuite", "docs", "docs", "images"
-)
+IMAGES_DIR = os.path.join(PROJECT_ROOT, "chgksuite", "docs", "docs", "images")
 WINDOW_TITLE_PREFIX = "chgksuite v"
 
 # Delay (seconds) after each UI action to let the window resize / repaint.
@@ -41,6 +39,7 @@ UI_SETTLE = 0.6
 # ---------------------------------------------------------------------------
 # Low-level helpers
 # ---------------------------------------------------------------------------
+
 
 def osascript(script: str) -> str:
     """Run an AppleScript snippet.  Returns stdout; raises on failure."""
@@ -56,7 +55,9 @@ def jxa(script: str) -> str:
     """Run a JXA (JavaScript for Automation) snippet. Returns stdout."""
     r = subprocess.run(
         ["osascript", "-l", "JavaScript", "-e", script],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     if r.returncode != 0:
         raise RuntimeError(f"JXA failed: {r.stderr.strip()}")
@@ -92,6 +93,7 @@ found;
     if not result or result == "null":
         return None, None
     import json
+
     data = json.loads(result)
     return data["proc"], int(data["wid"])
 
@@ -116,6 +118,7 @@ def wait_for_window(timeout: float = 20.0):
 # ---------------------------------------------------------------------------
 # Accessibility helpers  (AppleScript talks to System Events)
 # ---------------------------------------------------------------------------
+
 
 def _ax_click(proc: str, role: str, title: str):
     """Click the first accessibility element with *role* and *title*
@@ -143,9 +146,7 @@ return "not_found"
 '''
     result = osascript(script)
     if result == "not_found":
-        raise RuntimeError(
-            f'Could not find {role} titled "{title}" in the window'
-        )
+        raise RuntimeError(f'Could not find {role} titled "{title}" in the window')
 
 
 def click_radio(proc: str, title: str):
@@ -177,9 +178,7 @@ return "not_found"
 '''
     result = osascript(script)
     if result == "not_found":
-        raise RuntimeError(
-            f'Could not find checkbox titled "{title}" in the window'
-        )
+        raise RuntimeError(f'Could not find checkbox titled "{title}" in the window')
     time.sleep(UI_SETTLE)
 
 
@@ -219,9 +218,7 @@ return "not_found"
 '''
     result = osascript(script)
     if result == "not_found":
-        raise RuntimeError(
-            f"Could not find combobox #{index} in the window"
-        )
+        raise RuntimeError(f"Could not find combobox #{index} in the window")
     time.sleep(UI_SETTLE)
 
 
@@ -285,6 +282,7 @@ end tell
 # Screenshot capture
 # ---------------------------------------------------------------------------
 
+
 def capture(wid: int, filename: str):
     """Capture the window (with shadow) and save to IMAGES_DIR."""
     path = os.path.join(IMAGES_DIR, filename)
@@ -295,6 +293,7 @@ def capture(wid: int, filename: str):
 # ---------------------------------------------------------------------------
 # Discovery / debug mode
 # ---------------------------------------------------------------------------
+
 
 def discover(proc: str):
     """Print a summary of all radio buttons and checkboxes in the window."""
@@ -339,123 +338,158 @@ TRELLO_UPLOAD = "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0432 \
 SCREENSHOTS = [
     # --- main window (nothing selected) ---
     ("main.png", []),
-
     # --- parse ---
-    ("parse.png", [
-        ("radio", "parse"),
-    ]),
-
+    (
+        "parse.png",
+        [
+            ("radio", "parse"),
+        ],
+    ),
     # --- i14n_parse: parse + custom language + advanced settings ---
-    ("i14n_parse.png", [
-        ("radio", "parse"),
-        ("radio", "custom"),
-        ("checkbox", ADVANCED_CHECKBOX, True),
-    ]),
-
+    (
+        "i14n_parse.png",
+        [
+            ("radio", "parse"),
+            ("radio", "custom"),
+            ("checkbox", ADVANCED_CHECKBOX, True),
+        ],
+    ),
     # --- compose > docx (Word) ---
-    ("word.png", [
-        ("checkbox", ADVANCED_CHECKBOX, False),
-        ("radio", "compose"),
-        ("radio", "docx"),
-    ]),
-
+    (
+        "word.png",
+        [
+            ("checkbox", ADVANCED_CHECKBOX, False),
+            ("radio", "compose"),
+            ("radio", "docx"),
+        ],
+    ),
     # --- i14n: compose > docx + custom language + advanced settings ---
-    ("i14n.png", [
-        ("radio", "compose"),
-        ("radio", "docx"),
-        ("radio", "custom"),
-        ("checkbox", ADVANCED_CHECKBOX, True),
-    ]),
-
+    (
+        "i14n.png",
+        [
+            ("radio", "compose"),
+            ("radio", "docx"),
+            ("radio", "custom"),
+            ("checkbox", ADVANCED_CHECKBOX, True),
+        ],
+    ),
     # --- compose > base ---
-    ("base.png", [
-        ("checkbox", ADVANCED_CHECKBOX, False),
-        ("radio", "compose"),
-        ("radio", "ru"),  # reset language from custom
-        ("radio", "base"),
-    ]),
-
+    (
+        "base.png",
+        [
+            ("checkbox", ADVANCED_CHECKBOX, False),
+            ("radio", "compose"),
+            ("radio", "ru"),  # reset language from custom
+            ("radio", "base"),
+        ],
+    ),
     # --- compose > pptx ---
-    ("pptx.png", [
-        ("radio", "compose"),
-        ("radio", "pptx"),
-    ]),
-
+    (
+        "pptx.png",
+        [
+            ("radio", "compose"),
+            ("radio", "pptx"),
+        ],
+    ),
     # --- compose > pptx + advanced settings ---
-    ("pptx_additional_conf.png", [
-        ("radio", "compose"),
-        ("radio", "pptx"),
-        ("checkbox", ADVANCED_CHECKBOX, True),
-    ]),
-
+    (
+        "pptx_additional_conf.png",
+        [
+            ("radio", "compose"),
+            ("radio", "pptx"),
+            ("checkbox", ADVANCED_CHECKBOX, True),
+        ],
+    ),
     # --- compose > telegram ---
-    ("telegram.png", [
-        ("checkbox", ADVANCED_CHECKBOX, False),
-        ("radio", "compose"),
-        ("radio", "telegram"),
-        # Both comboboxes default to the first saved target. Set them in
-        # one shot so the calls don't interfere with each other.
-        ("set_telegram_comboboxes", "chgksuite_tg_test_channel",
-         "chgksuite_tg_test_channel_chat"),
-    ]),
-
+    (
+        "telegram.png",
+        [
+            ("checkbox", ADVANCED_CHECKBOX, False),
+            ("radio", "compose"),
+            ("radio", "telegram"),
+            # Both comboboxes default to the first saved target. Set them in
+            # one shot so the calls don't interfere with each other.
+            (
+                "set_telegram_comboboxes",
+                "chgksuite_tg_test_channel",
+                "chgksuite_tg_test_channel_chat",
+            ),
+        ],
+    ),
     # --- compose > lj ---
-    ("lj.png", [
-        ("radio", "compose"),
-        ("radio", "lj"),
-    ]),
-
+    (
+        "lj.png",
+        [
+            ("radio", "compose"),
+            ("radio", "lj"),
+        ],
+    ),
     # --- compose > openquiz ---
-    ("openquiz.png", [
-        ("radio", "compose"),
-        ("radio", "openquiz"),
-    ]),
-
+    (
+        "openquiz.png",
+        [
+            ("radio", "compose"),
+            ("radio", "openquiz"),
+        ],
+    ),
     # --- compose > add_stats ---
-    ("stats.png", [
-        ("radio", "compose"),
-        ("radio", "add_stats"),
-    ]),
-
+    (
+        "stats.png",
+        [
+            ("radio", "compose"),
+            ("radio", "add_stats"),
+        ],
+    ),
     # --- trello > token ---
-    ("trello_token.png", [
-        ("radio", "trello"),
-        ("radio", "token"),
-    ]),
-
+    (
+        "trello_token.png",
+        [
+            ("radio", "trello"),
+            ("radio", "token"),
+        ],
+    ),
     # --- trello > download ---
-    ("trello_download.png", [
-        ("radio", "trello"),
-        ("radio", TRELLO_DOWNLOAD),
-    ]),
-
+    (
+        "trello_download.png",
+        [
+            ("radio", "trello"),
+            ("radio", TRELLO_DOWNLOAD),
+        ],
+    ),
     # --- trello > upload ---
-    ("trello_upload.png", [
-        ("radio", "trello"),
-        ("radio", TRELLO_UPLOAD),
-    ]),
-
+    (
+        "trello_upload.png",
+        [
+            ("radio", "trello"),
+            ("radio", TRELLO_UPLOAD),
+        ],
+    ),
     # --- handouts > 4s -> hndt (generate) ---
-    ("handouts_generate.png", [
-        ("radio", "handouts"),
-        ("radio", "4s \u2192 hndt"),
-    ]),
-
+    (
+        "handouts_generate.png",
+        [
+            ("radio", "handouts"),
+            ("radio", "4s \u2192 hndt"),
+        ],
+    ),
     # --- handouts > hndt -> pdf (render) ---
-    ("handouts_render.png", [
-        ("radio", "handouts"),
-        ("radio", "hndt \u2192 pdf"),
-    ]),
+    (
+        "handouts_render.png",
+        [
+            ("radio", "handouts"),
+            ("radio", "hndt \u2192 pdf"),
+        ],
+    ),
 ]
 
 # Screenshots that are NOT auto-generated (manual / external content):
 SKIPPED = [
-    "macos_security.png",   # macOS system dialog
-    "openquiz2.png",        # Open-Quiz web UI screenshot
-    "pptx_slide_q.png",     # PowerPoint slide content
-    "pptx_slide_a.png",     # PowerPoint slide content
-    "roenko.png",           # Web page screenshot
-    "rozhdsushkov.png",     # Web page screenshot
+    "macos_security.png",  # macOS system dialog
+    "openquiz2.png",  # Open-Quiz web UI screenshot
+    "pptx_slide_q.png",  # PowerPoint slide content
+    "pptx_slide_a.png",  # PowerPoint slide content
+    "roenko.png",  # Web page screenshot
+    "rozhdsushkov.png",  # Web page screenshot
     "douplet_problem.png",  # Not referenced in docs
 ]
 
@@ -463,6 +497,7 @@ SKIPPED = [
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main():
     if sys.platform != "darwin":

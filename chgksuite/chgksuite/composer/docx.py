@@ -322,7 +322,10 @@ def _select_font_faces(font_spec, search_dirs=None):
     for role in ("regular", "bold", "italic", "bold_italic"):
         role_faces = [face for face in faces if face.role == role]
         if role_faces:
-            selected[role] = min(role_faces, key=lambda face: (_font_role_priority(face, role), face.path))
+            selected[role] = min(
+                role_faces,
+                key=lambda face: (_font_role_priority(face, role), face.path),
+            )
 
     if "regular" not in selected:
         selected["regular"] = faces[0]
@@ -398,9 +401,7 @@ def replace_font_in_docx(template_path, new_font):
                         content,
                     )
                     content = re.sub(r"<w:embedTrueTypeFonts\s*/>", "", content)
-                    content = re.sub(
-                        r'<Default Extension="odttf"[^>]*/>', "", content
-                    )
+                    content = re.sub(r'<Default Extension="odttf"[^>]*/>', "", content)
                     content = content.replace("Arial Unicode MS", new_font)
                     content = content.replace("Arial", new_font)
                     content = content.replace("Noto Sans", new_font)
@@ -1279,9 +1280,7 @@ class DocxExporter(BaseExporter):
     def _standalone_field(self, element):
         """Render a stand-alone theme-level field such as ``@`` author or ``/`` comment."""
         para = self.doc.add_paragraph()
-        label = self.labels["question_labels"].get(
-            element[0], element[0].capitalize()
-        )
+        label = self.labels["question_labels"].get(element[0], element[0].capitalize())
         run = para.add_run(f"{label}: ")
         run.bold = True
         self._docx_format(element[1], para, False, replace_no_break_spaces=True)
@@ -1363,7 +1362,9 @@ class DocxExporter(BaseExporter):
                     if isinstance(theme_value, dict)
                     else theme_value
                 )
-                self._docx_format(theme_label, para, False, replace_no_break_spaces=True)
+                self._docx_format(
+                    theme_label, para, False, replace_no_break_spaces=True
+                )
                 if not first_theme:
                     para.paragraph_format.space_before = DocxPt(24)
                 else:

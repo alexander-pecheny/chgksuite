@@ -417,9 +417,10 @@ def _rewrite_zip_package(package_path, replacements, removals=()):
     fd, temp_path = tempfile.mkstemp(suffix=suffix, dir=output_dir)
     os.close(fd)
     try:
-        with zipfile.ZipFile(package_path, "r") as source_zip, zipfile.ZipFile(
-            temp_path, "w", zipfile.ZIP_DEFLATED
-        ) as target_zip:
+        with (
+            zipfile.ZipFile(package_path, "r") as source_zip,
+            zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as target_zip,
+        ):
             replaced_names = set(replacements)
             removed_names = set(removals)
             for item in source_zip.infolist():
@@ -780,11 +781,7 @@ def compose_4s(structure, args=None):
                     + (f"{SEP}- ").join([clean(x) for x in z[1]])
                 )
             else:
-                return (
-                    SEP
-                    + "- "
-                    + (f"{SEP}- ").join([clean(x) for x in z])
-                )
+                return SEP + "- " + (f"{SEP}- ").join([clean(x) for x in z])
 
     def is_zero(s):
         return str(s).startswith("0") or not tryint(s)

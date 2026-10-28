@@ -100,10 +100,7 @@ class DbExporter(BaseExporter):
             return res
         if isinstance(e, list):
             res = "\n".join(
-                [
-                    f"   {i + 1}. {self.base_element_layout(x)}"
-                    for i, x in enumerate(e)
-                ]
+                [f"   {i + 1}. {self.base_element_layout(x)}" for i, x in enumerate(e)]
             )
         return res
 

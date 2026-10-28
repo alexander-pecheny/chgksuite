@@ -124,7 +124,9 @@ def split_blocks(contents: str) -> list[str]:
         else:
             current.append(line)
     blocks.append(current)
-    return ["\n".join(block).strip("\n") for block in blocks if "\n".join(block).strip()]
+    return [
+        "\n".join(block).strip("\n") for block in blocks if "\n".join(block).strip()
+    ]
 
 
 def metadata_line(line: str) -> tuple[str, str] | None:
@@ -216,7 +218,9 @@ def upsert_metadata(block: HandoutBlock, updates: dict[str, str | None]) -> str:
         output.append(line)
 
     missing = [
-        key for key, value in updates.items() if key not in updated and value is not None
+        key
+        for key, value in updates.items()
+        if key not in updated and value is not None
     ]
     if missing:
         insert_at = 0
@@ -727,10 +731,7 @@ def fit_rows_and_resize(
             verbose,
             log,
         )
-        if (
-            bottom_space is None
-            or current_resize <= resize_config.min_resize_image
-        ):
+        if bottom_space is None or current_resize <= resize_config.min_resize_image:
             break
         threshold = bottom_space_threshold_mm(
             bottom_space,
@@ -962,7 +963,8 @@ def all_q_block_text(
     # handouts_per_team that still fits in the original columns, with
     # max_width scaled down so the cell size matches the split version.
     one_team_columns = max(
-        d for d in range(1, handouts_per_team + 1)
+        d
+        for d in range(1, handouts_per_team + 1)
         if handouts_per_team % d == 0 and d <= columns
     )
     updates = {"rows": str(handouts_per_team // one_team_columns)}
@@ -1047,10 +1049,16 @@ def run_split_fit(args) -> int:
         print("--min-resize-image must be > 0", file=sys.stderr)
         return 1
     source = Path(args.filename).expanduser().resolve()
-    output_dir = Path(args.output_dir).expanduser().resolve() if args.output_dir else source.parent
+    output_dir = (
+        Path(args.output_dir).expanduser().resolve()
+        if args.output_dir
+        else source.parent
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    source_contents = apply_preamble(source.read_text(encoding="utf8"), preamble_ignore(args))
+    source_contents = apply_preamble(
+        source.read_text(encoding="utf8"), preamble_ignore(args)
+    )
     blocks = parse_blocks(source_contents)
     if not blocks:
         print(f"No handouts found in {source}", file=sys.stderr)
@@ -1103,7 +1111,9 @@ def run_split_fit(args) -> int:
     resize_by_ordinal = {result.ordinal: result.resize_image for result in results}
     if not args.no_update_source_resize:
         try:
-            if update_source_resizes(source, source_contents, blocks, resize_by_ordinal):
+            if update_source_resizes(
+                source, source_contents, blocks, resize_by_ordinal
+            ):
                 print(f"Updated resize_image values in {source}")
         except Exception:
             logger.exception("Could not update source resize_image values")

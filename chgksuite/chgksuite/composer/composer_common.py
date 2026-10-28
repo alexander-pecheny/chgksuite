@@ -42,10 +42,11 @@ def backtick_replace(el):
         else:
             if el.index("`") + 2 < len(el) and re.search(r"\s", el[el.index("`") + 2]):
                 el = el[: el.index("`") + 2] + "" + el[el.index("`") + 2 :]
-            if el.index("`") + 1 < len(el) and re_lowercase.search(
-                el[el.index("`") + 1]
-            ) or el.index("`") + 1 < len(el) and re_uppercase.search(
-                el[el.index("`") + 1]
+            if (
+                el.index("`") + 1 < len(el)
+                and re_lowercase.search(el[el.index("`") + 1])
+                or el.index("`") + 1 < len(el)
+                and re_uppercase.search(el[el.index("`") + 1])
             ):
                 el = (
                     el[: el.index("`") + 1]
@@ -571,7 +572,10 @@ def _parse_4s_elem(s, logger=None, keep_hidden_comments=False):
     topart = sorted(topart)
 
     parts = [
-        ["hidden-comment" if start in hidden_comment_starts else "", x.replace("\u6565", "")]
+        [
+            "hidden-comment" if start in hidden_comment_starts else "",
+            x.replace("\u6565", ""),
+        ]
         for start, x in zip([0] + topart, partition(s, topart))
     ]
 

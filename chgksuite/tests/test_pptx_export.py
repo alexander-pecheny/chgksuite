@@ -293,7 +293,10 @@ def test_pptx_hyperlinks_are_clickable_and_styled(tmp_path):
     assert '<a:hlinkClick r:id="' in slide_xml
     assert 'u="sng"' in slide_xml
     assert 'val="0563C1"' in slide_xml
-    assert 'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"' in rels_xml
+    assert (
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"'
+        in rels_xml
+    )
     assert f'Target="{encoded_url}"' in rels_xml
     assert 'TargetMode="External"' in rels_xml
 
@@ -544,9 +547,9 @@ def test_default_pptx_template_uses_larger_tour_and_handout_fonts(tmp_path):
     question_paragraph = question_shape.text_frame.paragraphs[1]
 
     assert handout_paragraph.text == "Текст раздатки"
-    assert {
-        run.font.size.pt for run in handout_paragraph.runs if run.text.strip()
-    } == {42.0}
+    assert {run.font.size.pt for run in handout_paragraph.runs if run.text.strip()} == {
+        42.0
+    }
     assert question_paragraph.text == "Вопрос?"
     assert {
         run.font.size.pt for run in question_paragraph.runs if run.text.strip()
@@ -635,20 +638,24 @@ def test_pptx_textboxes_shrink_text_and_stamp_run_sizes(tmp_path):
             ("section", "Тур 2"),
             (
                 "editor",
-                ("Редакторы: Александр Сновский, Артём Сапожников, "
-                "Александр Зайцев, Ольга Шиншинова, Мария Аристова."),
+                (
+                    "Редакторы: Александр Сновский, Артём Сапожников, "
+                    "Александр Зайцев, Ольга Шиншинова, Мария Аристова."
+                ),
             ),
             (
                 "meta",
-                ("Редакторы благодарят за тестирование вопросов и очень ценные "
-                "замечания: Андрея Багдуева, Дмитрия Батова, Марию Богуш, "
-                "Виталия Буковского, Михаила Гриценко, Дарью Жукову, "
-                "Фёдора Журавлёва, Григория Зырянова, Алексея Ковбу, "
-                "Евгению Колпащикову, Юстину Кустовскую, Маргариту Лузину, "
-                "Михаила Малкина, Веру Монину, Ерлана Мухамеджанова, "
-                "Илью Орлова, Никиту Пеговса, Кирилла Платонова, "
-                "Юрия Разумова, Дмитрия Селянина, Дмитрия Слободянюка, "
-                "Наиля Фарукшина, Ксению и Эдуарда Шагалов и Максима Шиловского."),
+                (
+                    "Редакторы благодарят за тестирование вопросов и очень ценные "
+                    "замечания: Андрея Багдуева, Дмитрия Батова, Марию Богуш, "
+                    "Виталия Буковского, Михаила Гриценко, Дарью Жукову, "
+                    "Фёдора Журавлёва, Григория Зырянова, Алексея Ковбу, "
+                    "Евгению Колпащикову, Юстину Кустовскую, Маргариту Лузину, "
+                    "Михаила Малкина, Веру Монину, Ерлана Мухамеджанова, "
+                    "Илью Орлова, Никиту Пеговса, Кирилла Платонова, "
+                    "Юрия Разумова, Дмитрия Селянина, Дмитрия Слободянюка, "
+                    "Наиля Фарукшина, Ксению и Эдуарда Шагалов и Максима Шиловского."
+                ),
             ),
             ("Question", {"question": "Вопрос.", "answer": "Ответ."}),
         ],
@@ -940,9 +947,7 @@ def test_caps_question_number_formats_zero_with_label(tmp_path):
     )
 
     number_texts = [
-        shape.text
-        for shape in prs.slides[1].shapes
-        if hasattr(shape, "text_frame")
+        shape.text for shape in prs.slides[1].shapes if hasattr(shape, "text_frame")
     ]
 
     assert "ВОПРОС 0" in number_texts
@@ -975,10 +980,7 @@ def test_douplet_list_gets_extra_break_before_numbering(tmp_path):
         if hasattr(shape, "text_frame") and "Дуплет." in shape.text
     )
 
-    assert (
-        "каждый.\n\n1. Первый подвопрос."
-        in _soft_breaks_as_newlines(question_text)
-    )
+    assert "каждый.\n\n1. Первый подвопрос." in _soft_breaks_as_newlines(question_text)
 
 
 def test_douplet_list_numbering_style_is_configurable(tmp_path):
@@ -1137,9 +1139,9 @@ def test_inline_handout_uses_handout_config_when_not_separate_slide(tmp_path):
 
     assert handout_paragraph.text == "Klemperer"
     assert handout_paragraph.alignment == PP_ALIGN.CENTER
-    assert {
-        run.font.size.pt for run in handout_paragraph.runs if run.text.strip()
-    } == {32.0}
+    assert {run.font.size.pt for run in handout_paragraph.runs if run.text.strip()} == {
+        32.0
+    }
     assert handout_paragraph.space_after.pt == 72.0
     assert question_paragraph.text.startswith("Чтобы спастись")
     assert {
@@ -1180,9 +1182,9 @@ def test_inline_handout_line_uses_larger_default_handout_font(tmp_path):
     question_paragraph = question_shape.text_frame.paragraphs[1]
 
     assert handout_paragraph.text == "Klemperer"
-    assert {
-        run.font.size.pt for run in handout_paragraph.runs if run.text.strip()
-    } == {42.0}
+    assert {run.font.size.pt for run in handout_paragraph.runs if run.text.strip()} == {
+        42.0
+    }
     assert question_paragraph.text.startswith("Чтобы спастись")
     assert {
         run.font.size.pt for run in question_paragraph.runs if run.text.strip()
@@ -1231,9 +1233,9 @@ def test_inline_handout_font_size_shrinks_to_preserve_source_lines(
     question_paragraph = question_shape.text_frame.paragraphs[1]
 
     assert handout_paragraph.text == "abcdefghijklmnopqrstuvwxy"
-    assert {
-        run.font.size.pt for run in handout_paragraph.runs if run.text.strip()
-    } == {39.0}
+    assert {run.font.size.pt for run in handout_paragraph.runs if run.text.strip()} == {
+        39.0
+    }
     assert {
         run.font.size.pt for run in question_paragraph.runs if run.text.strip()
     } == {32.0}
@@ -1388,7 +1390,10 @@ def test_inline_images_render_without_driving_pptx_image_layout(tmp_path):
     )
 
     picture_shapes = [
-        shape for slide in prs.slides for shape in slide.shapes if shape.shape_type == 13
+        shape
+        for slide in prs.slides
+        for shape in slide.shapes
+        if shape.shape_type == 13
     ]
     question_shape = next(
         shape
@@ -1415,8 +1420,7 @@ def test_overlay_image_and_text_keeps_textbox_on_base_rect(tmp_path):
                 "Question",
                 {
                     "question": (
-                        f"(img w=3in {image_path})\n"
-                        "Перед вами картинка. Назовите ее."
+                        f"(img w=3in {image_path})\nПеред вами картинка. Назовите ее."
                     ),
                     "answer": "Ответ.",
                 },
@@ -1519,7 +1523,10 @@ def test_legacy_pptx_config_sizes_and_disabled_autolayout_do_not_overlap(tmp_pat
 def test_comment_first_puts_the_comment_before_the_answer(tmp_path):
     structure = [
         ("heading", "Тестовый пакет"),
-        ("Question", {"question": "Вопрос.", "answer": "Ответ.", "comment": "Пояснение."}),
+        (
+            "Question",
+            {"question": "Вопрос.", "answer": "Ответ.", "comment": "Пояснение."},
+        ),
     ]
     args = _pptx_args(tmp_path, config_updates={"add_comment": True})
     args.comment_first = True

@@ -24,7 +24,10 @@ XY_VECTOR = {
 def test_decrypts_xy_browser_vector():
     dk = xy_crypto.derive_dk(XY_VECTOR["passphrase"], XY_VECTOR["keymeta"])
     assert len(dk) == 32
-    assert xy_crypto.decrypt_field(dk, XY_VECTOR["ciphertext_b64"]) == XY_VECTOR["plaintext"]
+    assert (
+        xy_crypto.decrypt_field(dk, XY_VECTOR["ciphertext_b64"])
+        == XY_VECTOR["plaintext"]
+    )
 
 
 def test_field_round_trip():
@@ -91,7 +94,9 @@ def test_board_metadata_round_trip(tmp_path):
     folder = str(tmp_path)
     assert board_config.read_board_metadata(folder) is None
     # xy: passphrase persisted
-    board_config.write_board_metadata(folder, "https://xy.pecheny.me/board/2", "пароль доски")
+    board_config.write_board_metadata(
+        folder, "https://xy.pecheny.me/board/2", "пароль доски"
+    )
     meta = board_config.read_board_metadata(folder)
     assert meta["board_url"] == "https://xy.pecheny.me/board/2"
     assert meta["passphrase"] == "пароль доски"
@@ -122,4 +127,7 @@ def test_legacy_board_id_migration_keeps_existing_metadata(tmp_path):
 
     # stale .board_id is dropped; existing metadata is untouched
     assert not (tmp_path / ".board_id").exists()
-    assert board_config.read_board_metadata(folder)["board_url"] == "https://xy.pecheny.me/board/2"
+    assert (
+        board_config.read_board_metadata(folder)["board_url"]
+        == "https://xy.pecheny.me/board/2"
+    )

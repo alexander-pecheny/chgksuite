@@ -65,7 +65,11 @@ def _post_card(board, lid, name, desc):
         url = "{}/1/lists/{}/cards".format(board["base_url"], lid)
         return requests.post(
             url,
-            {"token": board["token"], "name": name, "desc": xy_crypto.encrypt_field(board["dk"], desc)},
+            {
+                "token": board["token"],
+                "name": name,
+                "desc": xy_crypto.encrypt_field(board["dk"], desc),
+            },
         )
     url = f"{API}/lists/{lid}/cards"
     return requests.post(
