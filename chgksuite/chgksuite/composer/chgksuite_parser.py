@@ -96,7 +96,12 @@ def replace_counters(string_):
 
 
 def parse_4s(
-    s, randomize=False, debug=False, logger=None, debug_dir=None, required_fields=None,
+    s,
+    randomize=False,
+    debug=False,
+    logger=None,
+    debug_dir=None,
+    required_fields=None,
     game=None,
 ):
     logger = logger or init_logger("composer")
@@ -184,10 +189,7 @@ def parse_4s(
                 "setcounter"
             }:
                 try:
-                    assert all(
-                        (label in current_question)
-                        for label in REQUIRED_LABELS
-                    )
+                    assert all((label in current_question) for label in REQUIRED_LABELS)
                 except AssertionError:
                     logger.error(
                         f"Question {log_wrap(current_question)} misses "
@@ -214,10 +216,7 @@ def parse_4s(
 
     if current_question != {}:
         try:
-            assert all(
-                (label in current_question)
-                for label in REQUIRED_LABELS
-            )
+            assert all((label in current_question) for label in REQUIRED_LABELS)
             if "setcounter" in current_question:
                 counter = int(current_question["setcounter"])
             if "number" not in current_question:

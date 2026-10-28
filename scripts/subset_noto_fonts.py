@@ -21,9 +21,7 @@ from fontTools import subset
 FACES = ["Regular", "Bold", "Italic", "BoldItalic"]
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 KEEP_FILE = os.path.join(SCRIPT_DIR, "noto_keep_unicodes.txt")
-OUT_DIR = os.path.join(
-    SCRIPT_DIR, "..", "chgksuite", "chgksuite", "resources", "fonts"
-)
+OUT_DIR = os.path.join(SCRIPT_DIR, "..", "chgksuite", "chgksuite", "resources", "fonts")
 
 
 def main():

@@ -31,7 +31,9 @@ def _question(text):
 
 
 def test_escaped_handout_lines_stay_in_one_handout():
-    q = _question("№ 1\n> Раздатка:\n\\> первая строка\n\\> вторая строка\n? Вопрос\n! Ответ")
+    q = _question(
+        "№ 1\n> Раздатка:\n\\> первая строка\n\\> вторая строка\n? Вопрос\n! Ответ"
+    )
     assert q["handout"] == "Раздатка:\n> первая строка\n> вторая строка"
 
 

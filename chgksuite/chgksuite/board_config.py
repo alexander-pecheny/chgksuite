@@ -25,7 +25,9 @@ TRELLO_HOST = "trello.com"
 
 def _is_trello_host(host):
     host = (host or "").lower()
-    return host == TRELLO_HOST or host == "www.trello.com" or host.endswith(".trello.com")
+    return (
+        host == TRELLO_HOST or host == "www.trello.com" or host.endswith(".trello.com")
+    )
 
 
 def parse_board_url(url):

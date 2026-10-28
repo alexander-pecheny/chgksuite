@@ -523,7 +523,9 @@ class ParserWrapper:
             try:
                 r = subprocess.run(
                     [self.pyapp_executable, "self", "python", "--version"],
-                    capture_output=True, timeout=5, check=False,
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
                 )
                 self._has_self_python = r.returncode == 0
             except Exception:
@@ -540,12 +542,16 @@ class ParserWrapper:
             self._channel_var = tk.StringVar(value=default_channel)
 
             tk.Radiobutton(
-                update_frame, text="Стабильный",
-                variable=self._channel_var, value="stable",
+                update_frame,
+                text="Стабильный",
+                variable=self._channel_var,
+                value="stable",
             ).pack(side="left")
             tk.Radiobutton(
-                update_frame, text="Бета",
-                variable=self._channel_var, value="beta",
+                update_frame,
+                text="Бета",
+                variable=self._channel_var,
+                value="beta",
             ).pack(side="left")
 
             self.update_button = tk.Button(

@@ -266,8 +266,7 @@ class HandoutGenerator:
 
         if img_expr and text_expr:
             body = (
-                f"stack(dir: ttb, spacing: 1mm, {img_expr}, "
-                f"align(center, {text_expr}))"
+                f"stack(dir: ttb, spacing: 1mm, {img_expr}, align(center, {text_expr}))"
             )
         else:
             body = img_expr or text_expr or wrap_text("")
@@ -320,7 +319,6 @@ class HandoutGenerator:
             f"{gap}mm, {cellw}mm, {pad}mm, {strut}mm, "
             f"{str(teamed).lower()}, {centered}, {cellbody}{label})"
         )
-
 
     def generate(self):
         for block in self.parse_input(self.args.filename):

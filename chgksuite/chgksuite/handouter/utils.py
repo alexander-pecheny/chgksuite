@@ -144,7 +144,10 @@ def _flatten_pdf_image_alpha(image, stream):
 
     smask = _pdf_deref(smask)
     width, height = image.size
-    if int(smask.get("/Width") or 0) != width or int(smask.get("/Height") or 0) != height:
+    if (
+        int(smask.get("/Width") or 0) != width
+        or int(smask.get("/Height") or 0) != height
+    ):
         return None, False
     if int(smask.get("/BitsPerComponent") or 0) != 8:
         return None, False
@@ -215,9 +218,7 @@ def _optimize_pdf_resource_images(resources, seen, quality=80):
     for ref in xobjects.values():
         obj = _pdf_deref(ref)
         key = (
-            (ref.idnum, ref.generation)
-            if isinstance(ref, IndirectObject)
-            else id(obj)
+            (ref.idnum, ref.generation) if isinstance(ref, IndirectObject) else id(obj)
         )
         if key in seen:
             continue

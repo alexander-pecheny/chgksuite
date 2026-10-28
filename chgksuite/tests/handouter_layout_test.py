@@ -431,9 +431,7 @@ class TestMaxWidthLayout:
         assert "max_width: 0.5" in contents
         assert "rows: 1" in contents
 
-    def test_split_fit_all_q_outputs_one_team_when_columns_exceed_team(
-        self, tmp_path
-    ):
+    def test_split_fit_all_q_outputs_one_team_when_columns_exceed_team(self, tmp_path):
         block = HandoutBlock(
             ordinal=1,
             text="columns: 6\nhandouts_per_team: 3\n\nhandout",
@@ -605,12 +603,8 @@ def test_handout_generator_uses_optimized_image_path(generator, tmp_path):
             os.remove(path)
 
 
-def test_handout_generator_drops_windows_drive_from_image_path(
-    generator, monkeypatch
-):
-    windows_temp_path = (
-        "C:\\Users\\USER~1\\AppData\\Local\\Temp\\2\\tmpigabk_hf.jpg"
-    )
+def test_handout_generator_drops_windows_drive_from_image_path(generator, monkeypatch):
+    windows_temp_path = "C:\\Users\\USER~1\\AppData\\Local\\Temp\\2\\tmpigabk_hf.jpg"
     monkeypatch.setattr(os, "path", ntpath)
     generator.input_dir = "C:\\Users\\me\\razd"
 
@@ -642,9 +636,7 @@ def test_handout_generator_can_disable_image_optimization(generator, tmp_path):
     assert not generator._temp_files
 
 
-def test_process_file_replays_typst_output_on_failure(
-    tmp_path, monkeypatch, capsys
-):
+def test_process_file_replays_typst_output_on_failure(tmp_path, monkeypatch, capsys):
     class FakeGenerator:
         _temp_files: ClassVar[list] = []
 

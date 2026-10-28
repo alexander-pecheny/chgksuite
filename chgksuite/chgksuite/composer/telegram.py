@@ -56,8 +56,22 @@ def get_saved_telegram_targets():
 
 
 _TG_TAGS = (
-    "b", "strong", "i", "em", "u", "ins", "s", "strike", "del",
-    "tg-spoiler", "tg-emoji", "a", "code", "pre", "span", "blockquote",
+    "b",
+    "strong",
+    "i",
+    "em",
+    "u",
+    "ins",
+    "s",
+    "strike",
+    "del",
+    "tg-spoiler",
+    "tg-emoji",
+    "a",
+    "code",
+    "pre",
+    "span",
+    "blockquote",
 )
 _TG_TAG_RE = re.compile(
     r"</?(?:" + "|".join(_TG_TAGS) + r")(?:\s[^>]*)?>", re.IGNORECASE
@@ -167,9 +181,7 @@ class TelegramExporter(BaseExporter):
         # Start the sidecar bot as a daemon thread
         if self.args.debug:
             print(f"Starting sidecar bot with DB at {self.temp_db_path}")
-        self.bot_thread, self.bot = run_bot_in_thread(
-            self.bot_token, self.temp_db_path
-        )
+        self.bot_thread, self.bot = run_bot_in_thread(self.bot_token, self.temp_db_path)
         cur = self.db_conn.cursor()
         while True:
             time.sleep(2)
@@ -239,7 +251,9 @@ class TelegramExporter(BaseExporter):
 
     def structure_has_stats(self):
         for element in self.structure:
-            if element[0] == "Question" and "Взятия:" in (element[1].get("comment") or ""):
+            if element[0] == "Question" and "Взятия:" in (
+                element[1].get("comment") or ""
+            ):
                 return True
         return False
 
@@ -330,7 +344,9 @@ class TelegramExporter(BaseExporter):
 
                 return response_data["result"]
             except requests.exceptions.RequestException as e:
-                if isinstance(e, requests.exceptions.ConnectionError) or "Connection reset by peer" in str(e):
+                if isinstance(
+                    e, requests.exceptions.ConnectionError
+                ) or "Connection reset by peer" in str(e):
                     self.logger.warning(
                         f"Connection error: {e}. Retrying in {retry_delay} seconds..."
                     )
@@ -447,9 +463,7 @@ class TelegramExporter(BaseExporter):
                     if not rich_mode:
                         # In rich mode the image is embedded in the message,
                         # no need for a textual placeholder.
-                        res += self.labels["general"].get(
-                            "cf_image", "см. изображение"
-                        )
+                        res += self.labels["general"].get("cf_image", "см. изображение")
                     parsed_image = parseimg(
                         run[1],
                         dimensions="ems",
@@ -564,9 +578,7 @@ class TelegramExporter(BaseExporter):
                     width = int(width * scale_factor)
                     height = int(height * scale_factor)
                     resized_img = img.resize((width, height), Image.LANCZOS)
-                    save_pil_image_as_jpeg(
-                        resized_img, new_imgfile, quality=quality
-                    )
+                    save_pil_image_as_jpeg(resized_img, new_imgfile, quality=quality)
 
             return new_imgfile
 
@@ -829,7 +841,9 @@ class TelegramExporter(BaseExporter):
                 self.buffer_images.extend(images)
             else:
                 if self.buffer_texts or self.buffer_images:
-                    posts = self.split_to_messages(self.buffer_texts, self.buffer_images)
+                    posts = self.split_to_messages(
+                        self.buffer_texts, self.buffer_images
+                    )
                     self.post_wrapper(posts)
                     self.buffer_texts = []
                     self.buffer_images = []
@@ -941,7 +955,7 @@ class TelegramExporter(BaseExporter):
         while res.endswith("\n"):
             res = res[:-1]
         if res.endswith("\n</tg-spoiler>"):
-            res = res[:-len("\n</tg-spoiler>")] + "</tg-spoiler>"
+            res = res[: -len("\n</tg-spoiler>")] + "</tg-spoiler>"
         if self.args.nospoilers:
             res = res.replace("<tg-spoiler>", "")
             res = res.replace("</tg-spoiler>", "")
@@ -1175,9 +1189,7 @@ class TelegramExporter(BaseExporter):
                 html_content += body
             else:
                 summary = self.labels["question_labels"]["answer"]
-                html_content += (
-                    f"<details><summary>{summary}</summary>{body}</details>"
-                )
+                html_content += f"<details><summary>{summary}</summary>{body}</details>"
         if self.si_mode:
             # Buffered per theme; finalized later in _split_to_messages_rich.
             return html_content, []
@@ -1634,11 +1646,12 @@ class TelegramExporter(BaseExporter):
                 current_msg = ""
                 for block in detail_blocks:
                     candidate = (
-                        block if not current_msg
-                        else current_msg + "\n\n" + block
+                        block if not current_msg else current_msg + "\n\n" + block
                     )
-                    if (tg_len(candidate) <= 4096
-                            and tg_entity_count(candidate) < _TG_MAX_ENTITIES):
+                    if (
+                        tg_len(candidate) <= 4096
+                        and tg_entity_count(candidate) < _TG_MAX_ENTITIES
+                    ):
                         current_msg = candidate
                     else:
                         if current_msg:
@@ -1662,7 +1675,8 @@ class TelegramExporter(BaseExporter):
 
                 # Post detail navigation with themes in discussion thread
                 comment_posts = (
-                    detail_posts if self.si_mode and detail_posts
+                    detail_posts
+                    if self.si_mode and detail_posts
                     else navigation_posts[1:]
                 )
                 if comment_posts:

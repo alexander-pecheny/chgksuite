@@ -99,9 +99,7 @@ def add_embed_setting(original_xml):
     root = ET.fromstring(original_xml)
     # CT_Settings is an ordered sequence; embedTrueTypeFonts belongs near the
     # top, right after zoom in this template.
-    index = next(
-        (i for i, el in enumerate(root) if el.tag == f"{{{W_NS}}}zoom"), -1
-    )
+    index = next((i for i, el in enumerate(root) if el.tag == f"{{{W_NS}}}zoom"), -1)
     root.insert(index + 1, ET.Element(f"{{{W_NS}}}embedTrueTypeFonts"))
     return ET.tostring(root, xml_declaration=True, encoding="UTF-8")
 
@@ -115,9 +113,7 @@ def main():
             font_data = f.read()
         guid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"chgksuite:{FAMILY}:{face}"))
         rel_ids[face] = (f"rIdFont{index}", guid)
-        odttf_parts[f"word/fonts/font{index}.odttf"] = obfuscate_odttf(
-            font_data, guid
-        )
+        odttf_parts[f"word/fonts/font{index}.odttf"] = obfuscate_odttf(font_data, guid)
 
     with zipfile.ZipFile(TEMPLATE) as zin:
         parts = {name: zin.read(name) for name in zin.namelist()}

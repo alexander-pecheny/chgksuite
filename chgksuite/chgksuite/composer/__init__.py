@@ -75,7 +75,10 @@ def parse_filepath(filepath, args=None):
     input_text = read_text_file(filepath)
     debug_dir = os.path.dirname(os.path.abspath(filepath))
     return parse_4s(
-        input_text, randomize=args.randomize, debug=args.debug, debug_dir=debug_dir,
+        input_text,
+        randomize=args.randomize,
+        debug=args.debug,
+        debug_dir=debug_dir,
         game=game,
     )
 

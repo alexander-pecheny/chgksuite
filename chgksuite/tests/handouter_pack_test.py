@@ -66,9 +66,7 @@ def test_handouts_subcommands_are_in_workflow_order():
     action = next(a for a in parser._actions if getattr(a, "dest", None) == "action")
     handouts = action.choices["handouts"]
     handouts_action = next(
-        a
-        for a in handouts._actions
-        if getattr(a, "dest", None) == "handoutssubcommand"
+        a for a in handouts._actions if getattr(a, "dest", None) == "handoutssubcommand"
     )
 
     assert list(handouts_action.choices) == [
