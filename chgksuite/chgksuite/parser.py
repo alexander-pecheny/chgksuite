@@ -1091,7 +1091,12 @@ def chgk_parse_txt(txtfile, encoding=None, defaultauthor="", args=None, logger=N
     # Normalize any remaining line endings
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     if text[0:10] == "Чемпионат:":
-        return chgk_parse_db(text, debug=args.debug, logger=logger)
+        return chgk_parse_db(
+            text,
+            debug=args.debug,
+            logger=logger,
+            target_dir=os.path.dirname(os.path.abspath(txtfile)),
+        )
     return chgk_parse(
         escape_underscores_except_urls(text),
         defaultauthor=defaultauthor,

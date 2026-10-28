@@ -1023,7 +1023,6 @@ def test_canon_parse_compose_parse_idempotence(filename):
 TO_DOCX_FILENAMES = [
     fn for fn in os.listdir(currentdir) if fn.endswith((".docx", ".txt"))
 ]
-TO_DOCX_FILENAMES.remove("balt09-1.txt")  # TODO: rm this line once dns is fixed
 
 
 @pytest.mark.parametrize("filename", TO_DOCX_FILENAMES)
