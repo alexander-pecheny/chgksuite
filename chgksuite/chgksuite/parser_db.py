@@ -48,8 +48,7 @@ states = (
     ("author", "exclusive"),
 )
 
-DB_PIC_BASE_URL = "http://db.chgk.info/images/db/"
-DB_AUD_BASE_URL = "http://db.chgk.info/sounds/db/"
+DB_URL = "http://db.chgk.info/"
 
 logger = DummyLogger()
 
@@ -393,15 +392,14 @@ def t_ANY_error(t):
     t.lexer.skip(1)
 
 
-def replace_handouts(match_handout):
+def replace_handouts(match_handout, target_dir):
     handout_type = "img" if match_handout.group(1) == "pic" else "aud"
-    db_base_url = (
-        DB_PIC_BASE_URL if match_handout.group(1) == "pic" else DB_AUD_BASE_URL
-    )
+    db_dir = "images/db/" if match_handout.group(1) == "pic" else "sounds/db/"
     handout_name = match_handout.group(2)
-    handout_path = os.path.abspath(handout_name)
+    handout_path = os.path.join(target_dir, handout_name)
     if not os.path.exists(handout_path):
-        handout_url = urljoin(db_base_url, handout_name)
+        db_url = os.environ.get("CHGKSUITE_DB_URL", DB_URL)
+        handout_url = urljoin(db_url, db_dir + handout_name)
         try:
             urlretrieve(handout_url, handout_path)
         except Exception:
@@ -411,12 +409,12 @@ def replace_handouts(match_handout):
     return f"({handout_type} {handout_name})"
 
 
-def chgk_parse_db(text, debug=False, logger=False):
+def chgk_parse_db(text, debug=False, logger=False, target_dir="."):
     if not logger:
         logger = init_logger("parser_db", debug=debug)
 
     re_handout = re.compile(r"\((pic|aud):\s([\d\.\w]+)\)", re.IGNORECASE | re.UNICODE)
-    text = re_handout.sub(replace_handouts, text)
+    text = re_handout.sub(lambda m: replace_handouts(m, target_dir), text)
 
     lexer = lex.lex(reflags=re.IGNORECASE | re.UNICODE)
     lexer.text = ""
