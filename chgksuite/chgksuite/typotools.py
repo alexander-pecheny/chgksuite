@@ -63,6 +63,7 @@ re_url = re.compile(
     """(?:(([^\\s()<>]+|(‌\u200b([^\\s()<>]+)))*)|[^\\s`!()[]{};:'".,<>?«»“”‘’]))""",
     re.DOTALL,
 )
+re_media = re.compile(r"\((?:img|aud)\s[^)]*\)")
 re_percent = re.compile(r"(%[0-9a-fA-F]{2})+")
 re_nbh = re.compile(
     "(^|[^а-яё])(?P<word>[а-яё]{0,3}\\-[а-яё]{0,3})([^а-яё]|$)", flags=re.IGNORECASE
@@ -325,7 +326,7 @@ def _replace_no_break_segment(s, spaces=True, hyphens=True):
 
 
 def replace_no_break(s, spaces=True, hyphens=True):
-    spans = iter_url_spans(s)
+    spans = sorted(iter_url_spans(s) + [m.span() for m in re_media.finditer(s)])
     if not spans:
         return _replace_no_break_segment(s, spaces=spaces, hyphens=hyphens)
 
