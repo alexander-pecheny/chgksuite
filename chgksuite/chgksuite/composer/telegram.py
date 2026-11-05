@@ -106,11 +106,6 @@ def _format_html_hyperlink(url, disable_asterisks_processing=False):
     return f'<a href="{href}">{text}</a>'
 
 
-def get_text(msg_data):
-    if "message" in msg_data and "text" in msg_data["message"]:
-        return msg_data["message"]["text"]
-
-
 class TelegramExporter(BaseExporter):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -119,9 +114,6 @@ class TelegramExporter(BaseExporter):
         self.qcount = 1
         self.number = 1
         self.tg_heading = None
-        self.forwarded_message = None
-        self.target_channel = None
-        self.created_at = None
         self.telegram_toml_path = os.path.join(self.chgksuite_dir, "telegram.toml")
         self.resolve_db_path = os.path.join(self.chgksuite_dir, "resolve.db")
         self.temp_db_path = os.path.join(
@@ -130,10 +122,8 @@ class TelegramExporter(BaseExporter):
         self.bot_token = None
         self.bot = None
         self.bot_thread = None
-        self.control_chat_id = None  # Chat ID where the user talks to the bot
         self.channel_id = None  # Target channel ID
         self.chat_id = None  # Discussion group ID linked to the channel
-        self.auth_uuid = uuid.uuid4().hex[:8]
         self.session = requests.Session()
         self.si_mode = self.game in ("si", "troika")
         self.rich_mode = True
@@ -206,47 +196,6 @@ class TelegramExporter(BaseExporter):
         if self.bot_thread is not None:
             self.bot_thread.join(timeout=30)
             self.bot_thread = None
-
-    def authenticate_user(self):
-        print("\n" + "=" * 50)
-        print(f"Please send the following code to the bot: {self.auth_uuid}")
-        print("This is for security validation.")
-        print("=" * 50 + "\n")
-
-        # Wait for authentication
-        retry_count = 0
-        SLEEP = 2
-        max_retries = 300 / SLEEP  # 5 minutes
-
-        while not self.control_chat_id and retry_count < max_retries:
-            time.sleep(2)
-            cursor = self.db_conn.cursor()
-            cursor.execute(
-                f"SELECT * FROM messages m WHERE m.raw_data like '%{self.auth_uuid}%' ORDER BY m.created_at DESC LIMIT 1",
-            )
-            result = cursor.fetchone()
-
-            if result:
-                msg_data = json.loads(result["raw_data"])
-                if msg_data["message"]["chat"]["type"] != "private":
-                    print(
-                        "You should post to the PRIVATE chat, not to the channel/group"
-                    )
-                    continue
-                self.control_chat_id = msg_data["message"]["chat"]["id"]
-                self.send_api_request(
-                    "sendMessage",
-                    {
-                        "chat_id": self.control_chat_id,
-                        "text": "✅ Authentication successful! This chat will be used for control messages.",
-                    },
-                )
-
-            retry_count += 1
-
-        if not self.control_chat_id:
-            self.logger.error("Authentication timeout. Please try again.")
-            raise ChgksuiteError("Authentication failed")
 
     def structure_has_stats(self):
         for element in self.structure:
@@ -1465,26 +1414,21 @@ class TelegramExporter(BaseExporter):
 
         channel_ref = self.extract_id_from_link(self.args.tgchannel)
         if isinstance(channel_ref, int):
-            channel_id = channel_ref
+            self.channel_id = f"-100{channel_ref}"
+        elif saved_id := self.resolve_username_to_id(channel_ref):
+            self.channel_id = f"-100{saved_id}"
         else:
-            channel_id = self.resolve_username_to_id(channel_ref)
-            if not channel_id:
-                self.authenticate_user()
-                print("\n" + "=" * 50)
-                print("Please forward any message from the target channel to the bot.")
-                print("This will allow me to extract the channel ID automatically.")
-                print("=" * 50 + "\n")
-                channel_id = self.wait_for_forwarded_message()
-                if not channel_id:
-                    raise ChgksuiteError(
-                        "Failed to get channel ID from forwarded message"
-                    )
-                self.save_username(channel_ref, channel_id)
-
-        self.channel_id = f"-100{channel_id}"
+            self.channel_id = f"@{channel_ref}"
+        try:
+            channel = self.send_api_request("getChat", {"chat_id": self.channel_id})
+        except ChgksuiteError as e:
+            raise ChgksuiteError(
+                f"Channel {self.args.tgchannel} not found. A private channel has "
+                "no username: give its ID or a link to one of its posts"
+            ) from e
+        self.channel_id = str(channel["id"])
         if not self.verify_access(self.channel_id, hr_type="channel"):
             raise ChgksuiteError("The bot isn't an admin of the channel")
-        channel = self.send_api_request("getChat", {"chat_id": self.channel_id})
         if not channel.get("linked_chat_id"):
             raise ChgksuiteError(
                 "The channel has no discussion group: link one in the channel settings"
@@ -1660,14 +1604,6 @@ class TelegramExporter(BaseExporter):
             return res[0]
         return None
 
-    def save_username(self, username, id_):
-        assert username is not None
-        assert id_ is not None
-        self.logger.info(f"Saving username {username} as ID {id_}")
-        cur = self.resolve_db_conn.cursor()
-        cur.execute("INSERT INTO resolve (username, id) VALUES (?, ?)", (username, id_))
-        self.resolve_db_conn.commit()
-
     def get_discussion_message(self, channel_id, message_id):
         """
         Find the corresponding message in the discussion group for a channel message.
@@ -1740,75 +1676,6 @@ class TelegramExporter(BaseExporter):
 
         self.logger.error(
             f"Could not find discussion message for channel message {message_id}"
-        )
-        return None
-
-    def wait_for_forwarded_message(self):
-        """
-        Wait for the user to forward the bot a message from a channel.
-
-        Returns the channel's numeric ID without the -100 prefix.
-        """
-        self.send_api_request(
-            "sendMessage",
-            {
-                "chat_id": self.control_chat_id,
-                "text": "🔄 Please forward any message from the target channel",
-            },
-        )
-
-        max_retries = 30  # 5 minutes (10 seconds per retry)
-        for retry_count in range(1, max_retries + 1):
-            time.sleep(10)
-
-            cursor = self.db_conn.cursor()
-            if self.created_at:
-                threshold = "'" + self.created_at + "'"
-            else:
-                threshold = "datetime('now', '-2 minutes')"
-            cursor.execute(
-                f"""
-                SELECT raw_data, created_at
-                FROM messages
-                WHERE created_at > {threshold}
-                ORDER BY created_at DESC
-            """
-            )
-
-            for row in cursor.fetchall():
-                if self.args.debug:
-                    self.logger.info(row["raw_data"])
-                if self.created_at and row["created_at"] < self.created_at:
-                    break
-                message = json.loads(row["raw_data"]).get("message")
-                if not message or message["chat"]["id"] != self.control_chat_id:
-                    continue
-                forward_info = message.get("forward_from_chat")
-                if not forward_info or forward_info.get("type") != "channel":
-                    continue
-                extracted_id = int(str(forward_info["id"]).removeprefix("-100"))
-                self.created_at = row["created_at"]
-                self.logger.info(
-                    f"Extracted channel ID: {extracted_id} from forwarded message"
-                )
-                self.send_api_request(
-                    "sendMessage",
-                    {
-                        "chat_id": self.control_chat_id,
-                        "text": f"✅ Successfully extracted channel ID: {extracted_id}",
-                    },
-                )
-                return extracted_id
-
-            print(f"Waiting for forwarded message... ({retry_count}/{max_retries})")
-
-        self.logger.error("Failed to extract channel ID from forwarded message")
-        self.send_api_request(
-            "sendMessage",
-            {
-                "chat_id": self.control_chat_id,
-                "text": "❌ Failed to extract channel ID.",
-            },
         )
         return None
 
