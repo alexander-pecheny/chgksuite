@@ -790,15 +790,6 @@ class ArgparseBuilder:
         )
         self.add_argument(
             cmdcompose_telegram,
-            "--tgchat",
-            required=True,
-            help="a chat connected to the channel.",
-            caption="Название чата, привязанного к каналу",
-            argtype="combobox",
-            combobox_values=saved_targets,
-        )
-        self.add_argument(
-            cmdcompose_telegram,
             "--resize_images",
             advanced=True,
             action="store_true",
