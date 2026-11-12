@@ -46,7 +46,7 @@ def get_saved_telegram_targets():
     try:
         conn = sqlite3.connect(resolve_db_path)
         cursor = conn.cursor()
-        cursor.execute("SELECT username FROM resolve ORDER BY username")
+        cursor.execute("SELECT username FROM resolve WHERE id > 0 ORDER BY username")
         results = cursor.fetchall()
         conn.close()
         return [row[0] for row in results]
@@ -1594,14 +1594,13 @@ class TelegramExporter(BaseExporter):
         return True
 
     def init_resolve_db(self):
-        if not os.path.exists(self.resolve_db_path):
-            self.resolve_db_conn = sqlite3.connect(self.resolve_db_path)
-            self.resolve_db_conn.execute(
-                "CREATE TABLE IF NOT EXISTS resolve (username TEXT PRIMARY KEY, id INTEGER)"
-            )
-            self.resolve_db_conn.commit()
-        else:
-            self.resolve_db_conn = sqlite3.connect(self.resolve_db_path)
+        self.resolve_db_conn = sqlite3.connect(self.resolve_db_path)
+        self.resolve_db_conn.execute(
+            "CREATE TABLE IF NOT EXISTS resolve (username TEXT PRIMARY KEY, id INTEGER)"
+        )
+        # older versions also saved discussion groups, under negative IDs
+        self.resolve_db_conn.execute("DELETE FROM resolve WHERE id < 0")
+        self.resolve_db_conn.commit()
 
     def resolve_username_to_id(self, username):
         assert username is not None
