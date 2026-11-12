@@ -1439,6 +1439,14 @@ class TelegramExporter(BaseExporter):
         self.logger.info(
             f"Using channel ID {self.channel_id} and discussion group ID {self.chat_id}"
         )
+        self.resolve_db_conn.execute(
+            "INSERT OR REPLACE INTO resolve VALUES (?, ?)",
+            (
+                channel_ref if isinstance(channel_ref, str) else self.args.tgchannel,
+                int(self.channel_id[4:]),
+            ),
+        )
+        self.resolve_db_conn.commit()
 
         # Load poll config if polls are enabled
         if self._polls_enabled:

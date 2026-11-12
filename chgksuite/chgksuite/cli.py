@@ -784,7 +784,7 @@ class ArgparseBuilder:
             "--tgchannel",
             required=True,
             help="a channel to post questions to.",
-            caption="Название канала, в который постим",
+            caption="Канал, в который постим (@username, ссылка или ID)",
             argtype="combobox",
             combobox_values=saved_targets,
         )
