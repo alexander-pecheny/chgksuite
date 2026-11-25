@@ -71,6 +71,7 @@ class ArgparseBuilder:
         assert isinstance(default_overrides, dict)
         return default_overrides
 
+    # sloplint: ignore[magic-numbers] the numbers are CLI defaults such as A4 in mm
     def build(self):
         parser = self.parser
         default_overrides = self.get_default_overrides()
@@ -784,7 +785,7 @@ class ArgparseBuilder:
             "--tgchannel",
             required=True,
             help="a channel to post questions to.",
-            caption="Канал, в который постим (@username, ссылка или ID)",
+            caption="Ссылка на любой пост из канала, в который постим",
             argtype="combobox",
             combobox_values=saved_targets,
         )
