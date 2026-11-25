@@ -797,9 +797,7 @@ class ChgkParser:
         for _id, element in enumerate(self.structure):
             if (
                 element[0] == "author"
-                and re.search(
-                    r"^{}$".format(regexes["author"].pattern), rew(element[1])
-                )
+                and regexes["author"].fullmatch(rew(element[1]))
                 and _id + 1 < len(self.structure)
             ):
                 self.merge_to_previous(_id + 1)
@@ -1026,7 +1024,15 @@ class ChgkParser:
                     current_question[element[0]] = element[1]
             else:
                 final_structure.append([element[0], element[1]])
-        if current_question != {}:
+        if current_question and "question" not in current_question:
+            logger.warning(
+                f"Fields without a question are kept as meta: {log_wrap(current_question)}"
+            )
+            for value in current_question.values():
+                final_structure.append(
+                    ["meta", SEP.join(value) if isinstance(value, list) else value]
+                )
+        elif current_question:
             if self.defaultauthor and "author" not in current_question:
                 current_question["author"] = self.defaultauthor
             self._process_question_images(current_question)
